@@ -72,7 +72,7 @@ class SlackClient:
                 if not response["ok"]:
                     raise SlackAPIError(f"Slack API error: {response.get('error')}")
 
-                messages = response.get("messages", [])
+                messages: list[dict[str, Any]] = response.get("messages", [])
 
                 # Filter for root messages only (thread_ts == ts or no thread_ts)
                 root_messages = [
@@ -90,7 +90,7 @@ class SlackClient:
                     break
 
                 # Check for more pages
-                cursor = response.get("response_metadata", {}).get("next_cursor")
+                cursor = response.get("response_metadata", {}).get("next_cursor")  # type: ignore[call-overload]
                 if not cursor:
                     break
 

@@ -195,8 +195,8 @@ class LLMClient:
                 raise ValidationError(f"Response validation failed: {e}")
 
             # Calculate cost
-            tokens_in = response.usage.prompt_tokens
-            tokens_out = response.usage.completion_tokens
+            tokens_in = response.usage.prompt_tokens if response.usage else 0
+            tokens_out = response.usage.completion_tokens if response.usage else 0
             cost_usd = self._calculate_cost(tokens_in, tokens_out)
 
             # Log response details

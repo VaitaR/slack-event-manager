@@ -4,7 +4,7 @@ These abstract interfaces define contracts that adapters must implement.
 """
 
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from src.domain.models import (
     Event,
@@ -23,7 +23,7 @@ class SlackClientProtocol(Protocol):
         channel_id: str,
         oldest_ts: str | None = None,
         latest_ts: str | None = None,
-    ) -> list[dict[str, any]]:
+    ) -> list[dict[str, Any]]:
         """Fetch messages from Slack channel.
 
         Args:
@@ -40,7 +40,7 @@ class SlackClientProtocol(Protocol):
         """
         ...
 
-    def get_user_info(self, user_id: str) -> dict[str, any]:
+    def get_user_info(self, user_id: str) -> dict[str, Any]:
         """Get user information by ID (with caching).
 
         Args:
@@ -54,7 +54,7 @@ class SlackClientProtocol(Protocol):
         """
         ...
 
-    def post_message(self, channel_id: str, blocks: list[dict[str, any]]) -> str:
+    def post_message(self, channel_id: str, blocks: list[dict[str, Any]]) -> str:
         """Post message with Block Kit to channel.
 
         Args:
