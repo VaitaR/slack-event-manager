@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Minimal pipeline test - processes only 5 messages to test full flow quickly."""
 
+import os
 import sys
 import tempfile
-import os
 from pathlib import Path
-from datetime import datetime, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -16,14 +15,14 @@ def log(msg: str) -> None:
     sys.stdout.flush()
 
 
+from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
-from src.adapters.llm_client import LLMClient
 from src.config.settings import get_settings
-from src.use_cases.ingest_messages import process_slack_message
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.ingest_messages import process_slack_message
 
 
 def main():

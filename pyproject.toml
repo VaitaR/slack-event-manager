@@ -36,6 +36,7 @@ ignore = [
 "src/clickhouse_loader.py" = ["E999"]  # Old file with syntax errors (out of scope for MVP)
 "src/slack_extractor.py" = ["PLR2004"]  # HTTP status codes are self-documenting
 "src/llm_parser.py" = ["PLR2004"]  # Old legacy file
+"scripts/*.py" = ["E402", "E722", "PLR2004"]  # Scripts and demos: relaxed rules
 
 [tool.mypy]
 python_version = "3.11"

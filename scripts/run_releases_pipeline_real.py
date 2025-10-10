@@ -6,11 +6,11 @@ through the complete Slack Event Manager pipeline using ONLY real API credential
 No mock data is used - all operations require valid Slack and OpenAI API keys.
 """
 
+import os
 import sys
 import tempfile
-import os
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -22,14 +22,13 @@ def log(msg: str) -> None:
     sys.stdout.flush()
 
 
+from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
-from src.adapters.llm_client import LLMClient
 from src.config.settings import get_settings
-from src.use_cases.ingest_messages import ingest_messages_use_case
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.publish_digest import publish_digest_use_case
 
 

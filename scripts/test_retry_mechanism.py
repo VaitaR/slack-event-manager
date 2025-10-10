@@ -7,7 +7,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datetime import datetime
+
 import pytz
+
 from src.adapters.llm_client import LLMClient
 from src.config.settings import get_settings
 
@@ -31,14 +33,14 @@ def test_retry_with_short_timeout():
     # Test with a long message that might timeout
     test_text = (
         """
-    <!here> Hi everyone! We've rolled out the new Deposit screen in Wallet! 
-    This update completely rethinks how users add funds, making the experience 
-    clearer, more personalized, and more conversion-friendly — especially for 
-    users from Russia and nearby regions. What's new: Payment methods are now 
-    grouped by fiat currency rather than KYC country. This means users immediately 
-    see all relevant deposit options (like Apple Pay, cards, and P2P) that actually 
-    work for their currency. Users can now easily select their preferred fiat 
-    currency using the new fiat selection widget to view all available deposit 
+    <!here> Hi everyone! We've rolled out the new Deposit screen in Wallet!
+    This update completely rethinks how users add funds, making the experience
+    clearer, more personalized, and more conversion-friendly — especially for
+    users from Russia and nearby regions. What's new: Payment methods are now
+    grouped by fiat currency rather than KYC country. This means users immediately
+    see all relevant deposit options (like Apple Pay, cards, and P2P) that actually
+    work for their currency. Users can now easily select their preferred fiat
+    currency using the new fiat selection widget to view all available deposit
     options in that currency. Automatic fiat selection based on user's KYC or IP.
     """
         * 5
@@ -48,8 +50,8 @@ def test_retry_with_short_timeout():
     test_ts = datetime.now(pytz.UTC)
 
     print(f"\n📝 Test message length: {len(test_text)} chars")
-    print(f"⏱️ Timeout set to: 1 second (very short)")
-    print(f"🔄 Max retries: 3")
+    print("⏱️ Timeout set to: 1 second (very short)")
+    print("🔄 Max retries: 3")
     print("\nStarting test...\n")
 
     try:
@@ -94,7 +96,7 @@ def test_retry_with_normal_timeout():
     test_ts = datetime.now(pytz.UTC)
 
     print(f"\n📝 Test message length: {len(test_text)} chars")
-    print(f"⏱️ Timeout set to: 30 seconds (normal)")
+    print("⏱️ Timeout set to: 30 seconds (normal)")
     print("\nStarting test...\n")
 
     try:

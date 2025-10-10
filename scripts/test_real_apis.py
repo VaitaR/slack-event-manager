@@ -99,12 +99,13 @@ def test_apis():
     print("-" * 30)
     try:
         import tempfile
+
         from src.adapters.sqlite_repository import SQLiteRepository
 
         temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         temp_db.close()
 
-        repo = SQLiteRepository(temp_db.name)
+        SQLiteRepository(temp_db.name)
         print("✅ Database initialized")
         print(f"   Path: {temp_db.name}")
 

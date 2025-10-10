@@ -103,7 +103,7 @@ def main() -> None:
 
         # Ingest for this day
         # Note: This is simplified; real backfill would need more sophisticated watermark handling
-        print(f"  Ingesting messages...")
+        print("  Ingesting messages...")
         ingest_result = ingest_messages_use_case(
             slack_client=slack_client,
             repository=repository,
@@ -113,14 +113,14 @@ def main() -> None:
         total_messages += ingest_result.messages_saved
 
         # Build candidates
-        print(f"  Building candidates...")
-        candidate_result = build_candidates_use_case(
+        print("  Building candidates...")
+        build_candidates_use_case(
             repository=repository,
             settings=settings,
         )
 
         # Extract events
-        print(f"  Extracting events...")
+        print("  Extracting events...")
         extraction_result = extract_events_use_case(
             llm_client=llm_client,
             repository=repository,
@@ -132,8 +132,8 @@ def main() -> None:
         total_cost += extraction_result.total_cost_usd
 
         # Deduplicate
-        print(f"  Deduplicating...")
-        dedup_result = deduplicate_events_use_case(
+        print("  Deduplicating...")
+        deduplicate_events_use_case(
             repository=repository,
             settings=settings,
             lookback_days=7,

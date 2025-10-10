@@ -174,13 +174,13 @@ def main() -> int:
 Examples:
   # Run once
   python scripts/run_pipeline.py
-  
+
   # Run continuously every hour
   python scripts/run_pipeline.py --interval-seconds 3600
-  
+
   # Backfill from specific date (first run only)
   python scripts/run_pipeline.py --backfill-from 2025-09-01
-  
+
   # Run with publish
   python scripts/run_pipeline.py --interval-seconds 3600 --publish
         """,

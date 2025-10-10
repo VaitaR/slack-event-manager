@@ -4,17 +4,17 @@
 Tests components one by one to identify issues before running full pipeline.
 """
 
-import sys
 import signal
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config.settings import get_settings
-from src.adapters.slack_client import SlackClient
 from src.adapters.llm_client import LLMClient
+from src.adapters.slack_client import SlackClient
+from src.config.settings import get_settings
 
 
 def log(msg: str) -> None:
@@ -38,7 +38,7 @@ def test_settings() -> bool:
     try:
         log("⏳ Loading settings...")
         settings = get_settings()
-        log(f"✅ Settings loaded successfully")
+        log("✅ Settings loaded successfully")
         log(f"   • Model: {settings.llm_model}")
         log(f"   • Temperature: {settings.llm_temperature}")
         log(f"   • DB Path: {settings.db_path}")
@@ -82,7 +82,7 @@ def test_slack_auth(slack_client: SlackClient) -> bool:
         signal.alarm(0)  # Cancel alarm
 
         if response["ok"]:
-            log(f"✅ Slack authentication successful")
+            log("✅ Slack authentication successful")
             log(f"   • Bot user: {response.get('user')}")
             log(f"   • Team: {response.get('team')}")
             return True
@@ -147,7 +147,7 @@ def test_llm_init(settings) -> tuple[bool, LLMClient | None]:
             temperature=settings.llm_temperature,
             timeout=10,
         )
-        log(f"✅ LLM client initialized")
+        log("✅ LLM client initialized")
         log(f"   • Model: {settings.llm_model}")
         log(f"   • Temperature: {settings.llm_temperature}")
         return True, llm_client
@@ -184,7 +184,7 @@ More details: https://example.com/release-notes"""
         )
         signal.alarm(0)  # Cancel alarm
 
-        log(f"✅ LLM extraction successful")
+        log("✅ LLM extraction successful")
         log(f"   • Is event: {response.is_event}")
         log(f"   • Events found: {len(response.events)}")
 

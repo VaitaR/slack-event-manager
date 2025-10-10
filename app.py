@@ -6,28 +6,27 @@ This app provides a visual interface for the Slack Event Manager pipeline,
 allowing users to configure settings, run the pipeline, and visualize results.
 """
 
-import streamlit as st
+import os
+import sys
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from pathlib import Path
-import sys
-import os
+import streamlit as st
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import sqlite3
 
-from config.settings import get_settings
+from adapters.llm_client import LLMClient
 from adapters.slack_client import SlackClient
 from adapters.sqlite_repository import SQLiteRepository
-from adapters.llm_client import LLMClient
-from use_cases.ingest_messages import process_slack_message
+from config.settings import get_settings
 from use_cases.build_candidates import build_candidates_use_case
-from use_cases.extract_events import extract_events_use_case
 from use_cases.deduplicate_events import deduplicate_events_use_case
+from use_cases.extract_events import extract_events_use_case
+from use_cases.ingest_messages import process_slack_message
 
 
 def get_readonly_connection(db_path: str) -> sqlite3.Connection:

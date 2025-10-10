@@ -39,7 +39,7 @@ def migrate_database(db_path: str) -> bool:
         # Check if table exists
         cursor.execute(
             """
-            SELECT name FROM sqlite_master 
+            SELECT name FROM sqlite_master
             WHERE type='table' AND name='raw_slack_messages'
         """
         )
@@ -69,7 +69,7 @@ def migrate_database(db_path: str) -> bool:
         for column_name, column_type in new_columns:
             try:
                 # Check if column already exists
-                cursor.execute(f"PRAGMA table_info(raw_slack_messages)")
+                cursor.execute("PRAGMA table_info(raw_slack_messages)")
                 existing_columns = [row[1] for row in cursor.fetchall()]
 
                 if column_name in existing_columns:
@@ -80,7 +80,7 @@ def migrate_database(db_path: str) -> bool:
                 # Add column
                 cursor.execute(
                     f"""
-                    ALTER TABLE raw_slack_messages 
+                    ALTER TABLE raw_slack_messages
                     ADD COLUMN {column_name} {column_type}
                 """
                 )
@@ -101,7 +101,7 @@ def migrate_database(db_path: str) -> bool:
         conn.commit()
         conn.close()
 
-        print(f"\n✅ Migration completed successfully!")
+        print("\n✅ Migration completed successfully!")
         print(f"   • Added: {columns_added} columns")
         print(f"   • Skipped: {columns_skipped} columns (already exist)")
 

@@ -11,10 +11,9 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,13 +24,10 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import get_settings
-from src.domain.models import LLMEvent, LLMResponse, EventCategory
+from src.domain.models import EventCategory, LLMEvent, LLMResponse
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
-from src.use_cases.publish_digest import publish_digest_use_case
-
 
 # Mock messages for demo when no real Slack access
 MOCK_MESSAGES = [
@@ -357,7 +353,6 @@ def run_e2e_demo(
 
     # Use temporary file for demo
     import tempfile
-    import os
 
     temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     temp_db.close()
@@ -383,7 +378,6 @@ def run_e2e_demo(
 
     # Get channels to process
     from src.config.channels import get_all_channel_ids
-    from src.use_cases.ingest_messages import ingest_messages_use_case
 
     channels_to_process = [channel_id] if channel_id else get_all_channel_ids()
     print(f"📋 Processing channels: {', '.join(channels_to_process)}")
@@ -483,6 +477,7 @@ def run_e2e_demo(
     try:
         # Get events from a wider time window to include our mock events (Oct 10-15, 2024)
         from datetime import datetime
+
         import pytz
 
         start_time = datetime(2024, 10, 9, tzinfo=pytz.UTC)  # Start from Oct 9

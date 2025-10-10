@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Test pipeline with real data - keep database for inspection."""
 
-import sys
 import os
+import sys
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -32,14 +32,14 @@ def log(msg: str) -> None:
         log_handle.flush()
 
 
+from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
-from src.adapters.llm_client import LLMClient
 from src.config.settings import get_settings
-from src.use_cases.ingest_messages import process_slack_message
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.ingest_messages import process_slack_message
 
 
 def inspect_database(db_path: str, stage: str = "") -> None:
@@ -63,8 +63,8 @@ def inspect_database(db_path: str, stage: str = "") -> None:
     cursor.execute(
         """
         SELECT message_id, text, ts, text_norm, links_norm, anchors
-        FROM raw_slack_messages 
-        ORDER BY ts DESC 
+        FROM raw_slack_messages
+        ORDER BY ts DESC
         LIMIT 3
     """
     )
@@ -121,7 +121,7 @@ def inspect_database(db_path: str, stage: str = "") -> None:
     if event_count > 0:
         cursor.execute(
             """
-            SELECT event_id, message_id, source_msg_event_idx, title, category, 
+            SELECT event_id, message_id, source_msg_event_idx, title, category,
                    event_date, confidence, dedup_key, version
             FROM events
             ORDER BY event_date DESC
@@ -158,7 +158,7 @@ def inspect_database(db_path: str, stage: str = "") -> None:
     llm_row = cursor.fetchone()
     if llm_row[0]:
         calls, total_cost, total_in, total_out = llm_row
-        log(f"\n💰 LLM Statistics:")
+        log("\n💰 LLM Statistics:")
         log(f"   Total calls: {calls}")
         log(f"   Total cost: ${total_cost:.6f}")
         log(f"   Total tokens IN: {total_in}")
@@ -178,7 +178,7 @@ def main():
     # Initialize
     log("⏳ Step 0: Initializing...")
     settings = get_settings()
-    log(f"   Settings loaded:")
+    log("   Settings loaded:")
     log(f"   - LLM model: {settings.llm_model}")
     log(f"   - LLM temperature: {settings.llm_temperature}")
     log(f"   - Threshold score: {settings.threshold_score_default}")
@@ -200,11 +200,11 @@ def main():
     # Remove old test db if exists
     if Path(db_path).exists():
         os.unlink(db_path)
-        log(f"🗑️ Removed old test database")
+        log("🗑️ Removed old test database")
 
     try:
         repo = SQLiteRepository(db_path)
-        log(f"✅ Components initialized")
+        log("✅ Components initialized")
         log(f"📊 Database: {db_path}")
         log("")
 
@@ -261,7 +261,7 @@ def main():
 
         if candidate_result.candidates_created == 0:
             log("ℹ️ No candidates - messages don't meet scoring criteria")
-            log(f"✅ Pipeline test completed")
+            log("✅ Pipeline test completed")
             log(f"📊 Database saved at: {db_path}")
             log(f"📝 Log saved at: {LOG_FILE}")
             return True
@@ -272,7 +272,7 @@ def main():
         # Step 4: Extract with LLM (process ALL candidates)
         log("")
         log("⏳ Step 4: Extracting events with LLM (processing ALL candidates)...")
-        log(f"   Note: Will show full LLM prompts and responses in verbose mode")
+        log("   Note: Will show full LLM prompts and responses in verbose mode")
         log("")
 
         extraction_result = extract_events_use_case(
@@ -283,7 +283,7 @@ def main():
             check_budget=False,
         )
         log("")
-        log(f"✅ Extraction completed:")
+        log("✅ Extraction completed:")
         log(f"   Events extracted: {extraction_result.events_extracted}")
         log(f"   Candidates processed: {extraction_result.candidates_processed}")
         log(f"   LLM calls: {extraction_result.llm_calls}")
@@ -305,7 +305,7 @@ def main():
             settings=settings,
             lookback_days=7,
         )
-        log(f"✅ Deduplication completed:")
+        log("✅ Deduplication completed:")
         log(f"   Total unique events: {dedup_result.total_events}")
         log(f"   New events: {dedup_result.new_events}")
         log(f"   Merged events: {dedup_result.merged_events}")

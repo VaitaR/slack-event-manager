@@ -55,13 +55,13 @@ def main():
     try:
         from src.adapters.llm_client import LLMClient
 
-        llm_client = LLMClient(
+        LLMClient(
             api_key=settings.openai_api_key.get_secret_value(),
             model=settings.llm_model,
             temperature=settings.llm_temperature,
             timeout=5,
         )
-        log(f"   ✅ LLM client initialized")
+        log("   ✅ LLM client initialized")
     except Exception as e:
         log(f"   ❌ Failed: {e}")
         return False
@@ -70,13 +70,14 @@ def main():
     log("\n4️⃣ Testing database...")
     try:
         import tempfile
+
         from src.adapters.sqlite_repository import SQLiteRepository
 
         temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         temp_db.close()
 
-        repo = SQLiteRepository(temp_db.name)
-        log(f"   ✅ Database initialized")
+        SQLiteRepository(temp_db.name)
+        log("   ✅ Database initialized")
 
         import os
 
