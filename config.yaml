@@ -1,0 +1,36 @@
+# Slack Event Manager Configuration
+# This file contains non-sensitive application settings
+# Secrets (tokens, API keys) are stored in .env file
+
+# LLM Configuration
+llm:
+  model: gpt-5-nano
+  temperature: 1.0  # gpt-5-nano only supports 1.0
+  timeout_seconds: 120
+  daily_budget_usd: 10.0
+  max_events_per_msg: 5
+
+# Database Configuration
+database:
+  path: data/slack_events.db
+
+# Slack Configuration
+slack:
+  digest_channel_id: YOUR_SLACK_CHANNEL_ID  # Channel for publishing digests
+  lookback_hours_default: 24  # Default lookback for message ingestion
+
+# Processing Configuration
+processing:
+  tz_default: Europe/Amsterdam
+  threshold_score_default: 0.0  # 0.0 = process all messages
+
+# Deduplication Configuration
+deduplication:
+  date_window_hours: 48
+  title_similarity: 0.8
+  message_lookback_days: 30
+
+# Observability
+logging:
+  level: INFO
+

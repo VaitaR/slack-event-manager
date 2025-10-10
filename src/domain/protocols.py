@@ -1,0 +1,273 @@
+"""Protocol definitions for dependency inversion.
+
+These abstract interfaces define contracts that adapters must implement.
+"""
+
+from datetime import datetime
+from typing import Protocol
+
+from src.domain.models import (
+    Event,
+    EventCandidate,
+    LLMCallMetadata,
+    LLMResponse,
+    SlackMessage,
+)
+
+
+class SlackClientProtocol(Protocol):
+    """Protocol for Slack API interactions."""
+
+    def fetch_messages(
+        self, channel_id: str, oldest_ts: str | None = None, latest_ts: str | None = None
+    ) -> list[dict[str, any]]:
+        """Fetch messages from Slack channel.
+
+        Args:
+            channel_id: Slack channel ID
+            oldest_ts: Oldest timestamp to fetch (inclusive)
+            latest_ts: Latest timestamp to fetch (inclusive)
+
+        Returns:
+            List of raw Slack message dictionaries
+
+        Raises:
+            SlackAPIError: On API communication errors
+            RateLimitError: On rate limit exceeded
+        """
+        ...
+
+    def get_user_info(self, user_id: str) -> dict[str, any]:
+        """Get user information by ID (with caching).
+
+        Args:
+            user_id: Slack user ID
+
+        Returns:
+            User info dictionary
+
+        Raises:
+            SlackAPIError: On API communication errors
+        """
+        ...
+
+    def post_message(self, channel_id: str, blocks: list[dict[str, any]]) -> str:
+        """Post message with Block Kit to channel.
+
+        Args:
+            channel_id: Target channel ID
+            blocks: Slack Block Kit blocks
+
+        Returns:
+            Message timestamp
+
+        Raises:
+            SlackAPIError: On API communication errors
+        """
+        ...
+
+
+class RepositoryProtocol(Protocol):
+    """Protocol for data storage operations."""
+
+    def save_messages(self, messages: list[SlackMessage]) -> int:
+        """Save messages to storage (idempotent upsert).
+
+        Args:
+            messages: List of slack messages
+
+        Returns:
+            Number of messages saved
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_watermark(self, channel: str) -> str | None:
+        """Get committed watermark timestamp for channel.
+
+        Args:
+            channel: Channel ID
+
+        Returns:
+            Last committed timestamp or None
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def update_watermark(self, channel: str, ts: str) -> None:
+        """Update committed watermark for channel.
+
+        Args:
+            channel: Channel ID
+            ts: New watermark timestamp
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_new_messages_for_candidates(self) -> list[SlackMessage]:
+        """Get messages not yet in candidates table.
+
+        Returns:
+            List of messages to process
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def save_candidates(self, candidates: list[EventCandidate]) -> int:
+        """Save event candidates (idempotent).
+
+        Args:
+            candidates: List of candidates
+
+        Returns:
+            Number of candidates saved
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_candidates_for_extraction(
+        self, batch_size: int = 50, min_score: float | None = None
+    ) -> list[EventCandidate]:
+        """Get candidates ready for LLM extraction.
+
+        Args:
+            batch_size: Maximum candidates to return
+            min_score: Minimum score filter (for budget control)
+
+        Returns:
+            List of candidates ordered by score DESC
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def update_candidate_status(
+        self, message_id: str, status: str
+    ) -> None:
+        """Update candidate processing status.
+
+        Args:
+            message_id: Message ID
+            status: New status (llm_ok, llm_fail)
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def save_events(self, events: list[Event]) -> int:
+        """Save events with versioning (upsert by dedup_key).
+
+        Args:
+            events: List of events
+
+        Returns:
+            Number of events saved
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_events_in_window(
+        self, start_dt: datetime, end_dt: datetime
+    ) -> list[Event]:
+        """Get events within date window.
+
+        Args:
+            start_dt: Start datetime (UTC)
+            end_dt: End datetime (UTC)
+
+        Returns:
+            List of events
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def save_llm_call(self, metadata: LLMCallMetadata) -> None:
+        """Save LLM call metadata.
+
+        Args:
+            metadata: Call metadata
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_daily_llm_cost(self, date: datetime) -> float:
+        """Get total LLM cost for a day.
+
+        Args:
+            date: Date to check
+
+        Returns:
+            Total cost in USD
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_cached_llm_response(self, prompt_hash: str) -> str | None:
+        """Get cached LLM response by prompt hash.
+
+        Args:
+            prompt_hash: SHA256 hash of prompt
+
+        Returns:
+            Cached JSON response or None
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+
+class LLMClientProtocol(Protocol):
+    """Protocol for LLM API interactions."""
+
+    def extract_events(
+        self, text: str, links: list[str], message_ts_dt: datetime
+    ) -> LLMResponse:
+        """Extract events from message text using LLM.
+
+        Args:
+            text: Normalized message text
+            links: Top 3 most relevant links
+            message_ts_dt: Message timestamp for date resolution fallback
+
+        Returns:
+            Structured LLM response
+
+        Raises:
+            LLMAPIError: On API communication errors
+            BudgetExceededError: When daily budget exceeded
+            ValidationError: On response validation failure
+        """
+        ...
+
+    def get_call_metadata(self) -> LLMCallMetadata:
+        """Get metadata for last LLM call.
+
+        Returns:
+            Call metadata including tokens and cost
+
+        Raises:
+            RuntimeError: If no call has been made
+        """
+        ...
+

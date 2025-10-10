@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  slack-bot:
+    build: .
+    container_name: slack_event_manager
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: python scripts/run_pipeline.py --interval-seconds 3600
+    healthcheck:
+      test: ["CMD", "python", "-c", "from src.config.settings import get_settings; get_settings(); print('OK')"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+
+  streamlit-ui:
+    build: .
+    container_name: slack_streamlit
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs:ro
+    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+    depends_on:
+      - slack-bot
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+

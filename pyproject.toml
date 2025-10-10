@@ -1,0 +1,102 @@
+[project]
+name = "slack-event-manager"
+version = "0.1.0"
+description = "AI-powered Slack event extraction and digest system"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+exclude = [
+    "src/clickhouse_loader.py",  # Old file with syntax errors, out of scope for MVP
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade
+    "PLR",    # pylint refactor (includes PLR2004 for magic numbers)
+]
+ignore = [
+    "E501",    # Line too long (handled by formatter)
+    "PLR0911", # Too many return statements (classification.py)
+    "PLR0912", # Too many branches (llm_client.py extract_events)
+    "PLR0913", # Too many arguments (sometimes needed for protocols)
+    "PLR0915", # Too many statements (llm_client.py extract_events)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Unused imports in __init__
+"tests/*.py" = ["PLR2004"]  # Allow magic numbers in tests
+"src/use_cases/*.py" = ["PLR2004"]  # Business logic numbers are self-documenting in context
+"src/clickhouse_loader.py" = ["E999"]  # Old file with syntax errors (out of scope for MVP)
+"src/slack_extractor.py" = ["PLR2004"]  # HTTP status codes are self-documenting
+"src/llm_parser.py" = ["PLR2004"]  # Old legacy file
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_unimported = false
+disallow_any_expr = false
+disallow_any_decorated = false
+disallow_any_explicit = false
+disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+module = [
+    "slack_sdk.*",
+    "openai.*",
+    "rapidfuzz.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.mypy_cache
+  | \.pytest_cache
+  | \.venv
+  | venv
+  | build
+  | dist
+)/
+'''
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+

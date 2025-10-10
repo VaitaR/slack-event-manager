@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.coveragerc
+
+# Data and logs (will be mounted)
+data/*.db
+data/*.db-journal
+logs/*.log
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Airflow (not using)
+airflow/
+
+# Scripts not needed in container
+scripts/demo_e2e.py
+scripts/diagnose_components.py
+scripts/test_*.py
+scripts/quick_test.py
+
+# Misc
+.env.example
+.DS_Store
+*.bak
+
