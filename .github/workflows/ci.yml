@@ -34,9 +34,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Black (check only)
+      - name: Ruff (format check)
         run: |
-          python -m black --check .
+          python -m ruff format --check .
 
       - name: Ruff (lint)
         run: |
@@ -44,7 +44,7 @@ jobs:
 
       - name: Mypy (strict)
         run: |
-          python -m mypy --strict
+          python -m mypy --strict src tests
 
       - name: Run tests with coverage
         env:

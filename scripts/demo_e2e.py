@@ -285,7 +285,9 @@ def format_digest_for_terminal(events: list[Any], channel_name: str = "demo") ->
                 confidence_icon = (
                     "✅"
                     if event.confidence >= 0.8
-                    else "⚠️" if event.confidence >= 0.6 else "❓"
+                    else "⚠️"
+                    if event.confidence >= 0.6
+                    else "❓"
                 )
 
                 output.append(f"  {confidence_icon} {event.title}")

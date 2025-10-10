@@ -144,7 +144,6 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
     """Run the complete pipeline and show results."""
 
     with st.spinner("Running pipeline... This may take a few minutes."):
-
         try:
             # Initialize components
             settings = get_settings()

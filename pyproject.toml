@@ -49,6 +49,9 @@ disallow_any_expr = false
 disallow_any_decorated = false
 disallow_any_explicit = false
 disallow_subclassing_any = false
+exclude = [
+    "src/clickhouse_loader\\.py",
+]
 
 [[tool.mypy.overrides]]
 module = [
@@ -70,23 +73,6 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
-
-[tool.black]
-line-length = 88
-target-version = ["py311"]
-include = '\\.pyi?$'
-exclude = '''
-/(
-    \\.git
-  | \\.mypy_cache
-  | \\.pytest_cache
-  | \\.venv
-  | venv
-  | build
-  | dist
-)/
-'''
-extend-exclude = "src/clickhouse_loader\\.py"
 
 [tool.coverage.run]
 source = ["src"]

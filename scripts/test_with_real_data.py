@@ -47,7 +47,7 @@ def inspect_database(db_path: str, stage: str = "") -> None:
     import sqlite3
 
     if stage:
-        log(f"\n{'='*80}")
+        log(f"\n{'=' * 80}")
         log(f"📊 DATABASE INSPECTION - {stage}")
         log("=" * 80)
 

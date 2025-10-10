@@ -34,9 +34,7 @@ PREVIEW_LENGTH_PROMPT: Final[int] = 800
 PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
 
-SYSTEM_PROMPT: Final[
-    str
-] = """You are an event extraction assistant for Slack messages.
+SYSTEM_PROMPT: Final[str] = """You are an event extraction assistant for Slack messages.
 
 Your task: Extract 0 to 5 independent events from a Slack message.
 
@@ -203,7 +201,7 @@ class LLMClient:
 
             # Log response details
             print("   📥 LLM Response:")
-            print(f"      Latency: {latency_ms}ms ({latency_ms/1000:.2f}s)")
+            print(f"      Latency: {latency_ms}ms ({latency_ms / 1000:.2f}s)")
             print(f"      Tokens IN: {tokens_in}")
             print(f"      Tokens OUT: {tokens_out}")
             print(f"      Total tokens: {tokens_in + tokens_out}")

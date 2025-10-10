@@ -418,7 +418,8 @@ def run_releases_pipeline():
 
         # Get events for display
         events = repo.get_events_in_window(
-            datetime.utcnow() - timedelta(days=30), datetime.utcnow()  # Last 30 days
+            datetime.utcnow() - timedelta(days=30),
+            datetime.utcnow(),  # Last 30 days
         )
 
         if events:
