@@ -104,4 +104,3 @@ def test_ingestion_state_persists_across_connections():
         # Assert
         assert result is not None
         assert abs(result - timestamp) < 0.000001
-

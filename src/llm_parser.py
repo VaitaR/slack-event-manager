@@ -18,6 +18,7 @@ Your goal is to parse each post and return a structured JSON object containing:
 Output only valid JSON without extra commentary. If info is not found, use null or empty strings.
 """
 
+
 def parse_message_with_llm(message_text: str) -> dict:
     """
     Sends the Slack message to the LLM with a system prompt,
@@ -29,18 +30,24 @@ def parse_message_with_llm(message_text: str) -> dict:
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Here is the raw Slack message:\n{message_text}"}
+                {
+                    "role": "user",
+                    "content": f"Here is the raw Slack message:\n{message_text}",
+                },
             ],
-            temperature=1.0
+            temperature=1.0,
         )
         content = response["choices"][0]["message"]["content"]
         # Attempt to parse the LLM's JSON
-        parsed = eval_json_safely(content)  # Implement a safe JSON parse (below, we show a naive approach)
+        parsed = eval_json_safely(
+            content
+        )  # Implement a safe JSON parse (below, we show a naive approach)
         return parsed
     except Exception as e:
         # Log or raise error
         print(f"Error parsing message with LLM: {e}")
         return {}
+
 
 def eval_json_safely(text: str) -> dict:
     """
@@ -48,6 +55,7 @@ def eval_json_safely(text: str) -> dict:
     In production, use a robust JSON parser with error handling.
     """
     import json
+
     try:
         return json.loads(text)
     except json.JSONDecodeError:

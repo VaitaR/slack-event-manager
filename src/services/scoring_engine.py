@@ -23,7 +23,9 @@ from src.domain.scoring_constants import (
 )
 
 # Mention pattern for @channel or @here
-CHANNEL_MENTION_PATTERN: Final[re.Pattern[str]] = re.compile(r"<!channel>|<!here>|@channel|@here")
+CHANNEL_MENTION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"<!channel>|<!here>|@channel|@here"
+)
 """Pattern to match channel-wide mentions (@channel, @here)."""
 
 
@@ -87,9 +89,7 @@ def extract_features(
     )
 
 
-def calculate_score(
-    features: ScoringFeatures, channel_config: ChannelConfig
-) -> float:
+def calculate_score(features: ScoringFeatures, channel_config: ChannelConfig) -> float:
     """Calculate candidate score based on features and config.
 
     Args:
@@ -180,4 +180,3 @@ def is_candidate(score: float, threshold: float) -> bool:
         False
     """
     return score >= threshold
-

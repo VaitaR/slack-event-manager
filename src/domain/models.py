@@ -35,7 +35,8 @@ class ChannelConfig(BaseModel):
     channel_id: str = Field(..., description="Slack channel ID")
     channel_name: str = Field(..., description="Human-readable channel name")
     threshold_score: float = Field(
-        default=0.0, description="Minimum score for candidate selection (0.0 = process all)"
+        default=0.0,
+        description="Minimum score for candidate selection (0.0 = process all)",
     )
     whitelist_keywords: list[str] = Field(
         default_factory=list, description="Keywords that boost score"
@@ -61,7 +62,9 @@ class SlackMessage(BaseModel):
     user_real_name: str | None = Field(default=None, description="User real name")
     user_display_name: str | None = Field(default=None, description="User display name")
     user_email: str | None = Field(default=None, description="User email")
-    user_profile_image: str | None = Field(default=None, description="User profile image URL")
+    user_profile_image: str | None = Field(
+        default=None, description="User profile image URL"
+    )
     is_bot: bool = Field(default=False, description="Is message from bot")
     subtype: str | None = Field(default=None, description="Message subtype")
     text: str = Field(default="", description="Raw message text")
@@ -242,4 +245,3 @@ class DigestResult(BaseModel):
     messages_posted: int
     events_included: int
     channel: str
-

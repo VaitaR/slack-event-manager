@@ -59,9 +59,7 @@ def deduplicate_events_use_case(
     all_events = repository.query_events(criteria)
 
     if not all_events:
-        return DeduplicationResult(
-            new_events=0, merged_events=0, total_events=0
-        )
+        return DeduplicationResult(new_events=0, merged_events=0, total_events=0)
 
     initial_count = len(all_events)
 
@@ -76,7 +74,9 @@ def deduplicate_events_use_case(
     print("   📋 Events BEFORE deduplication:")
     for i, evt in enumerate(all_events, 1):
         print(f"   {i}. {evt.title[:60]}")
-        print(f"      Message ID: {evt.message_id[:8]}... (idx: {evt.source_msg_event_idx})")
+        print(
+            f"      Message ID: {evt.message_id[:8]}... (idx: {evt.source_msg_event_idx})"
+        )
         print(f"      Date: {evt.event_date.isoformat()}")
         print(f"      Links: {evt.links}")
         print(f"      Anchors: {evt.anchors}")
@@ -107,7 +107,9 @@ def deduplicate_events_use_case(
     print("   📋 Events AFTER deduplication:")
     for i, evt in enumerate(deduplicated_events, 1):
         print(f"   {i}. {evt.title[:60]}")
-        print(f"      Message ID: {evt.message_id[:8]}... (idx: {evt.source_msg_event_idx})")
+        print(
+            f"      Message ID: {evt.message_id[:8]}... (idx: {evt.source_msg_event_idx})"
+        )
         print(f"      Date: {evt.event_date.isoformat()}")
         print(f"      Version: {evt.version}")
         print(f"      Channels: {evt.source_channels}")
@@ -123,4 +125,3 @@ def deduplicate_events_use_case(
         merged_events=merged_count,
         total_events=final_count,
     )
-

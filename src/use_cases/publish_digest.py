@@ -119,6 +119,7 @@ def build_event_block(event: Event, tz_name: str) -> dict[str, Any]:
             # Extract domain for display
             try:
                 from urllib.parse import urlparse
+
                 domain = urlparse(link).netloc or link
                 details.append(f"<{link}|{domain}>")
             except Exception:
@@ -327,4 +328,3 @@ def publish_digest_use_case(
         events_included=len(sorted_events),
         channel=channel,
     )
-

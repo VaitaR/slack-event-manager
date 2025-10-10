@@ -25,7 +25,9 @@ GITLAB_PATTERN: Final[re.Pattern[str]] = re.compile(
 ZOOM_PATTERN: Final[re.Pattern[str]] = re.compile(r"zoom\.us/[^\s<>\"']+")
 """Pattern to match Zoom meeting URLs."""
 
-MEET_PATTERN: Final[re.Pattern[str]] = re.compile(r"meet\.google\.com/[a-z]{3}-[a-z]{4}-[a-z]{3}")
+MEET_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"meet\.google\.com/[a-z]{3}-[a-z]{4}-[a-z]{3}"
+)
 """Pattern to match Google Meet links (e.g., meet.google.com/abc-defg-hij)."""
 
 TEAMS_PATTERN: Final[re.Pattern[str]] = re.compile(r"teams\.microsoft\.com/[^\s<>\"']+")
@@ -37,10 +39,14 @@ CONFLUENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 """Pattern to match Confluence page links."""
 
-NOTION_PATTERN: Final[re.Pattern[str]] = re.compile(r"notion\.so/[^\s<>\"']*-([a-f0-9]{32})")
+NOTION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"notion\.so/[^\s<>\"']*-([a-f0-9]{32})"
+)
 """Pattern to match Notion page links (with 32-char hex ID)."""
 
-GDOCS_PATTERN: Final[re.Pattern[str]] = re.compile(r"docs\.google\.com/[^\s<>\"']+/d/([a-zA-Z0-9_-]{25,})")
+GDOCS_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"docs\.google\.com/[^\s<>\"']+/d/([a-zA-Z0-9_-]{25,})"
+)
 """Pattern to match Google Docs links."""
 
 # Generic URL pattern
@@ -303,4 +309,3 @@ def normalize_links(urls: list[str]) -> list[str]:
         ['https://example.com', 'https://www.test.com']
     """
     return [normalize_url(url) for url in urls]
-

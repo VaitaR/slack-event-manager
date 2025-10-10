@@ -18,7 +18,10 @@ from src.domain.models import LLMCallMetadata, LLMResponse
 
 # Token cost per 1M tokens (as of 2025-10)
 TOKEN_COSTS: Final[dict[str, dict[str, float]]] = {
-    "gpt-5-nano": {"input": 0.075, "output": 0.300},  # per 1M tokens - 75% cheaper than gpt-4o-mini
+    "gpt-5-nano": {
+        "input": 0.075,
+        "output": 0.300,
+    },  # per 1M tokens - 75% cheaper than gpt-4o-mini
     "gpt-4o-mini": {"input": 0.150, "output": 0.600},  # per 1M tokens
     "gpt-4o": {"input": 2.50, "output": 10.00},
     "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
@@ -31,7 +34,9 @@ PREVIEW_LENGTH_PROMPT: Final[int] = 800
 PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
 
-SYSTEM_PROMPT: Final[str] = """You are an event extraction assistant for Slack messages.
+SYSTEM_PROMPT: Final[
+    str
+] = """You are an event extraction assistant for Slack messages.
 
 Your task: Extract 0 to 5 independent events from a Slack message.
 
@@ -104,7 +109,9 @@ class LLMClient:
         else:
             # gpt-5-nano only supports temperature=1.0
             if model == "gpt-5-nano" and temperature != 1.0:
-                print(f"⚠️ Warning: gpt-5-nano only supports temperature=1.0, using {temperature} as requested")
+                print(
+                    f"⚠️ Warning: gpt-5-nano only supports temperature=1.0, using {temperature} as requested"
+                )
             self.temperature = temperature
 
         self._last_call_metadata: LLMCallMetadata | None = None
@@ -141,6 +148,7 @@ class LLMClient:
 
         # Log request details
         import sys
+
         print("   📤 LLM Request:")
         print(f"      Model: {self.model}")
         print(f"      Temperature: {self.temperature}")
@@ -210,7 +218,9 @@ class LLMClient:
                 print("\n   === RAW JSON RESPONSE ===")
                 print(f"   {content[:PREVIEW_LENGTH_RESPONSE]}...")
                 if len(content) > PREVIEW_LENGTH_RESPONSE:
-                    print(f"   ... ({len(content) - PREVIEW_LENGTH_RESPONSE} more chars)")
+                    print(
+                        f"   ... ({len(content) - PREVIEW_LENGTH_RESPONSE} more chars)"
+                    )
 
             sys.stdout.flush()
 
@@ -281,14 +291,16 @@ class LLMClient:
             except (ValidationError, LLMAPIError) as e:
                 last_error = e
                 error_msg = str(e)
-                
+
                 # Determine if we should retry
-                is_timeout = "timed out" in error_msg.lower() or "timeout" in error_msg.lower()
+                is_timeout = (
+                    "timed out" in error_msg.lower() or "timeout" in error_msg.lower()
+                )
                 is_rate_limit = "rate limit" in error_msg.lower()
                 is_validation = isinstance(e, ValidationError)
-                
+
                 should_retry = is_timeout or is_rate_limit or is_validation
-                
+
                 if attempt < max_retries and should_retry:
                     # Calculate backoff delay
                     if is_rate_limit:
@@ -297,21 +309,24 @@ class LLMClient:
                         delay = 5 * (attempt + 1)  # 5s, 10s, 15s for timeouts
                     else:
                         delay = 2 * (attempt + 1)  # 2s, 4s, 6s for validation
-                    
+
                     print(f"   ⚠️ Retry {attempt + 1}/{max_retries}: {error_msg}")
                     print(f"   ⏳ Waiting {delay}s before retry...")
                     import sys
+
                     sys.stdout.flush()
-                    
+
                     time.sleep(delay)
                     continue
-                
+
                 # No more retries or non-retriable error
                 raise
 
         # Should not reach here, but for type safety
         if isinstance(last_error, ValidationError):
-            raise ValidationError(f"Failed after {max_retries + 1} attempts: {last_error}")
+            raise ValidationError(
+                f"Failed after {max_retries + 1} attempts: {last_error}"
+            )
         else:
             raise LLMAPIError(f"Failed after {max_retries + 1} attempts: {last_error}")
 
@@ -352,7 +367,9 @@ class LLMClient:
         ]
 
         if links:
-            prompt_parts.append("\nRelevant links:\n" + "\n".join(f"- {link}" for link in links[:3]))
+            prompt_parts.append(
+                "\nRelevant links:\n" + "\n".join(f"- {link}" for link in links[:3])
+            )
 
         return "\n".join(part for part in prompt_parts if part)
 
@@ -376,4 +393,3 @@ class LLMClient:
         cost_out = (tokens_out / 1_000_000) * costs["output"]
 
         return cost_in + cost_out
-

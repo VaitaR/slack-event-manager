@@ -376,4 +376,3 @@ def product_events_criteria(
         order_by="event_date",
         order_desc=False,  # Chronological order
     )
-

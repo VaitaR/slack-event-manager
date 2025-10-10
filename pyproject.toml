@@ -73,18 +73,19 @@ addopts = [
 [tool.black]
 line-length = 88
 target-version = ["py311"]
-include = '\.pyi?$'
+include = '\\.pyi?$'
 exclude = '''
 /(
-    \.git
-  | \.mypy_cache
-  | \.pytest_cache
-  | \.venv
+    \\.git
+  | \\.mypy_cache
+  | \\.pytest_cache
+  | \\.venv
   | venv
   | build
   | dist
 )/
 '''
+extend-exclude = "src/clickhouse_loader\\.py"
 
 [tool.coverage.run]
 source = ["src"]

@@ -13,10 +13,24 @@ MONITORED_CHANNELS = [
         threshold_score=0.0,  # Process all messages by default
         keyword_weight=0.0,  # Disable keyword filtering
         whitelist_keywords=[
-            "release", "deploy", "launch", "update", "new", "announcement",
-            "scheduled", "security", "metrics", "maintenance", "incident",
-            "daily", "weekly", "monthly", "report", "summary", "alert"
-        ]
+            "release",
+            "deploy",
+            "launch",
+            "update",
+            "new",
+            "announcement",
+            "scheduled",
+            "security",
+            "metrics",
+            "maintenance",
+            "incident",
+            "daily",
+            "weekly",
+            "monthly",
+            "report",
+            "summary",
+            "alert",
+        ],
     ),
     ChannelConfig(
         channel_id="C04V0TK7UG6",
@@ -24,23 +38,52 @@ MONITORED_CHANNELS = [
         threshold_score=0.0,  # Process all messages by default
         keyword_weight=0.0,  # Disable keyword filtering
         whitelist_keywords=[
-            "release", "deploy", "launch", "update", "new", "announcement",
-            "scheduled", "security", "metrics", "maintenance", "incident",
-            "daily", "weekly", "monthly", "report", "summary", "alert"
-        ]
+            "release",
+            "deploy",
+            "launch",
+            "update",
+            "new",
+            "announcement",
+            "scheduled",
+            "security",
+            "metrics",
+            "maintenance",
+            "incident",
+            "daily",
+            "weekly",
+            "monthly",
+            "report",
+            "summary",
+            "alert",
+        ],
     ),
-        ChannelConfig(
+    ChannelConfig(
         channel_id="C0770K7FV43",
         channel_name="t-onboarding-activation",
         threshold_score=0.0,  # Process all messages by default
         keyword_weight=0.0,  # Disable keyword filtering
         whitelist_keywords=[
-            "release", "deploy", "launch", "update", "new", "announcement",
-            "scheduled", "security", "metrics", "maintenance", "incident",
-            "daily", "weekly", "monthly", "report", "summary", "alert"
-        ]
+            "release",
+            "deploy",
+            "launch",
+            "update",
+            "new",
+            "announcement",
+            "scheduled",
+            "security",
+            "metrics",
+            "maintenance",
+            "incident",
+            "daily",
+            "weekly",
+            "monthly",
+            "report",
+            "summary",
+            "alert",
+        ],
     ),
 ]
+
 
 def get_channel_config(channel_id: str) -> ChannelConfig | None:
     """Get configuration for a specific channel.
@@ -56,6 +99,7 @@ def get_channel_config(channel_id: str) -> ChannelConfig | None:
             return config
     return None
 
+
 def get_all_channel_ids() -> list[str]:
     """Get list of all monitored channel IDs.
 
@@ -63,6 +107,7 @@ def get_all_channel_ids() -> list[str]:
         List of channel IDs
     """
     return [config.channel_id for config in MONITORED_CHANNELS]
+
 
 def get_all_channels() -> list[ChannelConfig]:
     """Get all monitored channels.

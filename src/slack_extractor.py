@@ -22,7 +22,7 @@ def fetch_slack_messages():
         "oldest": oldest,
         "latest": latest,
         "inclusive": True,
-        "limit": 100  # adjust if needed
+        "limit": 100,  # adjust if needed
     }
 
     response = requests.get(url, headers=headers, params=params)

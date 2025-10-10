@@ -199,4 +199,3 @@ def test_detect_timezone_default() -> None:
     tz = date_resolver.detect_timezone(text)
     # Should return default
     assert tz.zone in ["Europe/Amsterdam", "UTC"]
-

@@ -80,5 +80,3 @@ DEFAULT_THRESHOLD_SCORE: Final[float] = 0.0
 
 Can be raised to 10-15 in production to filter low-quality messages.
 """
-
-
