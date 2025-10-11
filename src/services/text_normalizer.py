@@ -131,4 +131,3 @@ def combine_text_sources(text: str, blocks_text: str) -> str:
 
     # Otherwise concatenate
     return f"{text} {blocks_text}".strip()
-

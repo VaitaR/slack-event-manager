@@ -6,11 +6,11 @@ through the complete Slack Event Manager pipeline using ONLY real API credential
 No mock data is used - all operations require valid Slack and OpenAI API keys.
 """
 
+import os
 import sys
 import tempfile
-import os
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -21,14 +21,14 @@ def log(msg: str) -> None:
     print(msg)
     sys.stdout.flush()
 
+
+from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
-from src.adapters.llm_client import LLMClient
 from src.config.settings import get_settings
-from src.use_cases.ingest_messages import ingest_messages_use_case
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.publish_digest import publish_digest_use_case
 
 
@@ -48,7 +48,9 @@ def run_releases_pipeline_real():
     # Initialize real Slack client
     try:
         log("⏳ Initializing Slack client...")
-        slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
+        slack_client = SlackClient(
+            bot_token=settings.slack_bot_token.get_secret_value()
+        )
         log("✅ Real Slack client initialized successfully")
     except Exception as e:
         log(f"❌ Failed to initialize Slack client: {e}")
@@ -62,7 +64,9 @@ def run_releases_pipeline_real():
         log("✅ Slack API connection verified")
     except Exception as e:
         log(f"❌ Slack API connection failed: {e}")
-        log("💡 Check that the bot is a member of the releases channel and has proper permissions")
+        log(
+            "💡 Check that the bot is a member of the releases channel and has proper permissions"
+        )
         return False
 
     # Initialize real LLM client
@@ -82,7 +86,7 @@ def run_releases_pipeline_real():
         return False
 
     # Create temporary database for this run
-    temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+    temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     temp_db.close()
 
     try:
@@ -100,13 +104,12 @@ def run_releases_pipeline_real():
         try:
             # Fetch latest 10 messages (reduced to avoid rate limits)
             raw_messages = slack_client.fetch_messages(
-                channel_id=releases_channel_id,
-                oldest_ts=None,
-                latest_ts=None,
-                limit=10
+                channel_id=releases_channel_id, oldest_ts=None, latest_ts=None, limit=10
             )
 
-            log(f"✅ Successfully fetched {len(raw_messages)} real messages from releases channel")
+            log(
+                f"✅ Successfully fetched {len(raw_messages)} real messages from releases channel"
+            )
 
             if not raw_messages:
                 log("❌ No messages found in releases channel")
@@ -116,9 +119,13 @@ def run_releases_pipeline_real():
             # Show first few messages for context
             log("\n📨 Recent messages (first 3):")
             for i, msg in enumerate(raw_messages[:3], 1):
-                text = msg.get('text', '')[:100] + '...' if len(msg.get('text', '')) > 100 else msg.get('text', '')
-                ts = msg.get('ts', '')
-                user = msg.get('user', 'unknown')
+                text = (
+                    msg.get("text", "")[:100] + "..."
+                    if len(msg.get("text", "")) > 100
+                    else msg.get("text", "")
+                )
+                ts = msg.get("ts", "")
+                user = msg.get("user", "unknown")
                 log(f"  {i}. [{ts}] User {user}: {text}")
 
         except Exception as e:
@@ -138,18 +145,19 @@ def run_releases_pipeline_real():
 
             # Get messages directly from the specific channel
             raw_messages = slack_client.fetch_messages(
-                channel_id=releases_channel_id,
-                oldest_ts=None,
-                latest_ts=None,
-                limit=50
+                channel_id=releases_channel_id, oldest_ts=None, latest_ts=None, limit=50
             )
 
-            log(f"📨 Processing {len(raw_messages)} real messages from releases channel")
+            log(
+                f"📨 Processing {len(raw_messages)} real messages from releases channel"
+            )
 
             # Process and save messages
             from src.use_cases.ingest_messages import process_slack_message
+
             processed_messages = [
-                process_slack_message(raw_msg, releases_channel_id) for raw_msg in raw_messages
+                process_slack_message(raw_msg, releases_channel_id)
+                for raw_msg in raw_messages
             ]
 
             saved_count = repo.save_messages(processed_messages)
@@ -162,6 +170,7 @@ def run_releases_pipeline_real():
         except Exception as e:
             log(f"❌ Error during message ingestion: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -196,6 +205,7 @@ def run_releases_pipeline_real():
         except Exception as e:
             log(f"❌ Error during candidate building: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -206,7 +216,7 @@ def run_releases_pipeline_real():
 
         try:
             log("⏳ Starting LLM extraction...")
-            
+
             extraction_result = extract_events_use_case(
                 llm_client=llm_client,
                 repository=repo,
@@ -230,6 +240,7 @@ def run_releases_pipeline_real():
             log(f"❌ Error during event extraction: {e}")
             log("💡 Check your OPENAI_API_KEY and LLM model settings")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -253,6 +264,7 @@ def run_releases_pipeline_real():
         except Exception as e:
             log(f"❌ Error during deduplication: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -263,8 +275,8 @@ def run_releases_pipeline_real():
 
         # Get events for display
         events = repo.get_events_in_window(
-            datetime.utcnow() - timedelta(days=30),  # Last 30 days
-            datetime.utcnow()
+            datetime.utcnow() - timedelta(days=30),
+            datetime.utcnow(),  # Last 30 days
         )
 
         if events:
@@ -273,7 +285,11 @@ def run_releases_pipeline_real():
             # Group by category
             events_by_category = {}
             for event in events:
-                category = event.category.value if hasattr(event.category, 'value') else str(event.category)
+                category = (
+                    event.category.value
+                    if hasattr(event.category, "value")
+                    else str(event.category)
+                )
                 if category not in events_by_category:
                     events_by_category[category] = []
                 events_by_category[category].append(event)
@@ -304,7 +320,7 @@ def run_releases_pipeline_real():
                 slack_client=slack_client,
                 repository=repo,
                 settings=settings,
-                lookback_hours=24*7,  # Last 7 days
+                lookback_hours=24 * 7,  # Last 7 days
                 target_channel=settings.slack_digest_channel_id,
                 dry_run=True,  # Don't actually post for safety
             )
@@ -317,6 +333,7 @@ def run_releases_pipeline_real():
         except Exception as e:
             log(f"❌ Error during digest generation: {e}")
             import traceback
+
             traceback.print_exc()
 
         log("")
@@ -325,17 +342,30 @@ def run_releases_pipeline_real():
 
         # Show final statistics
         log("📈 Final Statistics:")
-        log(f"   • Messages processed: {len(messages) if 'messages' in locals() else 0}")
-        log(f"   • Candidates created: {candidate_result.candidates_created if 'candidate_result' in locals() else 0}")
-        log(f"   • Events extracted: {extraction_result.events_extracted if 'extraction_result' in locals() else 0}")
-        log(f"   • LLM API calls: {extraction_result.llm_calls if 'extraction_result' in locals() else 0}")
-        log(f"   • Total cost: ${extraction_result.total_cost_usd:.4f}" if 'extraction_result' in locals() else "   • Total cost: $0.0000")
+        log(
+            f"   • Messages processed: {len(messages) if 'messages' in locals() else 0}"
+        )
+        log(
+            f"   • Candidates created: {candidate_result.candidates_created if 'candidate_result' in locals() else 0}"
+        )
+        log(
+            f"   • Events extracted: {extraction_result.events_extracted if 'extraction_result' in locals() else 0}"
+        )
+        log(
+            f"   • LLM API calls: {extraction_result.llm_calls if 'extraction_result' in locals() else 0}"
+        )
+        log(
+            f"   • Total cost: ${extraction_result.total_cost_usd:.4f}"
+            if "extraction_result" in locals()
+            else "   • Total cost: $0.0000"
+        )
 
         return True
 
     except Exception as e:
         log(f"❌ Pipeline failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

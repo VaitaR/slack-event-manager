@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from src.adapters.sqlite_repository import SQLiteRepository
 
 
@@ -58,8 +56,8 @@ def test_update_last_processed_ts_upserts():
         second_result = repo.get_last_processed_ts(channel_id)
 
         # Assert
-        assert abs(first_result - old_ts) < 0.000001
-        assert abs(second_result - new_ts) < 0.000001
+        assert abs(first_result - old_ts) < 0.000001  # type: ignore[operator]
+        assert abs(second_result - new_ts) < 0.000001  # type: ignore[operator]
 
 
 def test_multiple_channels_independent_state():
@@ -81,8 +79,8 @@ def test_multiple_channels_independent_state():
         result2 = repo.get_last_processed_ts(channel2)
 
         # Assert
-        assert abs(result1 - ts1) < 0.000001
-        assert abs(result2 - ts2) < 0.000001
+        assert abs(result1 - ts1) < 0.000001  # type: ignore[operator]
+        assert abs(result2 - ts2) < 0.000001  # type: ignore[operator]
 
 
 def test_ingestion_state_persists_across_connections():
@@ -104,4 +102,3 @@ def test_ingestion_state_persists_across_connections():
         # Assert
         assert result is not None
         assert abs(result - timestamp) < 0.000001
-

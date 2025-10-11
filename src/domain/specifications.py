@@ -328,4 +328,3 @@ def product_events_for_digest() -> Specification[Event]:
         >>> digest_events = [e for e in events if spec.is_satisfied_by(e)]
     """
     return EventHasCategorySpec("product").and_(EventHighConfidenceSpec(0.7))
-

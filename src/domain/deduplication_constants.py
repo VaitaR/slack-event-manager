@@ -72,5 +72,3 @@ Example:
       → Message is processed (within 7 days)
       → Event date is 2025-09-01 (can be old, that's OK)
 """
-
-

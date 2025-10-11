@@ -61,7 +61,8 @@ class SQLiteRepository:
         cursor = conn.cursor()
 
         # Raw messages table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS raw_slack_messages (
                 message_id TEXT PRIMARY KEY,
                 channel TEXT NOT NULL,
@@ -90,10 +91,12 @@ class SQLiteRepository:
                 edited_user TEXT,
                 ingested_at TEXT
             )
-        """)
+        """
+        )
 
         # Candidates table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS event_candidates (
                 message_id TEXT PRIMARY KEY,
                 channel TEXT NOT NULL,
@@ -105,10 +108,12 @@ class SQLiteRepository:
                 status TEXT CHECK(status IN ('new', 'llm_ok', 'llm_fail')),
                 features_json TEXT
             )
-        """)
+        """
+        )
 
         # Events table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
                 version INTEGER DEFAULT 1,
@@ -128,22 +133,28 @@ class SQLiteRepository:
                 source_channels TEXT,
                 ingested_at TEXT
             )
-        """)
+        """
+        )
 
         # Create index on dedup_key
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_events_dedup_key
             ON events(dedup_key)
-        """)
+        """
+        )
 
         # Create index on event_date
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_events_date
             ON events(event_date)
-        """)
+        """
+        )
 
         # LLM calls table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS llm_calls (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id TEXT,
@@ -157,24 +168,29 @@ class SQLiteRepository:
                 response_json TEXT,
                 ts TEXT
             )
-        """)
+        """
+        )
 
         # Watermarks table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS channel_watermarks (
                 channel TEXT PRIMARY KEY,
                 processing_ts TEXT,
                 committed_ts TEXT
             )
-        """)
+        """
+        )
 
         # Ingestion state table (tracks last processed timestamp per channel)
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS ingestion_state (
                 channel_id TEXT PRIMARY KEY,
                 last_ts REAL NOT NULL
             )
-        """)
+        """
+        )
 
         conn.commit()
         print("✅ Schema creation completed")
@@ -308,12 +324,14 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT m.* FROM raw_slack_messages m
                 LEFT JOIN event_candidates c ON m.message_id = c.message_id
                 WHERE c.message_id IS NULL
                 ORDER BY m.ts_dt DESC
-            """)
+            """
+            )
 
             rows = cursor.fetchall()
             conn.close()
@@ -550,9 +568,7 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to save events: {e}")
 
-    def get_events_in_window(
-        self, start_dt: datetime, end_dt: datetime
-    ) -> list[Event]:
+    def get_events_in_window(self, start_dt: datetime, end_dt: datetime) -> list[Event]:
         """Get events within date window.
 
         Args:
@@ -628,7 +644,9 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to query events: {e}")
 
-    def query_candidates(self, criteria: CandidateQueryCriteria) -> list[EventCandidate]:
+    def query_candidates(
+        self, criteria: CandidateQueryCriteria
+    ) -> list[EventCandidate]:
         """Query event candidates using criteria builder.
 
         Args:
@@ -798,6 +816,7 @@ class SQLiteRepository:
 
     def _row_to_message(self, row: sqlite3.Row) -> SlackMessage:
         """Convert database row to SlackMessage."""
+
         # Helper to safely get optional fields from sqlite3.Row
         def safe_get(key: str) -> str | None:
             try:
@@ -947,4 +966,3 @@ class SQLiteRepository:
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to update last processed ts: {e}")
-

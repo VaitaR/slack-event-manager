@@ -7,9 +7,6 @@ requires-python = ">=3.11"
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-exclude = [
-    "src/clickhouse_loader.py",  # Old file with syntax errors, out of scope for MVP
-]
 
 [tool.ruff.lint]
 select = [
@@ -33,9 +30,7 @@ ignore = [
 "__init__.py" = ["F401"]  # Unused imports in __init__
 "tests/*.py" = ["PLR2004"]  # Allow magic numbers in tests
 "src/use_cases/*.py" = ["PLR2004"]  # Business logic numbers are self-documenting in context
-"src/clickhouse_loader.py" = ["E999"]  # Old file with syntax errors (out of scope for MVP)
-"src/slack_extractor.py" = ["PLR2004"]  # HTTP status codes are self-documenting
-"src/llm_parser.py" = ["PLR2004"]  # Old legacy file
+"scripts/*.py" = ["E402", "E722", "PLR2004"]  # Scripts and demos: relaxed rules
 
 [tool.mypy]
 python_version = "3.11"
@@ -48,6 +43,7 @@ disallow_any_expr = false
 disallow_any_decorated = false
 disallow_any_explicit = false
 disallow_subclassing_any = false
+warn_no_return = false
 
 [[tool.mypy.overrides]]
 module = [
@@ -56,6 +52,15 @@ module = [
     "rapidfuzz.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["src.adapters.slack_client", "src.config.settings"]
+warn_return_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -69,22 +74,6 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
-
-[tool.black]
-line-length = 88
-target-version = ["py311"]
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.mypy_cache
-  | \.pytest_cache
-  | \.venv
-  | venv
-  | build
-  | dist
-)/
-'''
 
 [tool.coverage.run]
 source = ["src"]

@@ -11,10 +11,9 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,13 +24,10 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import get_settings
-from src.domain.models import LLMEvent, LLMResponse, EventCategory
+from src.domain.models import EventCategory, LLMEvent, LLMResponse
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
-from src.use_cases.publish_digest import publish_digest_use_case
-
 
 # Mock messages for demo when no real Slack access
 MOCK_MESSAGES = [
@@ -85,6 +81,7 @@ MOCK_MESSAGES = [
 
 def create_mock_slack_client() -> SlackClient:
     """Create a mock Slack client that returns demo messages."""
+
     class MockSlackClient(SlackClient):
         def __init__(self):
             # Don't call super().__init__ to avoid needing real token
@@ -106,8 +103,10 @@ def create_mock_slack_client() -> SlackClient:
                 oldest_timestamp = float(oldest_ts)
                 # For demo, return all messages if timestamp filter would exclude them
                 filtered_messages = [
-                    msg for msg in MOCK_MESSAGES
-                    if float(msg["ts"]) >= oldest_timestamp or oldest_timestamp > 1728000000  # Demo mode
+                    msg
+                    for msg in MOCK_MESSAGES
+                    if float(msg["ts"]) >= oldest_timestamp
+                    or oldest_timestamp > 1728000000  # Demo mode
                 ]
 
             print(f"📨 [MOCK] Returning {len(filtered_messages)} messages")
@@ -117,7 +116,9 @@ def create_mock_slack_client() -> SlackClient:
             """Return mock user info."""
             return {"real_name": f"User {user_id}", "name": f"user_{user_id}"}
 
-        def post_message(self, channel_id: str, blocks: list[dict[str, Any]], text: str = "") -> str:
+        def post_message(
+            self, channel_id: str, blocks: list[dict[str, Any]], text: str = ""
+        ) -> str:
             """Mock posting message."""
             print(f"📤 [MOCK] Would post digest to channel {channel_id}")
             return "1728000000.000000"
@@ -127,13 +128,18 @@ def create_mock_slack_client() -> SlackClient:
 
 def create_demo_llm_client() -> LLMClient:
     """Create a mock LLM client that returns realistic responses."""
+
     class DemoLLMClient(LLMClient):
         def __init__(self):
             # Don't call super().__init__ to avoid needing real API key
             pass
 
         def extract_events(
-            self, text: str, links: list[str], message_ts_dt: datetime, channel_name: str = ""
+            self,
+            text: str,
+            links: list[str],
+            message_ts_dt: datetime,
+            channel_name: str = "",
         ) -> Any:
             """Return mock LLM response based on message content."""
 
@@ -142,65 +148,79 @@ def create_demo_llm_client() -> LLMClient:
             # Analyze text for events
             # Create unique events based on message content
             if "release" in text.lower() or "v2.1" in text:
-                events.append(LLMEvent(
-                    title="🚀 Product Release v2.1.0",
-                    summary="Major release with P2P improvements, KYC enhancements, and bug fixes",
-                    category=EventCategory.PRODUCT,
-                    event_date="2024-10-15T10:00:00Z",
-                    event_end=None,
-                    impact_area=["p2p", "kyc", "wallet"],
-                    tags=["release", "v2.1", "improvement"],
-                    links=["https://docs.company.com/v2.1"],
-                    confidence=0.95,
-                    source_channels=[f"#{channel_name}"] if channel_name else []
-                ))
+                events.append(
+                    LLMEvent(
+                        title="🚀 Product Release v2.1.0",
+                        summary="Major release with P2P improvements, KYC enhancements, and bug fixes",
+                        category=EventCategory.PRODUCT,
+                        event_date="2024-10-15T10:00:00Z",
+                        event_end=None,
+                        impact_area=["p2p", "kyc", "wallet"],
+                        tags=["release", "v2.1", "improvement"],
+                        links=["https://docs.company.com/v2.1"],
+                        confidence=0.95,
+                        source_channels=[f"#{channel_name}"] if channel_name else [],
+                    )
+                )
 
             if "maintenance" in text.lower() or "downtime" in text.lower():
-                events.append(LLMEvent(
-                    title="🔧 Scheduled Maintenance Window",
-                    summary="30-minute downtime for wallet services and P2P transfers",
-                    category=EventCategory.PROCESS,
-                    event_date="2024-10-11T02:00:00Z",
-                    event_end="2024-10-11T04:00:00Z",
-                    impact_area=["wallet", "p2p"],
-                    tags=["maintenance", "downtime"],
-                    links=[],
-                    confidence=0.90,
-                    source_channels=[f"#{channel_name}"] if channel_name else []
-                ))
+                events.append(
+                    LLMEvent(
+                        title="🔧 Scheduled Maintenance Window",
+                        summary="30-minute downtime for wallet services and P2P transfers",
+                        category=EventCategory.PROCESS,
+                        event_date="2024-10-11T02:00:00Z",
+                        event_end="2024-10-11T04:00:00Z",
+                        impact_area=["wallet", "p2p"],
+                        tags=["maintenance", "downtime"],
+                        links=[],
+                        confidence=0.90,
+                        source_channels=[f"#{channel_name}"] if channel_name else [],
+                    )
+                )
 
             if "security incident" in text.lower() or "unusual login" in text.lower():
-                events.append(LLMEvent(
-                    title="⚠️ Security Incident Investigation",
-                    summary="Investigation of unusual login attempts affecting wallet authentication",
-                    category=EventCategory.RISK,
-                    event_date="2024-10-10T15:00:00Z",
-                    event_end="2024-10-10T17:00:00Z",
-                    impact_area=["security", "wallet"],
-                    tags=["security", "incident"],
-                    links=[],
-                    confidence=0.85,
-                    source_channels=[f"#{channel_name}"] if channel_name else []
-                ))
+                events.append(
+                    LLMEvent(
+                        title="⚠️ Security Incident Investigation",
+                        summary="Investigation of unusual login attempts affecting wallet authentication",
+                        category=EventCategory.RISK,
+                        event_date="2024-10-10T15:00:00Z",
+                        event_end="2024-10-10T17:00:00Z",
+                        impact_area=["security", "wallet"],
+                        tags=["security", "incident"],
+                        links=[],
+                        confidence=0.85,
+                        source_channels=[f"#{channel_name}"] if channel_name else [],
+                    )
+                )
 
-            if "metrics" in text.lower() and ("p2p" in text.lower() or "volume" in text.lower()):
-                events.append(LLMEvent(
-                    title="📊 Weekly Product Metrics Update",
-                    summary="P2P volume increased 12%, new user registrations up 8%",
-                    category=EventCategory.MARKETING,
-                    event_date="2024-10-10T12:00:00Z",
-                    event_end=None,
-                    impact_area=["p2p", "user_growth"],
-                    tags=["metrics", "growth"],
-                    links=["https://dashboard.company.com/metrics"],
-                    confidence=0.80,
-                    source_channels=[f"#{channel_name}"] if channel_name else []
-                ))
+            if "metrics" in text.lower() and (
+                "p2p" in text.lower() or "volume" in text.lower()
+            ):
+                events.append(
+                    LLMEvent(
+                        title="📊 Weekly Product Metrics Update",
+                        summary="P2P volume increased 12%, new user registrations up 8%",
+                        category=EventCategory.MARKETING,
+                        event_date="2024-10-10T12:00:00Z",
+                        event_end=None,
+                        impact_area=["p2p", "user_growth"],
+                        tags=["metrics", "growth"],
+                        links=["https://dashboard.company.com/metrics"],
+                        confidence=0.80,
+                        source_channels=[f"#{channel_name}"] if channel_name else [],
+                    )
+                )
 
             return LLMResponse(
                 is_event=len(events) > 0,
-                overflow_note=None if len(events) <= 5 else f"Found {len(events)} events, showing top 5",
-                events=events[:5]  # Limit to 5 events
+                overflow_note=(
+                    None
+                    if len(events) <= 5
+                    else f"Found {len(events)} events, showing top 5"
+                ),
+                events=events[:5],  # Limit to 5 events
             )
 
         def extract_events_with_retry(self, *args, **kwargs) -> Any:
@@ -210,6 +230,7 @@ def create_demo_llm_client() -> LLMClient:
         def get_call_metadata(self) -> Any:
             """Return mock metadata."""
             from src.domain.models import LLMCallMetadata
+
             return LLMCallMetadata(
                 message_id="demo",
                 prompt_hash="demo_hash",
@@ -219,7 +240,7 @@ def create_demo_llm_client() -> LLMClient:
                 cost_usd=0.015,
                 latency_ms=500,
                 cached=False,
-                ts=datetime.utcnow()
+                ts=datetime.utcnow(),
             )
 
     return DemoLLMClient()
@@ -261,7 +282,13 @@ def format_digest_for_terminal(events: list[Any], channel_name: str = "demo") ->
                     date_str = f"{date_str} - {end_str}"
 
                 # Format confidence
-                confidence_icon = "✅" if event.confidence >= 0.8 else "⚠️" if event.confidence >= 0.6 else "❓"
+                confidence_icon = (
+                    "✅"
+                    if event.confidence >= 0.8
+                    else "⚠️"
+                    if event.confidence >= 0.6
+                    else "❓"
+                )
 
                 output.append(f"  {confidence_icon} {event.title}")
                 output.append(f"    📅 {date_str}")
@@ -282,7 +309,9 @@ def format_digest_for_terminal(events: list[Any], channel_name: str = "demo") ->
     return "\n".join(output)
 
 
-def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, hours_back: int = 24) -> None:
+def run_e2e_demo(
+    use_real_slack: bool = False, channel_id: str | None = None, hours_back: int = 24
+) -> None:
     """Run end-to-end demo of the Slack Event Manager pipeline."""
 
     print("🚀 Starting Slack Event Manager E2E Demo")
@@ -296,7 +325,9 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
     if use_real_slack:
         print("📡 Using REAL Slack API (requires valid tokens)")
         try:
-            slack_client = SlackClient(bot_token=get_settings().slack_bot_token.get_secret_value())
+            slack_client = SlackClient(
+                bot_token=get_settings().slack_bot_token.get_secret_value()
+            )
             print("✅ Real Slack client initialized successfully")
         except Exception as e:
             print(f"❌ Failed to initialize real Slack client: {e}")
@@ -310,6 +341,7 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
     if use_real_slack:
         # Use real LLM client for real data processing
         from src.adapters.llm_client import LLMClient
+
         llm_client = LLMClient(
             api_key=get_settings().openai_api_key.get_secret_value(),
             model=get_settings().llm_model,
@@ -323,8 +355,8 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
 
     # Use temporary file for demo
     import tempfile
-    import os
-    temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+
+    temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     temp_db.close()
 
     try:
@@ -348,7 +380,6 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
 
     # Get channels to process
     from src.config.channels import get_all_channel_ids
-    from src.use_cases.ingest_messages import ingest_messages_use_case
 
     channels_to_process = [channel_id] if channel_id else get_all_channel_ids()
     print(f"📋 Processing channels: {', '.join(channels_to_process)}")
@@ -359,7 +390,9 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
             slack_client=slack_client,
             repository=repo,
             settings=get_settings(),
-            lookback_hours=hours_back if not use_real_slack else 24,  # Use shorter window for demo
+            lookback_hours=(
+                hours_back if not use_real_slack else 24
+            ),  # Use shorter window for demo
         )
 
         print(f"✅ Messages fetched: {ingest_result.messages_fetched}")
@@ -374,6 +407,7 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
     except Exception as e:
         print(f"❌ Error during ingestion: {e}")
         import traceback
+
         traceback.print_exc()
         return
 
@@ -393,9 +427,13 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
 
         # Show candidate creation summary
         if candidate_result.candidates_created == 0:
-            print("ℹ️ No candidates created - this might be normal if no messages were fetched or they don't meet scoring criteria")
+            print(
+                "ℹ️ No candidates created - this might be normal if no messages were fetched or they don't meet scoring criteria"
+            )
         else:
-            print(f"✅ Successfully created {candidate_result.candidates_created} candidates for processing")
+            print(
+                f"✅ Successfully created {candidate_result.candidates_created} candidates for processing"
+            )
 
     except Exception as e:
         print(f"❌ Error during candidate building: {e}")
@@ -441,9 +479,11 @@ def run_e2e_demo(use_real_slack: bool = False, channel_id: str | None = None, ho
     try:
         # Get events from a wider time window to include our mock events (Oct 10-15, 2024)
         from datetime import datetime
+
         import pytz
+
         start_time = datetime(2024, 10, 9, tzinfo=pytz.UTC)  # Start from Oct 9
-        end_time = datetime(2024, 10, 16, tzinfo=pytz.UTC)    # End at Oct 16
+        end_time = datetime(2024, 10, 16, tzinfo=pytz.UTC)  # End at Oct 16
 
         events = repo.get_events_in_window(start_time, end_time)
 
@@ -481,41 +521,40 @@ Examples:
   python scripts/demo_e2e.py                    # Run with mock data
   python scripts/demo_e2e.py --real            # Try to use real Slack API
   python scripts/demo_e2e.py --hours 72        # Process last 72 hours
-        """
+        """,
     )
 
     parser.add_argument(
         "--real",
         action="store_true",
-        help="Use real Slack API (requires valid tokens in .env)"
+        help="Use real Slack API (requires valid tokens in .env)",
     )
 
     parser.add_argument(
         "--channel",
         type=str,
-        help="Specific channel ID to process (for real Slack mode)"
+        help="Specific channel ID to process (for real Slack mode)",
     )
 
     parser.add_argument(
         "--hours",
         type=int,
         default=24,
-        help="Hours to look back for messages (default: 24)"
+        help="Hours to look back for messages (default: 24)",
     )
 
     args = parser.parse_args()
 
     try:
         run_e2e_demo(
-            use_real_slack=args.real,
-            channel_id=args.channel,
-            hours_back=args.hours
+            use_real_slack=args.real, channel_id=args.channel, hours_back=args.hours
         )
     except KeyboardInterrupt:
         print("\n⏹️ Demo interrupted by user")
     except Exception as e:
         print(f"\n❌ Demo failed: {e}")
         import traceback
+
         traceback.print_exc()
 
 

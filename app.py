@@ -6,36 +6,35 @@ This app provides a visual interface for the Slack Event Manager pipeline,
 allowing users to configure settings, run the pipeline, and visualize results.
 """
 
-import streamlit as st
+import os
+import sys
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from pathlib import Path
-import sys
-import os
+import streamlit as st
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import sqlite3
 
-from config.settings import get_settings
+from adapters.llm_client import LLMClient
 from adapters.slack_client import SlackClient
 from adapters.sqlite_repository import SQLiteRepository
-from adapters.llm_client import LLMClient
-from use_cases.ingest_messages import process_slack_message
+from config.settings import get_settings
 from use_cases.build_candidates import build_candidates_use_case
-from use_cases.extract_events import extract_events_use_case
 from use_cases.deduplicate_events import deduplicate_events_use_case
+from use_cases.extract_events import extract_events_use_case
+from use_cases.ingest_messages import process_slack_message
 
 
 def get_readonly_connection(db_path: str) -> sqlite3.Connection:
     """Get read-only SQLite connection.
-    
+
     Args:
         db_path: Path to database file
-        
+
     Returns:
         SQLite connection in read-only mode
     """
@@ -51,11 +50,12 @@ st.set_page_config(
     page_title="Slack Event Manager",
     page_icon="📅",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Custom CSS for better styling
-st.markdown("""
+st.markdown(
+    """
 <style>
 .main-header {
     font-size: 2.5rem;
@@ -71,15 +71,21 @@ st.markdown("""
     margin: 0.5rem 0;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 def main():
     """Main application function."""
 
     # Header
-    st.markdown('<h1 class="main-header">📅 Slack Event Manager</h1>', unsafe_allow_html=True)
-    st.markdown("Visual interface for processing Slack messages and extracting structured events.")
+    st.markdown(
+        '<h1 class="main-header">📅 Slack Event Manager</h1>', unsafe_allow_html=True
+    )
+    st.markdown(
+        "Visual interface for processing Slack messages and extracting structured events."
+    )
 
     # Sidebar configuration
     with st.sidebar:
@@ -94,7 +100,7 @@ def main():
             min_value=5,
             max_value=100,
             value=20,
-            help="Number of recent messages to fetch from each channel"
+            help="Number of recent messages to fetch from each channel",
         )
 
         # Channel selection from config
@@ -103,15 +109,15 @@ def main():
             f"{ch.channel_name} ({ch.channel_id})": ch.channel_id
             for ch in settings.slack_channels
         }
-        
+
         # Use channel names as display options
         selected_channel_names = st.multiselect(
             "Channels",
             options=list(channel_options.keys()),
             default=list(channel_options.keys()),  # All channels by default
-            help="Select Slack channels to process"
+            help="Select Slack channels to process",
         )
-        
+
         # Convert back to channel IDs
         channels = [channel_options[name] for name in selected_channel_names]
 
@@ -119,14 +125,12 @@ def main():
         db_path = st.text_input(
             "Database Path",
             value=settings.db_path,  # Use settings.db_path (data/slack_events.db)
-            help="Path to the database (read from production by default)"
+            help="Path to the database (read from production by default)",
         )
 
         # Run pipeline button
         run_pipeline = st.button(
-            "🚀 Run Pipeline",
-            type="primary",
-            use_container_width=True
+            "🚀 Run Pipeline", type="primary", use_container_width=True
         )
 
     # Main content
@@ -140,21 +144,24 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
     """Run the complete pipeline and show results."""
 
     with st.spinner("Running pipeline... This may take a few minutes."):
-
         try:
             # Initialize components
             settings = get_settings()
-            slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
-            
+            slack_client = SlackClient(
+                bot_token=settings.slack_bot_token.get_secret_value()
+            )
+
             # gpt-5-nano requires temperature=1.0 (cannot be changed)
-            temperature = 1.0 if settings.llm_model == "gpt-5-nano" else settings.llm_temperature
-            
+            temperature = (
+                1.0 if settings.llm_model == "gpt-5-nano" else settings.llm_temperature
+            )
+
             llm_client = LLMClient(
                 api_key=settings.openai_api_key.get_secret_value(),
                 model=settings.llm_model,
                 temperature=temperature,
                 timeout=30,
-                verbose=False  # Disable verbose for demo
+                verbose=False,  # Disable verbose for demo
             )
 
             # Create database if it doesn't exist
@@ -172,8 +179,7 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
             all_messages = []
             for channel in channels:
                 messages = slack_client.fetch_messages(
-                    channel_id=channel,
-                    limit=message_limit
+                    channel_id=channel, limit=message_limit
                 )
                 all_messages.extend(messages)
 
@@ -184,7 +190,7 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
             processed_messages = []
             for idx, msg in enumerate(all_messages):
                 channel = channels[idx % len(channels)]
-                
+
                 # Get user info if available
                 user_info = None
                 user_id = msg.get("user")
@@ -193,7 +199,7 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
                         user_info = slack_client.get_user_info(user_id)
                     except Exception:
                         pass  # Continue without user info
-                
+
                 # Get permalink
                 permalink = None
                 msg_ts = msg.get("ts")
@@ -202,12 +208,12 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
                         permalink = slack_client.get_permalink(channel, msg_ts)
                     except Exception:
                         pass  # Continue without permalink
-                
+
                 processed_msg = process_slack_message(
                     msg, channel, user_info=user_info, permalink=permalink
                 )
                 processed_messages.append(processed_msg)
-            
+
             saved_count = repo.save_messages(processed_messages)
 
             # Step 3: Build candidates
@@ -283,7 +289,9 @@ def show_pipeline_results(db_path: str):
     # Database inspection using read-only connection
     try:
         # Create tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["📨 Messages", "🎯 Candidates", "📝 Events", "📈 Timeline"])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["📨 Messages", "🎯 Candidates", "📝 Events", "📈 Timeline"]
+        )
 
         with tab1:
             show_messages_table(db_path)
@@ -325,13 +333,16 @@ def show_messages_table(db_path: str):
     try:
         # Query messages with new fields using read-only connection
         conn = get_readonly_connection(db_path)
-        messages_df = pd.read_sql_query("""
+        messages_df = pd.read_sql_query(
+            """
             SELECT message_id, text, ts, user_real_name, user_email,
                    total_reactions, reply_count, attachments_count, files_count,
                    permalink, edited_ts
             FROM raw_slack_messages
             ORDER BY ts DESC
-        """, conn)
+        """,
+            conn,
+        )
         conn.close()
 
         if messages_df.empty:
@@ -339,12 +350,12 @@ def show_messages_table(db_path: str):
             return
 
         # Format timestamps
-        messages_df['ts'] = pd.to_datetime(messages_df['ts'], unit='s')
-        messages_df['text'] = messages_df['text'].str.slice(0, 150) + "..."
-        
+        messages_df["ts"] = pd.to_datetime(messages_df["ts"], unit="s")
+        messages_df["text"] = messages_df["text"].str.slice(0, 150) + "..."
+
         # Format edited_ts if present
-        if 'edited_ts' in messages_df.columns:
-            messages_df['edited'] = messages_df['edited_ts'].notna()
+        if "edited_ts" in messages_df.columns:
+            messages_df["edited"] = messages_df["edited_ts"].notna()
 
         st.dataframe(
             messages_df,
@@ -352,12 +363,20 @@ def show_messages_table(db_path: str):
             column_config={
                 "message_id": st.column_config.TextColumn("Message ID", width="medium"),
                 "text": st.column_config.TextColumn("Text", width="large"),
-                "ts": st.column_config.DatetimeColumn("Timestamp", format="YYYY-MM-DD HH:mm:ss"),
+                "ts": st.column_config.DatetimeColumn(
+                    "Timestamp", format="YYYY-MM-DD HH:mm:ss"
+                ),
                 "user_real_name": st.column_config.TextColumn("User", width="medium"),
                 "user_email": st.column_config.TextColumn("Email", width="medium"),
-                "total_reactions": st.column_config.NumberColumn("👍 Reactions", width="small"),
-                "reply_count": st.column_config.NumberColumn("💬 Replies", width="small"),
-                "attachments_count": st.column_config.NumberColumn("📎 Files", width="small"),
+                "total_reactions": st.column_config.NumberColumn(
+                    "👍 Reactions", width="small"
+                ),
+                "reply_count": st.column_config.NumberColumn(
+                    "💬 Replies", width="small"
+                ),
+                "attachments_count": st.column_config.NumberColumn(
+                    "📎 Files", width="small"
+                ),
                 "files_count": st.column_config.NumberColumn("📄 Docs", width="small"),
                 "permalink": st.column_config.LinkColumn("🔗 Link", width="small"),
                 "edited": st.column_config.CheckboxColumn("✏️ Edited", width="small"),
@@ -370,11 +389,15 @@ def show_messages_table(db_path: str):
         with col1:
             st.metric("Total Messages", len(messages_df))
         with col2:
-            st.metric("Total Reactions", int(messages_df['total_reactions'].sum()))
+            st.metric("Total Reactions", int(messages_df["total_reactions"].sum()))
         with col3:
-            st.metric("Total Replies", int(messages_df['reply_count'].sum()))
+            st.metric("Total Replies", int(messages_df["reply_count"].sum()))
         with col4:
-            edited_count = messages_df['edited_ts'].notna().sum() if 'edited_ts' in messages_df.columns else 0
+            edited_count = (
+                messages_df["edited_ts"].notna().sum()
+                if "edited_ts" in messages_df.columns
+                else 0
+            )
             st.metric("Edited Messages", int(edited_count))
 
     except Exception as e:
@@ -389,11 +412,14 @@ def show_candidates_table(db_path: str):
     try:
         # Query candidates using read-only connection
         conn = get_readonly_connection(db_path)
-        candidates_df = pd.read_sql_query("""
+        candidates_df = pd.read_sql_query(
+            """
             SELECT message_id, text_norm, score, status, features_json
             FROM event_candidates
             ORDER BY score DESC
-        """, conn)
+        """,
+            conn,
+        )
         conn.close()
 
         if candidates_df.empty:
@@ -401,7 +427,9 @@ def show_candidates_table(db_path: str):
             return
 
         # Format data
-        candidates_df['text_norm'] = candidates_df['text_norm'].str.slice(0, 200) + "..."
+        candidates_df["text_norm"] = (
+            candidates_df["text_norm"].str.slice(0, 200) + "..."
+        )
 
         st.dataframe(
             candidates_df,
@@ -411,8 +439,10 @@ def show_candidates_table(db_path: str):
                 "text_norm": st.column_config.TextColumn("Text", width="large"),
                 "score": st.column_config.NumberColumn("Score", format="%.2f"),
                 "status": st.column_config.TextColumn("Status", width="small"),
-                "features_json": st.column_config.TextColumn("Features", width="medium"),
-            }
+                "features_json": st.column_config.TextColumn(
+                    "Features", width="medium"
+                ),
+            },
         )
 
         st.caption(f"Total candidates: {len(candidates_df)}")
@@ -429,12 +459,15 @@ def show_events_table(db_path: str):
     try:
         # Query events using read-only connection
         conn = get_readonly_connection(db_path)
-        events_df = pd.read_sql_query("""
+        events_df = pd.read_sql_query(
+            """
             SELECT event_id, message_id, source_msg_event_idx, title, category,
                    event_date, confidence, dedup_key, version
             FROM events
             ORDER BY event_date DESC
-        """, conn)
+        """,
+            conn,
+        )
         conn.close()
 
         if events_df.empty:
@@ -442,7 +475,7 @@ def show_events_table(db_path: str):
             return
 
         # Format dates
-        events_df['event_date'] = pd.to_datetime(events_df['event_date'])
+        events_df["event_date"] = pd.to_datetime(events_df["event_date"])
 
         st.dataframe(
             events_df,
@@ -451,13 +484,21 @@ def show_events_table(db_path: str):
                 "event_id": st.column_config.TextColumn("Event ID", width="medium"),
                 "title": st.column_config.TextColumn("Title", width="large"),
                 "category": st.column_config.TextColumn("Category", width="medium"),
-                "event_date": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD"),
-                "confidence": st.column_config.NumberColumn("Confidence", format="%.2f"),
-                "message_id": st.column_config.TextColumn("Source Message", width="medium"),
-                "source_msg_event_idx": st.column_config.NumberColumn("Event Index", width="small"),
+                "event_date": st.column_config.DatetimeColumn(
+                    "Date", format="YYYY-MM-DD"
+                ),
+                "confidence": st.column_config.NumberColumn(
+                    "Confidence", format="%.2f"
+                ),
+                "message_id": st.column_config.TextColumn(
+                    "Source Message", width="medium"
+                ),
+                "source_msg_event_idx": st.column_config.NumberColumn(
+                    "Event Index", width="small"
+                ),
                 "dedup_key": st.column_config.TextColumn("Dedup Key", width="medium"),
                 "version": st.column_config.TextColumn("Version", width="small"),
-            }
+            },
         )
 
         st.caption(f"Total events: {len(events_df)}")
@@ -474,12 +515,15 @@ def show_gantt_chart(db_path: str):
     try:
         # Query events with dates using read-only connection
         conn = get_readonly_connection(db_path)
-        events_df = pd.read_sql_query("""
+        events_df = pd.read_sql_query(
+            """
             SELECT title, category, event_date
             FROM events
             WHERE event_date IS NOT NULL
             ORDER BY event_date
-        """, conn)
+        """,
+            conn,
+        )
         conn.close()
 
         if events_df.empty:
@@ -487,18 +531,18 @@ def show_gantt_chart(db_path: str):
             return
 
         # Convert to datetime
-        events_df['event_date'] = pd.to_datetime(events_df['event_date'])
+        events_df["event_date"] = pd.to_datetime(events_df["event_date"])
 
         # Create Gantt chart
         fig = px.timeline(
             events_df,
-            x_start=events_df['event_date'],
-            x_end=events_df['event_date'] + pd.Timedelta(days=1),  # Events span 1 day
-            y='title',
-            color='category',
-            title='Events Timeline',
-            labels={'event_date': 'Date'},
-            color_discrete_sequence=px.colors.qualitative.Set3
+            x_start=events_df["event_date"],
+            x_end=events_df["event_date"] + pd.Timedelta(days=1),  # Events span 1 day
+            y="title",
+            color="category",
+            title="Events Timeline",
+            labels={"event_date": "Date"},
+            color_discrete_sequence=px.colors.qualitative.Set3,
         )
 
         # Update layout
@@ -506,7 +550,9 @@ def show_gantt_chart(db_path: str):
             xaxis_title="Timeline",
             yaxis_title="Events",
             showlegend=True,
-            height=max(400, len(events_df) * 30)  # Dynamic height based on number of events
+            height=max(
+                400, len(events_df) * 30
+            ),  # Dynamic height based on number of events
         )
 
         # Update y-axis to show full titles
@@ -519,9 +565,11 @@ def show_gantt_chart(db_path: str):
         with col1:
             st.metric("Total Events", len(events_df))
         with col2:
-            st.metric("Categories", events_df['category'].nunique())
+            st.metric("Categories", events_df["category"].nunique())
         with col3:
-            date_range = (events_df['event_date'].max() - events_df['event_date'].min()).days
+            date_range = (
+                events_df["event_date"].max() - events_df["event_date"].min()
+            ).days
             st.metric("Date Range", f"{date_range} days")
 
     except Exception as e:

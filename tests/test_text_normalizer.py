@@ -128,4 +128,3 @@ def test_combine_text_sources_different() -> None:
     result = text_normalizer.combine_text_sources(text, blocks_text)
     assert "Text part" in result
     assert "Blocks part" in result
-

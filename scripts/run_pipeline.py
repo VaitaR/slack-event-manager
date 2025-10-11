@@ -47,20 +47,17 @@ def signal_handler(signum: int, frame: object) -> None:
 
 def setup_logging(log_dir: Path) -> None:
     """Setup logging to file and stdout.
-    
+
     Args:
         log_dir: Directory for log files
     """
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / f"pipeline_{datetime.now().strftime('%Y%m%d')}.log"
-    
+
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout)
-        ]
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(log_file), logging.StreamHandler(sys.stdout)],
     )
 
 
@@ -73,7 +70,7 @@ def run_single_iteration(
     backfill_from_date: datetime | None = None,
 ) -> None:
     """Run single pipeline iteration.
-    
+
     Args:
         slack_client: Slack API client
         repository: Data repository
@@ -164,12 +161,12 @@ def run_single_iteration(
 
 def main() -> int:
     """Run pipeline (once or continuously).
-    
+
     Returns:
         Exit code (0 = success, 1 = error)
     """
     global _shutdown_requested
-    
+
     parser = argparse.ArgumentParser(
         description="Run Slack Event Manager pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -177,16 +174,16 @@ def main() -> int:
 Examples:
   # Run once
   python scripts/run_pipeline.py
-  
+
   # Run continuously every hour
   python scripts/run_pipeline.py --interval-seconds 3600
-  
+
   # Backfill from specific date (first run only)
   python scripts/run_pipeline.py --backfill-from 2025-09-01
-  
+
   # Run with publish
   python scripts/run_pipeline.py --interval-seconds 3600 --publish
-        """
+        """,
     )
     parser.add_argument(
         "--interval-seconds",
@@ -237,7 +234,9 @@ Examples:
     backfill_from_date: datetime | None = None
     if args.backfill_from:
         try:
-            backfill_from_date = datetime.strptime(args.backfill_from, "%Y-%m-%d").replace(tzinfo=pytz.UTC)
+            backfill_from_date = datetime.strptime(
+                args.backfill_from, "%Y-%m-%d"
+            ).replace(tzinfo=pytz.UTC)
             logger.info(f"Backfill from date: {backfill_from_date.isoformat()}")
         except ValueError as e:
             logger.error(f"Invalid date format for --backfill-from: {e}")
@@ -254,7 +253,9 @@ Examples:
     # Initialize adapters
     logger.info("Initializing clients...")
     try:
-        slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
+        slack_client = SlackClient(
+            bot_token=settings.slack_bot_token.get_secret_value()
+        )
         repository = SQLiteRepository(db_path=settings.db_path)
         llm_client = LLMClient(
             api_key=settings.openai_api_key.get_secret_value(),
@@ -277,12 +278,14 @@ Examples:
     while not _shutdown_requested:
         iteration += 1
         start_time = time.time()
-        
+
         try:
             logger.info("=" * 80)
-            logger.info(f"Pipeline iteration #{iteration} started at {datetime.now().isoformat()}")
+            logger.info(
+                f"Pipeline iteration #{iteration} started at {datetime.now().isoformat()}"
+            )
             logger.info("=" * 80)
-            
+
             run_single_iteration(
                 slack_client=slack_client,
                 repository=repository,
@@ -291,14 +294,18 @@ Examples:
                 args=args,
                 backfill_from_date=backfill_from_date,
             )
-            
+
             elapsed = time.time() - start_time
             logger.info("=" * 80)
-            logger.info(f"✅ Pipeline iteration #{iteration} completed in {elapsed:.1f}s")
+            logger.info(
+                f"✅ Pipeline iteration #{iteration} completed in {elapsed:.1f}s"
+            )
             logger.info("=" * 80)
-            
+
         except Exception as e:
-            logger.error(f"❌ Pipeline iteration #{iteration} failed: {e}", exc_info=True)
+            logger.error(
+                f"❌ Pipeline iteration #{iteration} failed: {e}", exc_info=True
+            )
             if args.interval_seconds == 0:
                 # Single run mode: exit with error
                 return 1
@@ -311,7 +318,9 @@ Examples:
 
         # Sleep until next iteration (check shutdown flag frequently)
         if not _shutdown_requested:
-            logger.info(f"💤 Sleeping for {args.interval_seconds}s until next iteration...")
+            logger.info(
+                f"💤 Sleeping for {args.interval_seconds}s until next iteration..."
+            )
             sleep_start = time.time()
             while time.time() - sleep_start < args.interval_seconds:
                 if _shutdown_requested:
@@ -320,10 +329,9 @@ Examples:
 
     if _shutdown_requested:
         logger.info("🛑 Shutdown complete")
-    
+
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

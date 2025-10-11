@@ -72,13 +72,14 @@ class SlackClient:
                 if not response["ok"]:
                     raise SlackAPIError(f"Slack API error: {response.get('error')}")
 
-                messages = response.get("messages", [])
+                messages: list[dict[str, Any]] = response.get("messages", [])
 
                 # Filter for root messages only (thread_ts == ts or no thread_ts)
                 root_messages = [
                     msg
                     for msg in messages
-                    if msg.get("thread_ts") is None or msg.get("thread_ts") == msg.get("ts")
+                    if msg.get("thread_ts") is None
+                    or msg.get("thread_ts") == msg.get("ts")
                 ]
 
                 all_messages.extend(root_messages)
@@ -89,7 +90,7 @@ class SlackClient:
                     break
 
                 # Check for more pages
-                cursor = response.get("response_metadata", {}).get("next_cursor")
+                cursor = response.get("response_metadata", {}).get("next_cursor")  # type: ignore[call-overload]
                 if not cursor:
                     break
 
@@ -100,7 +101,10 @@ class SlackClient:
                 if e.response.get("error") == "ratelimited":
                     retry_after = int(e.response.headers.get("Retry-After", 10))
                     import sys
-                    print(f"⚠️ Rate limited. Waiting {retry_after}s before retry (attempt {retry_count + 1}/{max_retries})...")
+
+                    print(
+                        f"⚠️ Rate limited. Waiting {retry_after}s before retry (attempt {retry_count + 1}/{max_retries})..."
+                    )
                     sys.stdout.flush()
                     time.sleep(retry_after)
                     retry_count += 1
@@ -220,4 +224,3 @@ class SlackClient:
             pass
 
         return None
-

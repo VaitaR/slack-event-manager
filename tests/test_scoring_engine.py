@@ -4,31 +4,47 @@ from src.domain.models import ChannelConfig, ScoringFeatures, SlackMessage
 from src.services import scoring_engine
 
 
-def test_extract_features_keywords(sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig) -> None:
+def test_extract_features_keywords(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
     """Test feature extraction with keywords."""
-    features = scoring_engine.extract_features(sample_slack_message, sample_channel_config)
+    features = scoring_engine.extract_features(
+        sample_slack_message, sample_channel_config
+    )
 
     assert features.has_keywords is True
     assert features.keyword_count >= 1  # "release" is in text
 
 
-def test_extract_features_reactions(sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig) -> None:
+def test_extract_features_reactions(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
     """Test feature extraction counts reactions."""
-    features = scoring_engine.extract_features(sample_slack_message, sample_channel_config)
+    features = scoring_engine.extract_features(
+        sample_slack_message, sample_channel_config
+    )
 
     assert features.reaction_count == 7  # 5 + 2 from fixture
 
 
-def test_extract_features_replies(sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig) -> None:
+def test_extract_features_replies(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
     """Test feature extraction counts replies."""
-    features = scoring_engine.extract_features(sample_slack_message, sample_channel_config)
+    features = scoring_engine.extract_features(
+        sample_slack_message, sample_channel_config
+    )
 
     assert features.reply_count == 3
 
 
-def test_extract_features_anchors(sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig) -> None:
+def test_extract_features_anchors(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
     """Test feature extraction counts anchors."""
-    features = scoring_engine.extract_features(sample_slack_message, sample_channel_config)
+    features = scoring_engine.extract_features(
+        sample_slack_message, sample_channel_config
+    )
 
     assert features.anchor_count == 1
 
@@ -138,9 +154,13 @@ def test_calculate_score_links_capped(sample_channel_config: ChannelConfig) -> N
     assert score == 6.0
 
 
-def test_score_message_integration(sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig) -> None:
+def test_score_message_integration(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
     """Test complete message scoring."""
-    score, features = scoring_engine.score_message(sample_slack_message, sample_channel_config)
+    score, features = scoring_engine.score_message(
+        sample_slack_message, sample_channel_config
+    )
 
     assert score > 0
     assert features.has_keywords is True
@@ -161,4 +181,3 @@ def test_is_candidate_below_threshold() -> None:
 def test_is_candidate_exactly_threshold() -> None:
     """Test candidate selection exactly at threshold."""
     assert scoring_engine.is_candidate(15.0, 15.0) is True
-

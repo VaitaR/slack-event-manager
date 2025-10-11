@@ -4,7 +4,7 @@ These abstract interfaces define contracts that adapters must implement.
 """
 
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from src.domain.models import (
     Event,
@@ -19,8 +19,11 @@ class SlackClientProtocol(Protocol):
     """Protocol for Slack API interactions."""
 
     def fetch_messages(
-        self, channel_id: str, oldest_ts: str | None = None, latest_ts: str | None = None
-    ) -> list[dict[str, any]]:
+        self,
+        channel_id: str,
+        oldest_ts: str | None = None,
+        latest_ts: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch messages from Slack channel.
 
         Args:
@@ -37,7 +40,7 @@ class SlackClientProtocol(Protocol):
         """
         ...
 
-    def get_user_info(self, user_id: str) -> dict[str, any]:
+    def get_user_info(self, user_id: str) -> dict[str, Any]:
         """Get user information by ID (with caching).
 
         Args:
@@ -51,7 +54,7 @@ class SlackClientProtocol(Protocol):
         """
         ...
 
-    def post_message(self, channel_id: str, blocks: list[dict[str, any]]) -> str:
+    def post_message(self, channel_id: str, blocks: list[dict[str, Any]]) -> str:
         """Post message with Block Kit to channel.
 
         Args:
@@ -152,9 +155,7 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
-    def update_candidate_status(
-        self, message_id: str, status: str
-    ) -> None:
+    def update_candidate_status(self, message_id: str, status: str) -> None:
         """Update candidate processing status.
 
         Args:
@@ -180,9 +181,7 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
-    def get_events_in_window(
-        self, start_dt: datetime, end_dt: datetime
-    ) -> list[Event]:
+    def get_events_in_window(self, start_dt: datetime, end_dt: datetime) -> list[Event]:
         """Get events within date window.
 
         Args:
@@ -270,4 +269,3 @@ class LLMClientProtocol(Protocol):
             RuntimeError: If no call has been made
         """
         ...
-

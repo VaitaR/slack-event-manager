@@ -143,7 +143,9 @@ def test_should_merge_events_date_too_far() -> None:
     )
 
     # Default window is 48 hours
-    assert deduplicator.should_merge_events(event1, event2, date_window_hours=48) is False
+    assert (
+        deduplicator.should_merge_events(event1, event2, date_window_hours=48) is False
+    )
 
 
 def test_should_merge_events_title_too_different() -> None:
@@ -176,7 +178,10 @@ def test_should_merge_events_title_too_different() -> None:
         source_channels=["#test"],
     )
 
-    assert deduplicator.should_merge_events(event1, event2, title_similarity_threshold=0.8) is False
+    assert (
+        deduplicator.should_merge_events(event1, event2, title_similarity_threshold=0.8)
+        is False
+    )
 
 
 def test_should_merge_events_valid_merge() -> None:
@@ -362,4 +367,3 @@ def test_deduplicate_event_list() -> None:
 
     # Should have 2 events (first two merged, third separate)
     assert len(deduplicated) == 2
-

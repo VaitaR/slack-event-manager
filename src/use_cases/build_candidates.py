@@ -92,4 +92,3 @@ def build_candidates_use_case(
         max_score=max_score,
         min_score=min_score,
     )
-

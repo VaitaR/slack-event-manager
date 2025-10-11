@@ -7,23 +7,22 @@ through the complete Slack Event Manager pipeline without any pre-filtering.
 If real Slack API is not available, it will use mock data for demonstration.
 """
 
+import os
 import sys
 import tempfile
-import os
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.adapters.llm_client import LLMClient
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
-from src.adapters.llm_client import LLMClient
 from src.config.settings import get_settings
-from src.use_cases.ingest_messages import ingest_messages_use_case
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.publish_digest import publish_digest_use_case
 
 
@@ -52,7 +51,10 @@ def create_mock_slack_client_for_releases():
                     "ts": "1759761669.628109",
                     "user": "U03CQE1JJ1M",
                     "text": "<!here> Hi everyone! :wave:\nWe’ve rolled out the *new Deposit screen* in Wallet! :rocket:\n This update includes improved UX, faster processing, and better error handling. Users can now deposit with 50+ currencies! Check out the updated docs at https://docs.company.com/wallet/deposit-v2",
-                    "reactions": [{"name": "rocket", "count": 12}, {"name": "tada", "count": 8}],
+                    "reactions": [
+                        {"name": "rocket", "count": 12},
+                        {"name": "tada", "count": 8},
+                    ],
                     "reply_count": 5,
                     "thread_ts": "1759761669.628109",
                 },
@@ -61,7 +63,10 @@ def create_mock_slack_client_for_releases():
                     "ts": "1759745592.370999",
                     "user": "U03439ZFUQ3",
                     "text": "*<!here> Hi everyone!*\nIt’s finally happened! :tada: We’ve rolled out the island with beautiful animations and improved performance. The new design system makes everything feel smoother and more responsive. Major kudos to the design team! 🎨",
-                    "reactions": [{"name": "tada", "count": 15}, {"name": "art", "count": 6}],
+                    "reactions": [
+                        {"name": "tada", "count": 15},
+                        {"name": "art", "count": 6},
+                    ],
                     "reply_count": 8,
                     "thread_ts": "1759745592.370999",
                 },
@@ -70,7 +75,10 @@ def create_mock_slack_client_for_releases():
                     "ts": "1759424187.804379",
                     "user": "U09CTU7UFTK",
                     "text": "Hey everyone :wave:\n\nExciting news: *three new tokens are now available in Wallet* (trade-only mode)! We've added SOL, MATIC, and AVAX support. This expands our ecosystem significantly. Trading pairs will be available next week. 📈\n\nDocs: https://docs.company.com/wallet/supported-tokens",
-                    "reactions": [{"name": "chart_with_upwards_trend", "count": 20}, {"name": "moneybag", "count": 12}],
+                    "reactions": [
+                        {"name": "chart_with_upwards_trend", "count": 20},
+                        {"name": "moneybag", "count": 12},
+                    ],
                     "reply_count": 12,
                     "thread_ts": "1759424187.804379",
                 },
@@ -97,7 +105,10 @@ def create_mock_slack_client_for_releases():
                     "ts": "1759300000.000000",
                     "user": "U03GHI789IJ",
                     "text": "🚨 *Security incident resolved*: Investigation completed for unusual login attempts. No data breach detected, but we've enhanced monitoring. All systems operational. Thanks for your patience!",
-                    "reactions": [{"name": "white_check_mark", "count": 22}, {"name": "shield", "count": 15}],
+                    "reactions": [
+                        {"name": "white_check_mark", "count": 22},
+                        {"name": "shield", "count": 15},
+                    ],
                     "reply_count": 6,
                     "thread_ts": "1759300000.000000",
                 },
@@ -106,10 +117,13 @@ def create_mock_slack_client_for_releases():
                     "ts": "1759250000.000000",
                     "user": "U04JKL012KL",
                     "text": "🎯 *Q4 OKRs update*: On track for 95% completion. Key achievements: 200k+ new users, 50% reduction in support tickets, 99.9% uptime maintained. Full report: company.okr.com/q4-2024",
-                    "reactions": [{"name": "target", "count": 25}, {"name": "trophy", "count": 18}],
+                    "reactions": [
+                        {"name": "target", "count": 25},
+                        {"name": "trophy", "count": 18},
+                    ],
                     "reply_count": 7,
                     "thread_ts": "1759250000.000000",
-                }
+                },
             ]
 
             print(f"📨 [MOCK] Returning {len(mock_messages)} messages")
@@ -119,7 +133,9 @@ def create_mock_slack_client_for_releases():
             """Return mock user info."""
             return {"real_name": f"User {user_id}", "name": f"user_{user_id}"}
 
-        def post_message(self, channel_id: str, blocks: list[dict[str, any]], text: str = "") -> str:
+        def post_message(
+            self, channel_id: str, blocks: list[dict[str, any]], text: str = ""
+        ) -> str:
             """Mock posting message."""
             print(f"📤 [MOCK] Would post digest to channel {channel_id}")
             return "1759761669.628109"
@@ -141,11 +157,13 @@ def run_releases_pipeline():
     # Try to use real Slack client, fallback to mock if not available
     slack_client = None
     try:
-        slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
+        slack_client = SlackClient(
+            bot_token=settings.slack_bot_token.get_secret_value()
+        )
         print("✅ Real Slack client initialized")
 
         # Test the connection by trying to fetch a small number of messages
-        test_messages = slack_client.fetch_messages("C04V0TK7UG6", limit=1)
+        slack_client.fetch_messages("C04V0TK7UG6", limit=1)
         print("✅ Slack API connection verified")
     except Exception as e:
         print(f"⚠️ Real Slack client failed: {e}")
@@ -168,10 +186,11 @@ def run_releases_pipeline():
         # Import demo LLM client from demo_e2e script
         sys.path.append(str(Path(__file__).parent))
         from demo_e2e import create_demo_llm_client
+
         llm_client = create_demo_llm_client()
 
     # Create temporary database for this run
-    temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+    temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     temp_db.close()
 
     try:
@@ -188,10 +207,7 @@ def run_releases_pipeline():
         try:
             # Fetch latest 50 messages (no timestamp filter to get most recent)
             raw_messages = slack_client.fetch_messages(
-                channel_id=releases_channel_id,
-                oldest_ts=None,
-                latest_ts=None,
-                limit=50
+                channel_id=releases_channel_id, oldest_ts=None, latest_ts=None, limit=50
             )
 
             print(f"✅ Fetched {len(raw_messages)} messages from releases channel")
@@ -203,9 +219,13 @@ def run_releases_pipeline():
             # Show first few messages for context
             print("\n📨 Recent messages (first 3):")
             for i, msg in enumerate(raw_messages[:3], 1):
-                text = msg.get('text', '')[:100] + '...' if len(msg.get('text', '')) > 100 else msg.get('text', '')
-                ts = msg.get('ts', '')
-                user = msg.get('user', 'unknown')
+                text = (
+                    msg.get("text", "")[:100] + "..."
+                    if len(msg.get("text", "")) > 100
+                    else msg.get("text", "")
+                )
+                ts = msg.get("ts", "")
+                user = msg.get("user", "unknown")
                 print(f"  {i}. [{ts}] User {user}: {text}")
 
         except Exception as e:
@@ -222,28 +242,31 @@ def run_releases_pipeline():
 
             # Get messages directly from the specific channel
             raw_messages = slack_client.fetch_messages(
-                channel_id=releases_channel_id,
-                oldest_ts=None,
-                latest_ts=None,
-                limit=50
+                channel_id=releases_channel_id, oldest_ts=None, latest_ts=None, limit=50
             )
 
             print(f"📨 Fetched {len(raw_messages)} messages from releases channel")
 
             # Process and save messages manually
             from src.use_cases.ingest_messages import process_slack_message
+
             processed_messages = [
-                process_slack_message(raw_msg, releases_channel_id) for raw_msg in raw_messages
+                process_slack_message(raw_msg, releases_channel_id)
+                for raw_msg in raw_messages
             ]
 
             saved_count = repo.save_messages(processed_messages)
 
-            ingest_result = type('IngestResult', (), {
-                'messages_fetched': len(raw_messages),
-                'messages_saved': saved_count,
-                'channels_processed': [releases_channel_id],
-                'errors': []
-            })()
+            ingest_result = type(
+                "IngestResult",
+                (),
+                {
+                    "messages_fetched": len(raw_messages),
+                    "messages_saved": saved_count,
+                    "channels_processed": [releases_channel_id],
+                    "errors": [],
+                },
+            )()
 
             print(f"📋 Channels processed: {ingest_result.channels_processed}")
             print(f"📊 Total messages fetched: {ingest_result.messages_fetched}")
@@ -257,6 +280,7 @@ def run_releases_pipeline():
         except Exception as e:
             print(f"❌ Error during ingestion: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -271,7 +295,9 @@ def run_releases_pipeline():
             print(f"📨 Found {len(messages)} messages for candidate building")
 
             for i, msg in enumerate(messages[:3], 1):
-                print(f"  {i}. {msg.message_id[:8]}...: {msg.text_norm[:50]}... (score will be calculated)")
+                print(
+                    f"  {i}. {msg.message_id[:8]}...: {msg.text_norm[:50]}... (score will be calculated)"
+                )
 
             candidate_result = build_candidates_use_case(
                 repository=repo,
@@ -283,7 +309,9 @@ def run_releases_pipeline():
             print(f"✅ Average score: {candidate_result.average_score:.2f}")
 
             if candidate_result.candidates_created == 0:
-                print("ℹ️ No candidates created - checking if messages meet scoring criteria...")
+                print(
+                    "ℹ️ No candidates created - checking if messages meet scoring criteria..."
+                )
 
                 # Show scoring details for first message
                 if messages:
@@ -300,16 +328,26 @@ def run_releases_pipeline():
 
                         try:
                             from src.services import scoring_engine
-                            score, features = scoring_engine.score_message(msg, channel_config)
-                            print(f"🔍 First message scoring: {score:.2f} (threshold: {channel_config.threshold_score})")
-                            print(f"   Features: keywords={features.has_keywords}, mentions={features.has_mention}, reactions={features.reaction_count}, replies={features.reply_count}")
+
+                            score, features = scoring_engine.score_message(
+                                msg, channel_config
+                            )
+                            print(
+                                f"🔍 First message scoring: {score:.2f} (threshold: {channel_config.threshold_score})"
+                            )
+                            print(
+                                f"   Features: keywords={features.has_keywords}, mentions={features.has_mention}, reactions={features.reaction_count}, replies={features.reply_count}"
+                            )
 
                             # Show actual text content for debugging
                             print(f"   Text sample: {msg.text_norm[:100]}...")
-                            print(f"   Blocks text: {msg.blocks_text[:100] if msg.blocks_text else 'None'}...")
+                            print(
+                                f"   Blocks text: {msg.blocks_text[:100] if msg.blocks_text else 'None'}..."
+                            )
                         except Exception as e:
                             print(f"❌ Error in scoring: {e}")
                             import traceback
+
                             traceback.print_exc()
                     else:
                         print("❌ No channel config found for message channel")
@@ -317,6 +355,7 @@ def run_releases_pipeline():
         except Exception as e:
             print(f"❌ Error during candidate building: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -347,6 +386,7 @@ def run_releases_pipeline():
         except Exception as e:
             print(f"❌ Error during event extraction: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -368,6 +408,7 @@ def run_releases_pipeline():
         except Exception as e:
             print(f"❌ Error during deduplication: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -377,8 +418,8 @@ def run_releases_pipeline():
 
         # Get events for display
         events = repo.get_events_in_window(
-            datetime.utcnow() - timedelta(days=30),  # Last 30 days
-            datetime.utcnow()
+            datetime.utcnow() - timedelta(days=30),
+            datetime.utcnow(),  # Last 30 days
         )
 
         if events:
@@ -387,7 +428,11 @@ def run_releases_pipeline():
             # Group by category
             events_by_category = {}
             for event in events:
-                category = event.category.value if hasattr(event.category, 'value') else str(event.category)
+                category = (
+                    event.category.value
+                    if hasattr(event.category, "value")
+                    else str(event.category)
+                )
                 if category not in events_by_category:
                     events_by_category[category] = []
                 events_by_category[category].append(event)
@@ -416,7 +461,7 @@ def run_releases_pipeline():
                 slack_client=slack_client,
                 repository=repo,
                 settings=settings,
-                lookback_hours=24*7,  # Last 7 days
+                lookback_hours=24 * 7,  # Last 7 days
                 target_channel=settings.slack_digest_channel_id,
                 dry_run=True,  # Don't actually post
             )
@@ -428,6 +473,7 @@ def run_releases_pipeline():
         except Exception as e:
             print(f"❌ Error during digest generation: {e}")
             import traceback
+
             traceback.print_exc()
 
         print("\n🎉 Pipeline completed successfully!")
@@ -438,6 +484,7 @@ def run_releases_pipeline():
     except Exception as e:
         print(f"❌ Pipeline failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

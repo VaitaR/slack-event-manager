@@ -172,14 +172,19 @@ def extract_events_use_case(
         candidates_processed += 1
 
         # Debug output
-        print(f"🔄 Processing candidate {candidates_processed}/{len(candidates)}: {candidate.message_id[:8]}...")
+        print(
+            f"🔄 Processing candidate {candidates_processed}/{len(candidates)}: {candidate.message_id[:8]}..."
+        )
         import sys
+
         sys.stdout.flush()
 
         try:
             # Get channel config for context
             channel_config = settings.get_channel_config(candidate.channel)
-            channel_name = channel_config.channel_name if channel_config else candidate.channel
+            channel_name = (
+                channel_config.channel_name if channel_config else candidate.channel
+            )
 
             # Call LLM
             print("   Calling LLM API...")
@@ -249,4 +254,3 @@ def extract_events_use_case(
         total_cost_usd=total_cost,
         errors=errors,
     )
-

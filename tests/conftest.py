@@ -159,4 +159,3 @@ def mock_repository() -> Mock:
     mock.get_daily_llm_cost.return_value = 0.0
     mock.get_cached_llm_response.return_value = None
     return mock
-

@@ -53,7 +53,11 @@ def process_slack_message(
     """
     # Extract basic fields
     ts = raw_msg.get("ts", "")
-    ts_dt = datetime.fromtimestamp(float(ts), tz=pytz.UTC) if ts else datetime.utcnow().replace(tzinfo=pytz.UTC)
+    ts_dt = (
+        datetime.fromtimestamp(float(ts), tz=pytz.UTC)
+        if ts
+        else datetime.utcnow().replace(tzinfo=pytz.UTC)
+    )
     user = raw_msg.get("user")
     is_bot = bool(raw_msg.get("bot_id") or raw_msg.get("subtype") == "bot_message")
     subtype = raw_msg.get("subtype")
@@ -216,12 +220,16 @@ def ingest_messages_use_case(
             elif backfill_from_date:
                 # First run with explicit backfill date
                 oldest_ts = str(backfill_from_date.timestamp())
-                print(f"📅 Channel {channel_id}: Backfill from {backfill_from_date.isoformat()}")
+                print(
+                    f"📅 Channel {channel_id}: Backfill from {backfill_from_date.isoformat()}"
+                )
             else:
                 # First run: default 30 days
                 oldest_dt = now - timedelta(days=default_backfill_days)
                 oldest_ts = str(oldest_dt.timestamp())
-                print(f"🔄 Channel {channel_id}: First run, backfill {default_backfill_days} days")
+                print(
+                    f"🔄 Channel {channel_id}: First run, backfill {default_backfill_days} days"
+                )
 
             # Fetch messages from Slack
             raw_messages = slack_client.fetch_messages(
@@ -273,7 +281,9 @@ def ingest_messages_use_case(
                 latest_ts_str = max(msg.ts for msg in processed_messages)
                 latest_ts_float = float(latest_ts_str)
                 # Add small epsilon to avoid refetching the same message
-                repository.update_last_processed_ts(channel_id, latest_ts_float + 0.000001)
+                repository.update_last_processed_ts(
+                    channel_id, latest_ts_float + 0.000001
+                )
                 print(f"✅ Updated ingestion_state for {channel_id} to {latest_ts_str}")
             elif last_ts is None:
                 # First run but no messages: still mark as processed up to now
@@ -292,4 +302,3 @@ def ingest_messages_use_case(
         channels_processed=channels_processed,
         errors=errors,
     )
-

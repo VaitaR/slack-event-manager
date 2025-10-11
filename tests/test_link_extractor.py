@@ -160,4 +160,3 @@ def test_normalize_links() -> None:
     assert "utm_source" not in normalized[0]
     assert normalized[1].startswith("https://")
     assert not normalized[2].endswith("/")
-

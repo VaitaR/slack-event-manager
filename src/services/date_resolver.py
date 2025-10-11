@@ -45,7 +45,9 @@ IN_N_PATTERN: Final[re.Pattern[str]] = re.compile(
 """Pattern to match phrases like 'in 3 days', 'in 2 weeks', 'in 1 month'."""
 
 # Pattern for "next week/month"
-NEXT_PATTERN: Final[re.Pattern[str]] = re.compile(r"next\s+(week|month)", flags=re.IGNORECASE)
+NEXT_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"next\s+(week|month)", flags=re.IGNORECASE
+)
 """Pattern to match 'next week' or 'next month' phrases."""
 
 # Pattern for date ranges like "10-12 Oct" or "Sep 5-7"
@@ -101,7 +103,9 @@ def detect_timezone(text: str) -> pytz.BaseTzInfo:
     return get_default_timezone()
 
 
-def parse_absolute_date(text: str, reference_dt: datetime | None = None) -> datetime | None:
+def parse_absolute_date(
+    text: str, reference_dt: datetime | None = None
+) -> datetime | None:
     """Parse absolute date/time from text.
 
     Args:
@@ -208,7 +212,9 @@ def parse_relative_date(
     return None
 
 
-def parse_range(text: str, reference_dt: datetime | None = None) -> tuple[datetime | None, datetime | None]:
+def parse_range(
+    text: str, reference_dt: datetime | None = None
+) -> tuple[datetime | None, datetime | None]:
     """Parse date ranges like '10-12 Oct' or 'Sep 5-7'.
 
     Args:
@@ -357,4 +363,3 @@ def resolve_event_date(
 
     # No date found, use reference (message timestamp)
     return reference_dt, None
-
