@@ -599,6 +599,66 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get events: {e}")
 
+    def get_events_in_window_filtered(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        min_confidence: float = 0.0,
+        max_events: int | None = None,
+    ) -> list[Event]:
+        """Get events within date window with filtering.
+
+        Args:
+            start_dt: Start datetime (UTC)
+            end_dt: End datetime (UTC)
+            min_confidence: Minimum confidence score (0.0-1.0)
+            max_events: Maximum number of events to return (None = unlimited)
+
+        Returns:
+            List of filtered events
+
+        Example:
+            >>> repo = SQLiteRepository("data/events.db")
+            >>> events = repo.get_events_in_window_filtered(
+            ...     start_dt=datetime(2025, 10, 1),
+            ...     end_dt=datetime(2025, 10, 13),
+            ...     min_confidence=0.7,
+            ...     max_events=10
+            ... )
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Build query with confidence filter
+            query = """
+                SELECT * FROM events
+                WHERE event_date >= ? AND event_date <= ?
+                AND confidence >= ?
+                ORDER BY event_date ASC
+            """
+
+            params: list[Any] = [
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+                min_confidence,
+            ]
+
+            # Add limit if specified
+            if max_events is not None:
+                query += " LIMIT ?"
+                params.append(max_events)
+
+            cursor.execute(query, params)
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [self._row_to_event(row) for row in rows]
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to get filtered events: {e}")
+
     def query_events(self, criteria: EventQueryCriteria) -> list[Event]:
         """Query events using criteria builder.
 

@@ -128,6 +128,31 @@ class Settings(BaseSettings):
         if "logging" in config:
             data.setdefault("log_level", config["logging"].get("level", "INFO"))
 
+        if "digest" in config:
+            data.setdefault(
+                "digest_max_events", config["digest"].get("max_events", 10)
+            )
+            data.setdefault(
+                "digest_min_confidence", config["digest"].get("min_confidence", 0.7)
+            )
+            data.setdefault(
+                "digest_lookback_hours", config["digest"].get("lookback_hours", 48)
+            )
+            data.setdefault(
+                "digest_category_priorities",
+                config["digest"].get(
+                    "category_priorities",
+                    {
+                        "product": 1,
+                        "risk": 2,
+                        "process": 3,
+                        "marketing": 4,
+                        "org": 5,
+                        "unknown": 6,
+                    },
+                ),
+            )
+
         super().__init__(**data)
 
     # Slack channels (from code, not config file)
@@ -180,6 +205,28 @@ class Settings(BaseSettings):
     )
     lookback_hours_default: int = Field(
         default=24, description="Default lookback for message ingestion (hours)"
+    )
+
+    # Digest configuration
+    digest_max_events: int | None = Field(
+        default=10, description="Maximum events per digest (None = unlimited)"
+    )
+    digest_min_confidence: float = Field(
+        default=0.7, description="Minimum confidence score for digest inclusion"
+    )
+    digest_lookback_hours: int = Field(
+        default=48, description="Default lookback window for digest events"
+    )
+    digest_category_priorities: dict[str, int] = Field(
+        default_factory=lambda: {
+            "product": 1,
+            "risk": 2,
+            "process": 3,
+            "marketing": 4,
+            "org": 5,
+            "unknown": 6,
+        },
+        description="Category priority mapping for digest sorting",
     )
 
     # Observability
