@@ -5,6 +5,7 @@ Tests digest posting to real Slack channel C06B5NJLY4B.
 
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -64,7 +65,7 @@ def real_repository() -> SQLiteRepository:
 
 
 @pytest.fixture
-def test_repository(tmp_path: pytest.TempPathFactory) -> SQLiteRepository:
+def test_repository(tmp_path: Path) -> SQLiteRepository:
     """Create test repository with sample data for unit tests."""
     db_path = str(tmp_path / "test_digest_e2e.db")
     repo = SQLiteRepository(db_path=db_path)
@@ -203,7 +204,9 @@ def test_digest_confidence_filtering(test_repository: SQLiteRepository) -> None:
 
     # Assert - Should exclude low confidence events
     assert result.events_included <= 3  # Only events with confidence >= 0.8
-    print(f"✓ Confidence filter test passed: {result.events_included} high-confidence events")
+    print(
+        f"✓ Confidence filter test passed: {result.events_included} high-confidence events"
+    )
 
 
 def test_digest_max_events_limit(test_repository: SQLiteRepository) -> None:
@@ -322,7 +325,7 @@ def test_digest_with_settings_defaults(test_repository: SQLiteRepository) -> Non
     )
 
 
-def test_digest_empty_results(tmp_path: pytest.TempPathFactory) -> None:
+def test_digest_empty_results(tmp_path: Path) -> None:
     """Test digest when no events match the criteria."""
     # Arrange
     settings = get_settings()
@@ -345,4 +348,3 @@ def test_digest_empty_results(tmp_path: pytest.TempPathFactory) -> None:
     assert result.events_included == 0
     assert result.messages_posted == 0
     print("✓ Empty results test passed: 0 events handled gracefully")
-

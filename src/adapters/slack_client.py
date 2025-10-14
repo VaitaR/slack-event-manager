@@ -90,7 +90,7 @@ class SlackClient:
                     break
 
                 # Check for more pages
-                cursor = response.get("response_metadata", {}).get("next_cursor")  # type: ignore[call-overload]
+                cursor = response.get("response_metadata", {}).get("next_cursor")
                 if not cursor:
                     break
 

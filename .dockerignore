@@ -57,7 +57,3 @@ scripts/quick_test.py
 .env.example
 .DS_Store
 *.bak
-
-
-
-

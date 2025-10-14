@@ -62,6 +62,11 @@ disallow_incomplete_defs = false
 module = ["src.adapters.slack_client", "src.config.settings"]
 warn_return_any = false
 
+[[tool.mypy.overrides]]
+module = ["app", "scripts.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -88,4 +93,3 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
-

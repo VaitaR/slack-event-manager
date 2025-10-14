@@ -129,9 +129,7 @@ class Settings(BaseSettings):
             data.setdefault("log_level", config["logging"].get("level", "INFO"))
 
         if "digest" in config:
-            data.setdefault(
-                "digest_max_events", config["digest"].get("max_events", 10)
-            )
+            data.setdefault("digest_max_events", config["digest"].get("max_events", 10))
             data.setdefault(
                 "digest_min_confidence", config["digest"].get("min_confidence", 0.7)
             )

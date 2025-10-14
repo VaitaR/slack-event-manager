@@ -50,7 +50,10 @@ EOF
 # 3. Configure application (config.yaml with non-sensitive settings)
 # Edit config.yaml with your settings
 
-# 4. Verify configuration
+# 4. Set up pre-commit hooks (automatic code quality checks)
+pre-commit install
+
+# 5. Verify configuration
 python -c "from src.config.settings import get_settings; s = get_settings(); print(f'✅ Settings loaded: {s.llm_model}, temp={s.llm_temperature}')"
 ```
 
@@ -95,6 +98,7 @@ python -m pytest tests/ --cov=src --cov-report=html
 - **Type hints** required for all functions and variables
 - **Google-style docstrings** for all public APIs
 - **async/await** patterns for I/O operations where applicable
+- **Pre-commit hooks** automatically enforce code quality (see [PRE_COMMIT_SETUP.md](PRE_COMMIT_SETUP.md))
 
 ### Code Organization
 ```
@@ -534,6 +538,29 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 - Use `--lookback-hours` to override
 
 ## Recent Changes
+
+### 2025-10-14: Pre-commit Hooks Setup ✅
+
+**Automated Code Quality:**
+- ✅ Added `.pre-commit-config.yaml` with ruff, mypy, and file checks
+- ✅ Pre-commit configuration aligned with CI/CD pipeline
+- ✅ Auto-fixes formatting and linting issues before commit
+- ✅ Added `pre-commit>=3.6.0` to requirements.txt
+- ✅ Updated `pyproject.toml` to relax mypy checks for app.py and scripts
+- ✅ Documentation: `PRE_COMMIT_SETUP.md` with setup and usage guide
+
+**Code Quality Fixes:**
+- ✅ Fixed missing `from typing import Any` import in `sqlite_repository.py`
+- ✅ Removed unused imports from `test_publish_digest.py`
+- ✅ Fixed `pytest.TempPathFactory` → `Path` type annotations in tests
+- ✅ Removed unused `type: ignore` comment in `slack_client.py`
+- ✅ All 108 tests passing with strict type checking
+
+**Benefits:**
+- 🚀 Instant feedback on code quality issues
+- 🔧 Auto-fixes common problems (formatting, linting, whitespace)
+- 🎯 Consistent code quality across all developers
+- ✅ CI/CD alignment ensures no surprises in GitHub Actions
 
 ### 2025-10-13: Compact Digest Format ✅
 

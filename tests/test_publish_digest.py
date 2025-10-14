@@ -4,7 +4,6 @@ Tests confidence filtering, max events limit, category sorting, and block buildi
 """
 
 from datetime import datetime, timedelta
-from typing import Any
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -14,7 +13,7 @@ import pytz
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
-from src.domain.models import DigestResult, Event, EventCategory
+from src.domain.models import Event, EventCategory
 from src.use_cases.publish_digest import (
     build_digest_blocks,
     build_event_block,
@@ -315,7 +314,10 @@ def test_build_digest_blocks_empty() -> None:
 def test_chunk_blocks_under_limit() -> None:
     """Test chunking blocks under the limit."""
     # Arrange
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"Block {i}"}} for i in range(10)]
+    blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"Block {i}"}}
+        for i in range(10)
+    ]
 
     # Act
     chunks = chunk_blocks(blocks, max_blocks=50)
@@ -328,7 +330,10 @@ def test_chunk_blocks_under_limit() -> None:
 def test_chunk_blocks_over_limit() -> None:
     """Test chunking blocks over the limit."""
     # Arrange
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"Block {i}"}} for i in range(100)]
+    blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"Block {i}"}}
+        for i in range(100)
+    ]
 
     # Act
     chunks = chunk_blocks(blocks, max_blocks=50)
@@ -501,5 +506,6 @@ def test_publish_digest_use_case_uses_settings_defaults(
     # Assert
     call_args = mock_repository.get_events_in_window_filtered.call_args
     assert call_args.kwargs["min_confidence"] == mock_settings.digest_min_confidence
-    assert result.events_included <= (mock_settings.digest_max_events or len(sample_events))
-
+    assert result.events_included <= (
+        mock_settings.digest_max_events or len(sample_events)
+    )

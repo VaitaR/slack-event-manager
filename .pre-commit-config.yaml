@@ -1,0 +1,66 @@
+# Pre-commit hooks configuration
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Ruff - Fast Python linter and formatter (replaces black, isort, flake8)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run the formatter (must be before linter)
+      - id: ruff-format
+        types_or: [python, pyi]
+      # Run the linter (auto-fix in pre-commit, check-only in CI)
+      - id: ruff
+        args: [--fix]
+        types_or: [python, pyi]
+
+  # Basic file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '^.*\.md$'
+      - id: end-of-file-fixer
+        exclude: '^.*\.md$'
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-json
+      - id: check-toml
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # MyPy - Static type checking (matches CI/CD: checks src and tests)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-pytz
+          - types-PyYAML
+          - types-python-dateutil
+          - types-requests
+          - pydantic>=2.6.0
+          - pydantic-settings>=2.2.0
+          - pytest>=8.0.0
+        args: [--strict]
+        files: '^(src/|tests/)'
+
+# Global settings
+default_language_version:
+  python: python3.11
+
+# Skip these hooks in CI (optional)
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
