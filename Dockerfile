@@ -26,3 +26,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Default command: run pipeline with 1-hour interval
 CMD ["python", "scripts/run_pipeline.py", "--interval-seconds", "3600"]
 
+
+
+
