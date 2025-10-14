@@ -13,16 +13,6 @@ from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import DigestResult, Event, EventCategory
 
-# Category priorities (lower = higher priority)
-CATEGORY_PRIORITY = {
-    EventCategory.PRODUCT: 1,
-    EventCategory.RISK: 2,
-    EventCategory.PROCESS: 3,
-    EventCategory.MARKETING: 4,
-    EventCategory.ORG: 5,
-    EventCategory.UNKNOWN: 6,
-}
-
 
 def format_event_date(event_date: datetime, tz_name: str = "Europe/Amsterdam") -> str:
     """Format event date for display.
@@ -104,40 +94,15 @@ def build_event_block(event: Event, tz_name: str) -> dict[str, Any]:
         end_str = format_event_date(event.event_end, tz_name)
         date_str = f"{date_str} - {end_str}"
 
-    # Build title line
-    confidence_icon = get_confidence_icon(event.confidence)
-    title_line = f"{emoji} *{event.title}*"
-    if event.confidence < 0.7:
-        title_line += f" {confidence_icon}"
-
-    # Build detail line
-    details = [date_str]
-
-    # Add links (max 3)
-    if event.links:
-        for link in event.links[:3]:
-            # Extract domain for display
-            try:
-                from urllib.parse import urlparse
-
-                domain = urlparse(link).netloc or link
-                details.append(f"<{link}|{domain}>")
-            except Exception:
-                details.append(f"<{link}|link>")
-
-    detail_line = " · ".join(details)
-
-    # Build summary (optional, if not too long)
-    summary_line = ""
-    if event.summary and len(event.summary) <= 200:
-        summary_line = f"\n_{event.summary}_"
-
-    text = f"{title_line}\n{detail_line}{summary_line}"
+    # Compact format: only category emoji + title
+    text = f"{emoji} {event.title}"
 
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
 
-def sort_events_for_digest(events: list[Event]) -> list[Event]:
+def sort_events_for_digest(
+    events: list[Event], category_priorities: dict[str, int] | None = None
+) -> list[Event]:
     """Sort events for digest display.
 
     Primary: event_date ASC
@@ -146,6 +111,7 @@ def sort_events_for_digest(events: list[Event]) -> list[Event]:
 
     Args:
         events: List of events
+        category_priorities: Category priority mapping (lower = higher priority)
 
     Returns:
         Sorted list
@@ -154,11 +120,21 @@ def sort_events_for_digest(events: list[Event]) -> list[Event]:
         >>> events = [Event(...), Event(...)]
         >>> sorted_events = sort_events_for_digest(events)
     """
+    if category_priorities is None:
+        category_priorities = {
+            "product": 1,
+            "risk": 2,
+            "process": 3,
+            "marketing": 4,
+            "org": 5,
+            "unknown": 6,
+        }
+
     return sorted(
         events,
         key=lambda e: (
             e.event_date,
-            CATEGORY_PRIORITY.get(e.category, 99),
+            category_priorities.get(e.category.value, 99),
             -e.confidence,
         ),
     )
@@ -265,25 +241,30 @@ def publish_digest_use_case(
     slack_client: SlackClient,
     repository: SQLiteRepository,
     settings: Settings,
-    lookback_hours: int = 48,
+    lookback_hours: int | None = None,
     target_channel: str | None = None,
     dry_run: bool = False,
+    min_confidence: float | None = None,
+    max_events: int | None = None,
 ) -> DigestResult:
     """Publish daily event digest to Slack.
 
-    1. Query events for date range
+    1. Query events for date range with filtering
     2. Sort by date, category, confidence
-    3. Build Slack Block Kit
-    4. Chunk if needed
-    5. Post to channel
+    3. Apply max events limit
+    4. Build Slack Block Kit
+    5. Chunk if needed
+    6. Post to channel
 
     Args:
         slack_client: Slack client
         repository: Data repository
         settings: Application settings
-        lookback_hours: Hours to look back
+        lookback_hours: Hours to look back (defaults to settings.digest_lookback_hours)
         target_channel: Override digest channel
         dry_run: If True, don't post, just build
+        min_confidence: Minimum confidence score (defaults to settings.digest_min_confidence)
+        max_events: Maximum events to include (defaults to settings.digest_max_events)
 
     Returns:
         DigestResult with counts
@@ -291,17 +272,42 @@ def publish_digest_use_case(
     Example:
         >>> result = publish_digest_use_case(slack, repo, settings)
         >>> result.events_included
-        23
+        10
+        >>> result = publish_digest_use_case(
+        ...     slack, repo, settings, min_confidence=0.8, max_events=20
+        ... )
+        >>> result.events_included <= 20
+        True
     """
+    # Use settings defaults if not provided
+    if lookback_hours is None:
+        lookback_hours = settings.digest_lookback_hours
+    if min_confidence is None:
+        min_confidence = settings.digest_min_confidence
+    if max_events is None:
+        max_events = settings.digest_max_events
+
     # Get events from window
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
     start_dt = now - timedelta(hours=lookback_hours)
     end_dt = now
 
-    events = repository.get_events_in_window(start_dt, end_dt)
+    # Fetch events with database-level filtering
+    events = repository.get_events_in_window_filtered(
+        start_dt=start_dt,
+        end_dt=end_dt,
+        min_confidence=min_confidence,
+        max_events=None,  # Apply limit after sorting for better prioritization
+    )
 
-    # Sort events
-    sorted_events = sort_events_for_digest(events)
+    # Sort events by priority
+    sorted_events = sort_events_for_digest(
+        events, category_priorities=settings.digest_category_priorities
+    )
+
+    # Apply max events limit after sorting
+    if max_events is not None and len(sorted_events) > max_events:
+        sorted_events = sorted_events[:max_events]
 
     # Build blocks
     date_str = now.astimezone(pytz.timezone(settings.tz_default)).strftime("%d.%m.%Y")

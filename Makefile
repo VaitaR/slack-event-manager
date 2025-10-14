@@ -91,4 +91,3 @@ pre-commit: format-check lint typecheck ## Run pre-commit checks (fast)
 
 pre-push: ci-local ## Run pre-push checks (full CI)
 	@echo "$(GREEN)✓ Pre-push checks passed! Safe to push.$(NC)"
-

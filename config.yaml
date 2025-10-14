@@ -16,7 +16,7 @@ database:
 
 # Slack Configuration
 slack:
-  digest_channel_id: YOUR_SLACK_CHANNEL_ID  # Channel for publishing digests
+  digest_channel_id: C06B5NJLY4B  # Channel for publishing digests
   lookback_hours_default: 24  # Default lookback for message ingestion
 
 # Processing Configuration
@@ -30,7 +30,19 @@ deduplication:
   title_similarity: 0.8
   message_lookback_days: 30
 
+# Digest Configuration
+digest:
+  max_events: 10  # Default maximum events per digest (null = unlimited)
+  min_confidence: 0.7  # Minimum confidence score to include (0.0-1.0)
+  lookback_hours: 48  # Default lookback window for events
+  category_priorities:
+    product: 1
+    risk: 2
+    process: 3
+    marketing: 4
+    org: 5
+    unknown: 6
+
 # Observability
 logging:
   level: INFO
-
