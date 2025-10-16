@@ -1,17 +1,17 @@
 # AGENTS.md
 
-**Last Updated:** 2025-10-10  
-**Status:** ✅ MVP Complete - Production Ready + Code Quality Enhanced
+**Last Updated:** 2025-10-16  
+**Status:** ✅ MVP Complete - Production Ready + PostgreSQL Support
 
 ## Project Overview
 
-This is a **Slack Event Manager** that processes messages from Slack channels to extract and categorize release information, product updates, and other relevant events. The system uses AI (OpenAI LLM) to parse unstructured Slack messages and stores structured data in SQLite (with ClickHouse migration path) for analysis and monitoring.
+This is a **Slack Event Manager** that processes messages from Slack channels to extract and categorize release information, product updates, and other relevant events. The system uses AI (OpenAI LLM) to parse unstructured Slack messages and stores structured data in SQLite (development) or PostgreSQL (production) for analysis and monitoring.
 
 **Key Components:**
 - **Slack API Integration**: Fetches messages from specified Slack channels (✅ with rate limit handling)
 - **LLM Processing**: Uses OpenAI GPT-5-nano to extract structured data (✅ with comprehensive logging)
 - **Scoring Engine**: Intelligent candidate selection with configurable weights
-- **SQLite Storage**: Stores processed events (easy ClickHouse migration path)
+- **Database Storage**: SQLite (development) or PostgreSQL (production) with connection pooling
 - **Deduplication**: Merges similar events across messages using fuzzy matching
 - **Airflow Orchestration**: DAG file ready for automation
 
@@ -34,7 +34,8 @@ Candidate Building → LLM Extraction → Deduplication → Storage → Digest P
 - Python 3.11+
 - Slack Bot Token with appropriate permissions (channels:read, channels:history, groups:read, groups:history)
 - OpenAI API Key
-- SQLite (included with Python)
+- SQLite (included with Python) or PostgreSQL 16+ (for production)
+- Docker & Docker Compose (for containerized deployment)
 
 ### Installation
 ```bash
@@ -114,6 +115,8 @@ src/
 │   ├── slack_client.py
 │   ├── llm_client.py
 │   ├── sqlite_repository.py
+│   ├── postgres_repository.py    # PostgreSQL adapter (NEW 2025-10-16)
+│   ├── repository_factory.py     # Factory pattern (NEW 2025-10-16)
 │   └── query_builders.py         # Query criteria (NEW 2025-10-10)
 ├── services/           # Domain services
 │   ├── text_normalizer.py
@@ -271,7 +274,13 @@ llm:
   daily_budget_usd: 10.0
 
 database:
-  path: data/slack_events.db
+  type: sqlite  # or 'postgres' for production
+  path: data/slack_events.db  # used only for SQLite
+  postgres:  # used only when type: postgres
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
 
 slack:
   digest_channel_id: D07T451C1KK
@@ -336,12 +345,51 @@ Automatic retry with exponential backoff for transient failures:
 - **User IDs** should be handled carefully
 - **Consider data retention policies** for compliance
 
+## Database Configuration
+
+### SQLite (Development)
+- **Default configuration** for local development
+- **No additional setup** required
+- **File-based storage** in `data/` directory
+- **Perfect for testing** and prototyping
+
+```yaml
+# config.yaml
+database:
+  type: sqlite
+  path: data/slack_events.db
+```
+
+### PostgreSQL (Production)
+- **Recommended for production** microservices
+- **Connection pooling** for high concurrency
+- **ACID compliance** with strict transaction guarantees
+- **JSONB support** for efficient JSON querying
+
+Setup:
+1. Install PostgreSQL 16+
+2. Create database: `createdb slack_events`
+3. Update `config.yaml`:
+   ```yaml
+   database:
+     type: postgres
+     postgres:
+       host: localhost
+       port: 5432
+       database: slack_events
+       user: postgres
+   ```
+4. Set password in `.env`: `POSTGRES_PASSWORD=your_password`
+5. Run migrations: `alembic upgrade head`
+
+See **[MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md)** for complete guide.
+
 ## Performance Optimization
 
 ### Database Performance
-- **Batch inserts** for ClickHouse operations
-- **Connection pooling** for database connections
-- **Index optimization** based on query patterns
+- **Batch inserts** for PostgreSQL operations
+- **Connection pooling** for efficient resource management
+- **Index optimization** based on query patterns (dedup_key, event_date)
 
 ### API Efficiency
 - **Bulk message fetching** with appropriate limits
@@ -538,6 +586,40 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 - Use `--lookback-hours` to override
 
 ## Recent Changes
+
+### 2025-10-16: PostgreSQL Migration Support ✅
+
+**Database Flexibility:**
+- ✅ Added PostgreSQL repository adapter with connection pooling (`postgres_repository.py`)
+- ✅ Implemented repository factory pattern for database abstraction
+- ✅ Alembic migration system with initial schema (6 tables, 2 indexes)
+- ✅ Docker Compose integration with PostgreSQL 16-alpine service
+- ✅ Automatic migrations via docker-entrypoint.sh
+- ✅ Full backward compatibility with SQLite
+
+**Configuration:**
+- ✅ Extended `Settings` with database type selection (sqlite/postgres)
+- ✅ Updated `config.yaml` with PostgreSQL section
+- ✅ Environment variable support for PostgreSQL credentials
+- ✅ Docker networking and health checks configured
+
+**Testing:**
+- ✅ PostgreSQL test fixtures in `conftest.py`
+- ✅ Comprehensive test suite (`test_postgres_repository.py`)
+- ✅ Makefile target for PostgreSQL testing with Docker
+- ✅ All existing tests pass with both adapters
+
+**Documentation:**
+- ✅ Complete migration guide: `MIGRATION_TO_POSTGRES.md`
+- ✅ Updated README.md with database configuration
+- ✅ Updated AGENTS.md with PostgreSQL setup instructions
+- ✅ Alembic configuration and migration files
+
+**Benefits:**
+- 🚀 Production-ready with connection pooling and ACID compliance
+- 🔧 Zero code changes to switch between SQLite and PostgreSQL
+- 🎯 Maintains 100% backward compatibility
+- ✅ Industry-standard database for microservices
 
 ### 2025-10-14: Pre-commit Hooks Setup ✅
 

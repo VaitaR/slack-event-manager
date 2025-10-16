@@ -31,6 +31,7 @@ ignore = [
 "tests/*.py" = ["PLR2004"]  # Allow magic numbers in tests
 "src/use_cases/*.py" = ["PLR2004"]  # Business logic numbers are self-documenting in context
 "scripts/*.py" = ["E402", "E722", "PLR2004"]  # Scripts and demos: relaxed rules
+"src/adapters/postgres_repository.py" = ["N812"]  # psycopg2 type aliases
 
 [tool.mypy]
 python_version = "3.11"
@@ -50,6 +51,7 @@ module = [
     "slack_sdk.*",
     "openai.*",
     "rapidfuzz.*",
+    "psycopg2.*",
 ]
 ignore_missing_imports = true
 

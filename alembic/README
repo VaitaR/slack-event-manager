@@ -1,0 +1,34 @@
+Generic single-database configuration for Alembic migrations.
+
+## Running Migrations
+
+Set environment variables for PostgreSQL connection:
+```bash
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export POSTGRES_DATABASE=slack_events
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=your_password
+```
+
+Then run migrations:
+```bash
+# Upgrade to latest
+alembic upgrade head
+
+# Check current version
+alembic current
+
+# Show migration history
+alembic history
+
+# Downgrade one version
+alembic downgrade -1
+```
+
+## Creating New Migrations
+
+```bash
+# Create a new migration
+alembic revision -m "description of changes"
+```

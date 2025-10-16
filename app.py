@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 import sqlite3
 
 from adapters.llm_client import LLMClient
+from adapters.repository_factory import create_repository
 from adapters.slack_client import SlackClient
-from adapters.sqlite_repository import SQLiteRepository
 from config.settings import get_settings
 from use_cases.build_candidates import build_candidates_use_case
 from use_cases.deduplicate_events import deduplicate_events_use_case
@@ -166,7 +166,7 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
 
             # Create database if it doesn't exist
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
-            repo = SQLiteRepository(db_path)
+            repo = create_repository(settings)
 
             # Progress tracking
             progress_bar = st.progress(0)

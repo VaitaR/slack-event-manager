@@ -38,6 +38,7 @@ logs/*.log
 # Documentation (not needed in container)
 *.md
 !README.md
+!alembic/README
 
 # Docker
 Dockerfile

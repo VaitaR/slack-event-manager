@@ -12,7 +12,15 @@ llm:
 
 # Database Configuration
 database:
-  path: data/slack_events.db
+  type: sqlite  # sqlite or postgres (override with DATABASE_TYPE env var)
+  path: data/slack_events.db  # for sqlite
+  # PostgreSQL settings (used when type: postgres)
+  postgres:
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
+    # password is set via POSTGRES_PASSWORD environment variable
 
 # Slack Configuration
 slack:

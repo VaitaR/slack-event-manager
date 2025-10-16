@@ -9,7 +9,7 @@ AI-powered event extraction and digest system for Slack channels. Automatically 
 - 🔗 **Anchor detection**: Extracts Jira keys, GitHub issues, meeting links, document IDs
 - 📅 **Smart date resolution**: Handles absolute, relative dates, ranges, and timezones
 - 🔄 **Deduplication**: Merges similar events across messages with fuzzy matching
-- 💾 **Local storage**: SQLite database (easy migration to ClickHouse later)
+- 💾 **Flexible storage**: SQLite (development) or PostgreSQL (production)
 - 💰 **Budget control**: Daily LLM cost tracking with graceful degradation
 - 🌍 **Multi-channel**: Whitelist channels with per-channel configurations
 - 📨 **Digest publishing**: Beautiful Slack Block Kit digests
@@ -322,7 +322,7 @@ Plus auxiliary tables:
 - **llm_calls**: LLM API call metadata and costs
 - **channel_watermarks**: Incremental processing state
 
-Schema is designed for easy migration to ClickHouse.
+Supports both SQLite (development) and PostgreSQL (production) through repository factory pattern.
 
 ## Development
 
@@ -394,6 +394,22 @@ sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY even
 
 ## Recent Updates
 
+### 2025-10-16: PostgreSQL Migration Support ✅
+
+**Production Database:**
+- ✅ PostgreSQL 16 adapter with connection pooling
+- ✅ Alembic migrations for schema versioning
+- ✅ Docker Compose integration with automatic migrations
+- ✅ Repository factory pattern for database abstraction
+- ✅ Full backward compatibility with SQLite
+- ✅ See `MIGRATION_TO_POSTGRES.md` for details
+
+**Deployment:**
+- ✅ Docker entrypoint with auto-migration
+- ✅ PostgreSQL health checks and networking
+- ✅ Streamlit UI works with both databases
+- ✅ Zero code changes to switch databases
+
 ### 2025-10-10: Configuration Refactoring ✅
 
 **Secrets vs Config Separation:**
@@ -428,11 +444,49 @@ sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY even
 - ✅ Rate limiting handled gracefully
 - ✅ Comprehensive logging added
 
+## Database Configuration
+
+### SQLite (Default - Development)
+Perfect for local development and testing. No additional setup required.
+
+```yaml
+# config.yaml
+database:
+  type: sqlite
+  path: data/slack_events.db
+```
+
+### PostgreSQL (Production)
+Recommended for production deployment with Docker.
+
+```yaml
+# config.yaml
+database:
+  type: postgres
+  postgres:
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
+```
+
+Set password in `.env`:
+```bash
+POSTGRES_PASSWORD=your_secure_password
+```
+
+Run migrations:
+```bash
+alembic upgrade head
+```
+
+See [MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md) for complete migration guide.
+
 ## Future Enhancements
 
 Planned for post-MVP:
 
-- [ ] ClickHouse migration for production scale
+- [x] PostgreSQL support for production scale
 - [ ] Airflow DAG orchestration (hourly/daily)
 - [ ] Thread/reply processing
 - [ ] Edit/delete event handling

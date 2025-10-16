@@ -5,7 +5,7 @@ Non-sensitive configuration is loaded from config.yaml.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import Field, SecretStr, field_validator
@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # OpenAI configuration
     openai_api_key: SecretStr = Field(..., description="OpenAI API key (from .env)")
 
+    # PostgreSQL configuration (secrets from .env)
+    postgres_password: SecretStr | None = Field(
+        default=None, description="PostgreSQL password (from .env, optional)"
+    )
+
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
 
     def __init__(self, **data: Any):
@@ -79,10 +84,8 @@ class Settings(BaseSettings):
                 "llm_max_events_per_msg", config["llm"].get("max_events_per_msg", 5)
             )
 
-        if "database" in config:
-            data.setdefault(
-                "db_path", config["database"].get("path", "data/slack_events.db")
-            )
+        # NOTE: database settings (database_type, postgres_*) are NOT loaded from config.yaml
+        # to allow environment variables to take precedence. Use defaults in Field() or env vars.
 
         if "slack" in config:
             data.setdefault(
@@ -177,9 +180,18 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = Field(default=120, description="LLM request timeout")
 
     # Database configuration
+    database_type: Literal["sqlite", "postgres"] = Field(
+        default="sqlite", description="Database type: sqlite or postgres"
+    )
     db_path: str = Field(
         default="data/slack_events.db", description="SQLite database path"
     )
+    postgres_host: str = Field(default="localhost", description="PostgreSQL host")
+    postgres_port: int = Field(default=5432, description="PostgreSQL port")
+    postgres_database: str = Field(
+        default="slack_events", description="PostgreSQL database name"
+    )
+    postgres_user: str = Field(default="postgres", description="PostgreSQL user")
 
     # Processing configuration
     tz_default: str = Field(

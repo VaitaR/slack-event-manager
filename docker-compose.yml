@@ -1,11 +1,38 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: slack_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-slack_events}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - slack_network
+    restart: unless-stopped
+
   slack-bot:
     build: .
     container_name: slack_event_manager
     env_file: .env
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_TYPE=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-slack_events}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -15,23 +42,44 @@ services:
       interval: 5m
       timeout: 10s
       retries: 3
+    networks:
+      - slack_network
 
   streamlit-ui:
     build: .
     container_name: slack_streamlit
     env_file: .env
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      slack-bot:
+        condition: service_started
+    environment:
+      - DATABASE_TYPE=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-slack_events}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
     ports:
       - "8501:8501"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs:ro
     command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
-    depends_on:
-      - slack-bot
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - slack_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  slack_network:
+    driver: bridge

@@ -1,6 +1,8 @@
 """Pytest configuration and shared fixtures."""
 
+import os
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -159,3 +161,75 @@ def mock_repository() -> Mock:
     mock.get_daily_llm_cost.return_value = 0.0
     mock.get_cached_llm_response.return_value = None
     return mock
+
+
+@pytest.fixture
+def sqlite_repository(tmp_path: Path):
+    """SQLite repository for testing.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture
+
+    Returns:
+        SQLiteRepository instance with temporary database
+    """
+    from src.adapters.sqlite_repository import SQLiteRepository
+
+    db_path = tmp_path / "test.db"
+    return SQLiteRepository(str(db_path))
+
+
+@pytest.fixture
+def postgres_repository():
+    """PostgreSQL repository for testing.
+
+    Requires PostgreSQL test database to be available via environment variables.
+    Skips test if PostgreSQL is not configured.
+
+    Returns:
+        PostgresRepository instance
+
+    Environment Variables:
+        POSTGRES_HOST: PostgreSQL host (default: localhost)
+        POSTGRES_PORT: PostgreSQL port (default: 5432)
+        POSTGRES_DATABASE: Database name (default: postgres)
+        POSTGRES_USER: Database user (default: postgres)
+        POSTGRES_PASSWORD: Database password (required)
+    """
+    from src.adapters.postgres_repository import PostgresRepository
+
+    # Check if PostgreSQL test environment is configured
+    postgres_password = os.getenv("POSTGRES_PASSWORD")
+    if not postgres_password:
+        pytest.skip(
+            "PostgreSQL test database not configured (POSTGRES_PASSWORD not set)"
+        )
+
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = int(os.getenv("POSTGRES_PORT", "5432"))
+    database = os.getenv("POSTGRES_DATABASE", "postgres")
+    user = os.getenv("POSTGRES_USER", "postgres")
+
+    # Create repository
+    repo = PostgresRepository(
+        host=host, port=port, database=database, user=user, password=postgres_password
+    )
+
+    # Clean up tables before tests
+    try:
+        with repo._get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS ingestion_state CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS channel_watermarks CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS llm_calls CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS events CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS event_candidates CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS raw_slack_messages CASCADE")
+            conn.commit()
+    except Exception:
+        pass  # Tables might not exist yet
+
+    yield repo
+
+    # Cleanup after tests
+    repo.close()
