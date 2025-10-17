@@ -1,7 +1,6 @@
 """SQLite repository adapter for local storage.
 
 Implements RepositoryProtocol with SQLite backend.
-Schema compatible with future ClickHouse migration.
 """
 
 import json

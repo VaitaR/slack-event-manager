@@ -5,13 +5,13 @@
 
 ## Project Overview
 
-This is a **Slack Event Manager** that processes messages from Slack channels to extract and categorize release information, product updates, and other relevant events. The system uses AI (OpenAI LLM) to parse unstructured Slack messages and stores structured data in SQLite (with ClickHouse migration path) for analysis and monitoring.
+This is a **Slack Event Manager** that processes messages from Slack channels to extract and categorize release information, product updates, and other relevant events. The system uses AI (OpenAI LLM) to parse unstructured Slack messages and stores structured data in Postgres or Sqlite
 
 **Key Components:**
 - **Slack API Integration**: Fetches messages from specified Slack channels (✅ with rate limit handling)
 - **LLM Processing**: Uses OpenAI GPT-5-nano to extract structured data (✅ with comprehensive logging)
 - **Scoring Engine**: Intelligent candidate selection with configurable weights
-- **SQLite Storage**: Stores processed events (easy ClickHouse migration path)
+- **Postgres or SQLlite Storage**: Stores processed events 
 - **Deduplication**: Merges similar events across messages using fuzzy matching
 - **Airflow Orchestration**: DAG file ready for automation
 
@@ -369,7 +369,7 @@ Automatic retry with exponential backoff for transient failures:
 ## Performance Optimization
 
 ### Database Performance
-- **Batch inserts** for ClickHouse operations
+
 - **Connection pooling** for database connections
 - **Index optimization** based on query patterns
 

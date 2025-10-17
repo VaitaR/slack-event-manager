@@ -9,7 +9,7 @@ AI-powered event extraction and digest system for Slack channels. Automatically 
 - 🔗 **Anchor detection**: Extracts Jira keys, GitHub issues, meeting links, document IDs
 - 📅 **Smart date resolution**: Handles absolute, relative dates, ranges, and timezones
 - 🔄 **Deduplication**: Merges similar events across messages with fuzzy matching
-- 💾 **Local storage**: SQLite database (easy migration to ClickHouse later)
+- 💾 **Local storage**: Postgres or SQLite
 - 💰 **Budget control**: Daily LLM cost tracking with graceful degradation
 - 🌍 **Multi-channel**: Whitelist channels with per-channel configurations
 - 📨 **Digest publishing**: Beautiful Slack Block Kit digests
@@ -351,7 +351,6 @@ Plus auxiliary tables:
 - **llm_calls**: LLM API call metadata and costs
 - **channel_watermarks**: Incremental processing state
 
-Schema is designed for easy migration to ClickHouse.
 
 ## Development
 
@@ -410,65 +409,6 @@ If daily budget is reached:
 - Pipeline stops LLM processing
 - Only high-score candidates (P90+) are processed
 - Error logged in results
-
-### Database Issues
-
-```bash
-# Check database
-sqlite3 data/slack_events.db ".tables"
-
-# View recent events
-sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY event_date DESC LIMIT 10"
-```
-
-## Recent Updates
-
-### 2025-10-10: Configuration Refactoring ✅
-
-**Secrets vs Config Separation:**
-- ✅ `.env` - Only SLACK_BOT_TOKEN and OPENAI_API_KEY
-- ✅ `config.yaml` - All non-sensitive application settings
-- ✅ Added PyYAML dependency
-- ✅ Backward compatible with `.env` overrides
-- ✅ See `CONFIG_REFACTORING.md` for details
-
-### 2025-10-10: Code Quality Enhancement ✅
-
-**Major improvements:**
-- ✅ Specification Pattern implementation (330 lines)
-- ✅ Query Builder pattern (371 lines)
-- ✅ Domain constants layer with Final type hints
-- ✅ Ruff PLR2004 enforcement (no magic numbers)
-- ✅ Type-safe database queries (no string literals)
-- ✅ 100% backward compatibility
-
-**Quality metrics:**
-- Tests: 79/79 passing ✅
-- Linters: All checks passed ✅
-- Code quality: 7/7 (100%) ✅
-- Zero breaking changes ✅
-
-### 2025-10-09: Production Validation ✅
-
-- ✅ Tested with 20 real messages
-- ✅ 100% LLM extraction success rate
-- ✅ Cost: $0.0031 for 20 messages
-- ✅ Average latency: 13.5s per LLM call
-- ✅ Rate limiting handled gracefully
-- ✅ Comprehensive logging added
-
-## Future Enhancements
-
-Planned for post-MVP:
-
-- [ ] ClickHouse migration for production scale
-- [ ] Airflow DAG orchestration (hourly/daily)
-- [ ] Thread/reply processing
-- [ ] Edit/delete event handling
-- [ ] Semantic search with embeddings
-- [ ] Calendar export (Google Calendar, ICS)
-- [ ] Real-time streaming mode
-- [ ] Web dashboard for monitoring
 
 ## License
 
