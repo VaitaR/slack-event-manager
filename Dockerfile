@@ -19,6 +19,19 @@ COPY . .
 # Create directories for data and logs
 RUN mkdir -p /app/data /app/logs
 
+# Create config files from examples if they don't exist
+# This ensures the image works even if built from a fresh git clone
+RUN for example_file in config/defaults/*.example.yaml; do \
+        if [ -f "$example_file" ]; then \
+            filename=$(basename "$example_file" .example.yaml); \
+            target="config/${filename}.yaml"; \
+            if [ ! -f "$target" ]; then \
+                cp "$example_file" "$target"; \
+                echo "Created $target from example"; \
+            fi; \
+        fi; \
+    done
+
 # Healthcheck: validate settings can be loaded
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD python -c "from src.config.settings import get_settings; get_settings(); print('OK')" || exit 1

@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Main Configuration Schema",
+  "description": "Schema for main Slack Event Manager configuration",
+  "type": "object",
+  "properties": {
+    "llm": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "OpenAI model name"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "LLM temperature (0-2)"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Request timeout in seconds"
+        },
+        "daily_budget_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Daily budget in USD"
+        },
+        "max_events_per_msg": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum events to extract per message"
+        }
+      },
+      "required": ["model"]
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to SQLite database"
+        }
+      }
+    },
+    "slack": {
+      "type": "object",
+      "properties": {
+        "digest_channel_id": {
+          "type": "string",
+          "pattern": "^[CD][A-Z0-9]+$",
+          "description": "Slack channel ID for digests"
+        },
+        "lookback_hours_default": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default lookback hours for messages"
+        }
+      }
+    },
+    "processing": {
+      "type": "object",
+      "properties": {
+        "tz_default": {
+          "type": "string",
+          "description": "Default timezone (e.g., Europe/Amsterdam)"
+        },
+        "threshold_score_default": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Default candidate threshold score"
+        }
+      }
+    },
+    "deduplication": {
+      "type": "object",
+      "properties": {
+        "date_window_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Time window for deduplication in hours"
+        },
+        "title_similarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum title similarity for merge (0-1)"
+        },
+        "message_lookback_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days to look back for messages"
+        }
+      }
+    },
+    "digest": {
+      "type": "object",
+      "properties": {
+        "max_events": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Maximum events per digest (null = unlimited)"
+        },
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum confidence score to include"
+        },
+        "lookback_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Lookback window for events in hours"
+        },
+        "category_priorities": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z]+$": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "importance": {
+      "type": "object",
+      "properties": {
+        "min_publish_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Minimum importance to publish (0-100)"
+        },
+        "high_priority_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Threshold for high-priority events"
+        },
+        "category_base_scores": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z]+$": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        "critical_subsystems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum confidence for quality filter"
+        },
+        "max_title_length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum title length"
+        },
+        "max_qualifiers": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of qualifiers"
+        },
+        "max_links": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of links"
+        },
+        "max_impact_area": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of impact areas"
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+          "description": "Logging level"
+        }
+      }
+    }
+  }
+}

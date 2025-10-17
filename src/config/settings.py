@@ -1,13 +1,18 @@
 """Application settings with Pydantic Settings validation.
 
 Secrets (tokens, API keys) are loaded from .env file.
-Non-sensitive configuration is loaded from config.yaml.
+Non-sensitive configuration is loaded from config.yaml and config/*.yaml files.
+All configs are automatically merged and validated against JSON schemas.
 """
 
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
+from jsonschema import ValidationError as JSONSchemaValidationError
+from jsonschema import validate
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,19 +24,138 @@ from src.domain.deduplication_constants import (
 from src.domain.models import ChannelConfig
 from src.domain.scoring_constants import DEFAULT_THRESHOLD_SCORE
 
+logger = logging.getLogger(__name__)
 
-def load_config_yaml() -> dict[str, Any]:
-    """Load configuration from config.yaml file.
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge two dictionaries.
+
+    Args:
+        base: Base dictionary
+        override: Dictionary to merge into base (takes precedence)
 
     Returns:
-        Configuration dictionary
+        Merged dictionary
     """
-    config_path = Path("config.yaml")
-    if not config_path.exists():
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def load_schema(schema_name: str) -> dict[str, Any]:
+    """Load JSON Schema from config/schemas/.
+
+    Args:
+        schema_name: Schema name without extension (e.g., "main")
+
+    Returns:
+        JSON Schema dictionary or empty dict if not found
+    """
+    schema_path = Path("config/schemas") / f"{schema_name}.schema.json"
+    if not schema_path.exists():
         return {}
 
-    with open(config_path) as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with open(schema_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load schema {schema_name}: {e}")
+        return {}
+
+
+def validate_config_section(
+    config: dict[str, Any], schema_name: str, file_path: str = ""
+) -> None:
+    """Validate config section against JSON Schema.
+
+    Args:
+        config: Configuration dictionary to validate
+        schema_name: Name of schema to validate against
+        file_path: Optional file path for error messages
+
+    Raises:
+        ValueError: If validation fails
+    """
+    schema = load_schema(schema_name)
+    if not schema:
+        # No schema available, skip validation
+        return
+
+    try:
+        validate(instance=config, schema=schema)
+        logger.debug(f"Config validation passed for {schema_name}")
+    except JSONSchemaValidationError as e:
+        error_msg = f"Config validation failed for {schema_name}"
+        if file_path:
+            error_msg += f" (file: {file_path})"
+        error_msg += f": {e.message}"
+        raise ValueError(error_msg) from e
+
+
+def load_all_configs() -> dict[str, Any]:
+    """Load and merge all YAML configs from config/ directory.
+
+    Loading order (later overrides earlier):
+    1. config/main.yaml (main config)
+    2. config/object_registry.yaml
+    3. config/channels.yaml
+    4. All other config/*.yaml files (sorted alphabetically)
+
+    Each config is validated against its JSON Schema if available.
+
+    Returns:
+        Merged configuration dictionary
+    """
+    merged_config: dict[str, Any] = {}
+
+    # 1. Load main config from config/main.yaml
+    main_path = Path("config/main.yaml")
+    if main_path.exists():
+        try:
+            with open(main_path, encoding="utf-8") as f:
+                main_config = yaml.safe_load(f) or {}
+                validate_config_section(main_config, "main", str(main_path))
+                merged_config = main_config
+                logger.debug(f"Loaded config from {main_path}")
+        except (yaml.YAMLError, OSError) as e:
+            logger.warning(f"Failed to load {main_path}: {e}")
+
+    # 2. Load config directory files
+    config_dir = Path("config")
+    if config_dir.exists() and config_dir.is_dir():
+        # Get all YAML files, excluding already loaded main.yaml
+        yaml_files = sorted(
+            [f for f in config_dir.glob("*.yaml") if f.name != "main.yaml"]
+        )
+
+        for yaml_file in yaml_files:
+            try:
+                with open(yaml_file, encoding="utf-8") as f:
+                    file_config = yaml.safe_load(f) or {}
+
+                    # Determine schema name from filename
+                    schema_name = yaml_file.stem  # e.g., "object_registry"
+                    validate_config_section(file_config, schema_name, str(yaml_file))
+
+                    # Deep merge
+                    merged_config = deep_merge(merged_config, file_config)
+                    logger.debug(f"Loaded and merged config from {yaml_file}")
+            except (yaml.YAMLError, OSError) as e:
+                logger.warning(f"Failed to load {yaml_file}: {e}")
+            except ValueError as e:
+                # Validation error
+                logger.error(str(e))
+                raise
+
+    file_count = (1 if main_path.exists() else 0) + (
+        len(yaml_files) if config_dir.exists() and config_dir.is_dir() else 0
+    )
+    logger.info(f"Configuration loaded and merged from {file_count} file(s)")
+    return merged_config
 
 
 class Settings(BaseSettings):
@@ -65,8 +189,8 @@ class Settings(BaseSettings):
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
 
     def __init__(self, **data: Any):
-        """Initialize settings with config.yaml defaults."""
-        config = load_config_yaml()
+        """Initialize settings with auto-loaded configs from all YAML files."""
+        config = load_all_configs()
 
         # Apply config.yaml values as defaults (can be overridden by .env)
         if "llm" in config:
@@ -351,6 +475,16 @@ class Settings(BaseSettings):
 
     # Observability
     log_level: str = Field(default="INFO", description="Logging level")
+
+    # Configuration paths
+    object_registry_path: str = Field(
+        default="config/object_registry.yaml",
+        description="Path to object registry YAML",
+    )
+    channels_config_path: str = Field(
+        default="config/channels.yaml",
+        description="Path to channels configuration YAML",
+    )
 
     @field_validator("slack_channels", mode="before")
     @classmethod

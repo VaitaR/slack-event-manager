@@ -81,20 +81,39 @@ pip install -r requirements.txt
 
 ### 2. Configuration
 
-**Secrets (`.env`):**
+**Automated Setup (Recommended):**
 ```bash
+# Run setup script - creates all config files from examples
+./scripts/setup_config.sh
+
+# Edit files with your values
+# 1. .env - Add your API tokens
+# 2. config/main.yaml - Adjust settings (optional, uses good defaults)
+# 3. config/object_registry.yaml - Add your internal systems
+# 4. config/channels.yaml - Add your Slack channels
+```
+
+**Manual Setup:**
+```bash
+# 1. Copy config files from examples
+cp config/defaults/*.example.yaml config/
+
+# 2. Create .env file
 cat > .env << 'EOF'
 SLACK_BOT_TOKEN=xoxb-your-token
 OPENAI_API_KEY=sk-your-key
 EOF
+
+# 3. Edit all files with your actual values
+# - config/main.yaml
+# - config/object_registry.yaml
+# - config/channels.yaml
 ```
 
-**Settings (`config.yaml`):**
-```bash
-# Copy example configuration and customize
-cp config.example.yaml config.yaml
-# Edit config.yaml with your channel IDs and settings
-```
+**Configuration System:**
+- All `config/*.yaml` files are automatically loaded and merged
+- Validated against JSON schemas in `config/schemas/`
+- See [CONFIG.md](CONFIG.md) for detailed documentation
 
 **Example config structure:**
 ```yaml
