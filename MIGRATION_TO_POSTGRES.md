@@ -286,6 +286,58 @@ GROUP BY state;
 - ✅ Test rollback procedure
 - ✅ Document recovery process
 
+## Database Consistency
+
+### SQLite vs PostgreSQL Behavior
+
+Both databases now behave identically during message upserts:
+
+**SQLite:**
+```sql
+INSERT OR REPLACE INTO raw_slack_messages (...) VALUES (...)
+-- Replaces entire row on conflict
+```
+
+**PostgreSQL (fixed in v1.0.0):**
+```sql
+INSERT INTO raw_slack_messages (...) VALUES (...)
+ON CONFLICT (message_id) DO UPDATE SET
+    -- All 18 mutable fields are updated:
+    user_real_name = EXCLUDED.user_real_name,
+    user_display_name = EXCLUDED.user_display_name,
+    ...
+    attachments_count = EXCLUDED.attachments_count,
+    files_count = EXCLUDED.files_count,
+    total_reactions = EXCLUDED.total_reactions,
+    ...
+```
+
+### Why This Matters
+
+Slack messages can change after initial creation:
+- Users add reactions → `total_reactions` changes
+- Users add attachments → `attachments_count` increases
+- Users add files → `files_count` increases
+- Links and anchors are extracted later → `links_raw`, `anchors` update
+- User profiles change → `user_real_name`, `user_profile_image` update
+
+**Impact:**
+- Scoring engine uses these counts to prioritize messages
+- Stale data = incorrect scoring = missed important events
+- PostgreSQL now updates ALL mutable fields on conflict (18 fields total)
+
+### Verification
+
+Test that upserts work correctly:
+
+```bash
+# Run PostgreSQL-specific tests
+TEST_POSTGRES=1 POSTGRES_PASSWORD=your_password \
+    pytest tests/test_postgres_repository.py::test_postgres_message_upsert_updates_all_mutable_fields -v
+```
+
+Expected: All 18 mutable fields should be updated when the same message is ingested again.
+
 ## Support
 
 For issues or questions:
