@@ -219,6 +219,14 @@ def merge_events(event1: Event, event2: Event) -> Event:
     max_confidence = max(event1.confidence, event2.confidence)
     max_importance = max(event1.importance, event2.importance)
 
+    # Earliest time values (prefer earlier dates for event start times)
+    def earliest_time(t1: datetime | None, t2: datetime | None) -> datetime | None:
+        if t1 is None:
+            return t2
+        if t2 is None:
+            return t1
+        return min(t1, t2)
+
     # Create merged event (keeping event1 as base)
     merged = Event(
         # Identification
@@ -239,11 +247,11 @@ def merge_events(event1: Event, event2: Event) -> Event:
         change_type=event1.change_type,
         environment=event1.environment,
         severity=event1.severity or event2.severity,
-        # Time fields (prefer event1, fallback to event2)
-        planned_start=event1.planned_start or event2.planned_start,
-        planned_end=event1.planned_end or event2.planned_end,
-        actual_start=event1.actual_start or event2.actual_start,
-        actual_end=event1.actual_end or event2.actual_end,
+        # Time fields (choose earliest times)
+        planned_start=earliest_time(event1.planned_start, event2.planned_start),
+        planned_end=earliest_time(event1.planned_end, event2.planned_end),
+        actual_start=earliest_time(event1.actual_start, event2.actual_start),
+        actual_end=earliest_time(event1.actual_end, event2.actual_end),
         time_source=event1.time_source,
         time_confidence=max(event1.time_confidence, event2.time_confidence),
         # Content (keep event1's primary, merge lists)
