@@ -1,6 +1,6 @@
 # AGENTS.md
 
-**Last Updated:** 2025-10-10  
+**Last Updated:** 2025-10-17  
 **Status:** ✅ MVP Complete - Production Ready + Code Quality Enhanced
 
 ## Project Overview
@@ -48,7 +48,8 @@ OPENAI_API_KEY=sk-your-key
 EOF
 
 # 3. Configure application (config.yaml with non-sensitive settings)
-# Edit config.yaml with your settings
+cp config.example.yaml config.yaml
+# Edit config.yaml with your channel IDs and settings
 
 # 4. Set up pre-commit hooks (automatic code quality checks)
 pre-commit install
@@ -256,6 +257,11 @@ python scripts/run_pipeline.py --interval-seconds 3600 --publish
 
 ### Configuration Structure
 
+**Configuration Files:**
+- **`.env`** - Secrets only (SLACK_BOT_TOKEN, OPENAI_API_KEY) - never committed
+- **`config.yaml`** - Application settings (in `.gitignore`, created from example)
+- **`config.example.yaml`** - Template with example values (committed to git)
+
 **`.env` (Secrets Only):**
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-token
@@ -263,6 +269,12 @@ OPENAI_API_KEY=sk-your-key
 ```
 
 **`config.yaml` (Application Settings):**
+```bash
+# Create from example
+cp config.example.yaml config.yaml
+```
+
+**Example config structure:**
 ```yaml
 llm:
   model: gpt-5-nano
@@ -538,6 +550,21 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 - Use `--lookback-hours` to override
 
 ## Recent Changes
+
+### 2025-10-17: Configuration Security Enhancement ✅
+
+**Configuration File Structure:**
+- ✅ Added `config.example.yaml` as template for new developers
+- ✅ Real `config.yaml` already in `.gitignore` (no sensitive data in git)
+- ✅ Replaced real Slack channel IDs with examples (C1234567890, etc.)
+- ✅ Replaced specific channel names with generic examples
+- ✅ Updated AGENTS.md and README.md with setup instructions
+
+**Benefits:**
+- 🔐 No sensitive channel IDs or team-specific data in git
+- 👥 Easy onboarding for new developers (copy example, customize)
+- ✅ Clear separation: example (git) vs actual config (local only)
+- 📄 Documentation updated with `cp config.example.yaml config.yaml` step
 
 ### 2025-10-14: Pre-commit Hooks Setup ✅
 

@@ -90,6 +90,13 @@ EOF
 ```
 
 **Settings (`config.yaml`):**
+```bash
+# Copy example configuration and customize
+cp config.example.yaml config.yaml
+# Edit config.yaml with your channel IDs and settings
+```
+
+**Example config structure:**
 ```yaml
 llm:
   model: gpt-5-nano
@@ -115,7 +122,10 @@ logging:
   level: INFO
 ```
 
-**Note:** `.env` contains ONLY secrets. All other settings are in `config.yaml`.
+**Note:** 
+- `.env` contains ONLY secrets (never committed to git)
+- `config.yaml` contains application settings (in `.gitignore`, created from `config.example.yaml`)
+- `config.example.yaml` is the template with example values (committed to git)
 
 ### 3. Run Pipeline
 
