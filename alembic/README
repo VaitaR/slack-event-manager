@@ -1,34 +1,39 @@
-Generic single-database configuration for Alembic migrations.
+Generic single-database configuration for Slack Event Manager.
+
+This directory contains Alembic migrations for the PostgreSQL database schema.
 
 ## Running Migrations
 
-Set environment variables for PostgreSQL connection:
-```bash
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=5432
-export POSTGRES_DATABASE=slack_events
-export POSTGRES_USER=postgres
-export POSTGRES_PASSWORD=your_password
-```
-
-Then run migrations:
+### Development
 ```bash
 # Upgrade to latest
 alembic upgrade head
 
-# Check current version
+# Downgrade one revision
+alembic downgrade -1
+
+# Show current revision
 alembic current
 
 # Show migration history
-alembic history
-
-# Downgrade one version
-alembic downgrade -1
+alembic history --verbose
 ```
+
+### Docker
+Migrations run automatically via docker-entrypoint.sh when using PostgreSQL.
 
 ## Creating New Migrations
 
 ```bash
-# Create a new migration
-alembic revision -m "description of changes"
+# Auto-generate migration from model changes
+alembic revision --autogenerate -m "description"
+
+# Create empty migration
+alembic revision -m "description"
 ```
+
+## Configuration
+
+Database connection details are loaded from Settings (config.yaml + .env).
+See alembic/env.py for configuration logic.
+

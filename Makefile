@@ -49,19 +49,19 @@ test-cov: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
 	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy pytest --cov=src --cov-report=term-missing --cov-report=html && echo "$(GREEN)✓ Tests passed with coverage$(NC)" || (echo "$(RED)✗ Tests failed$(NC)" && exit 1)
 
-test-postgres: ## Run tests with PostgreSQL (requires Docker)
-	@echo "$(BLUE)Starting PostgreSQL test container...$(NC)"
-	@docker run -d --name test-postgres -e POSTGRES_PASSWORD=test -p 5432:5432 postgres:16-alpine || true
-	@echo "$(YELLOW)Waiting for PostgreSQL to be ready...$(NC)"
-	@sleep 5
-	@echo "$(BLUE)Running tests with PostgreSQL...$(NC)"
-	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy \
-	 POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=postgres \
-	 POSTGRES_USER=postgres POSTGRES_PASSWORD=test \
-	 pytest tests/test_postgres_repository.py -v || true
-	@echo "$(BLUE)Stopping PostgreSQL container...$(NC)"
-	@docker stop test-postgres && docker rm test-postgres
-	@echo "$(GREEN)✓ PostgreSQL tests completed$(NC)"
+test-postgres: ## Run PostgreSQL tests (requires PostgreSQL running and TEST_POSTGRES=1)
+	@echo "$(BLUE)Running PostgreSQL tests...$(NC)"
+	@if [ -z "$$POSTGRES_PASSWORD" ]; then \
+		echo "$(RED)✗ POSTGRES_PASSWORD not set$(NC)"; \
+		echo "$(YELLOW)Set POSTGRES_PASSWORD and TEST_POSTGRES=1 to run PostgreSQL tests$(NC)"; \
+		exit 1; \
+	fi
+	@if [ "$$TEST_POSTGRES" != "1" ]; then \
+		echo "$(RED)✗ TEST_POSTGRES not set to 1$(NC)"; \
+		echo "$(YELLOW)Set TEST_POSTGRES=1 to run PostgreSQL tests$(NC)"; \
+		exit 1; \
+	fi
+	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy pytest tests/test_postgres_repository.py -v && echo "$(GREEN)✓ PostgreSQL tests passed$(NC)" || (echo "$(RED)✗ PostgreSQL tests failed$(NC)" && exit 1)
 
 ci: format-check lint typecheck test ## Run all CI checks (format, lint, typecheck, test)
 	@echo "$(GREEN)✓ All CI checks passed!$(NC)"

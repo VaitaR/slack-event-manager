@@ -164,72 +164,85 @@ def mock_repository() -> Mock:
 
 
 @pytest.fixture
-def sqlite_repository(tmp_path: Path):
-    """SQLite repository for testing.
-
-    Args:
-        tmp_path: Pytest temporary directory fixture
-
-    Returns:
-        SQLiteRepository instance with temporary database
-    """
-    from src.adapters.sqlite_repository import SQLiteRepository
-
-    db_path = tmp_path / "test.db"
-    return SQLiteRepository(str(db_path))
+def postgres_available() -> bool:
+    """Check if PostgreSQL is available for testing."""
+    return (
+        os.environ.get("POSTGRES_PASSWORD") is not None
+        and os.environ.get("TEST_POSTGRES", "0") == "1"
+    )
 
 
 @pytest.fixture
-def postgres_repository():
-    """PostgreSQL repository for testing.
+def postgres_test_db():
+    """Setup and teardown PostgreSQL test database.
 
-    Requires PostgreSQL test database to be available via environment variables.
-    Skips test if PostgreSQL is not configured.
+    Requires:
+        - POSTGRES_PASSWORD environment variable
+        - TEST_POSTGRES=1 environment variable
+        - PostgreSQL running on localhost:5432
 
-    Returns:
-        PostgresRepository instance
-
-    Environment Variables:
-        POSTGRES_HOST: PostgreSQL host (default: localhost)
-        POSTGRES_PORT: PostgreSQL port (default: 5432)
-        POSTGRES_DATABASE: Database name (default: postgres)
-        POSTGRES_USER: Database user (default: postgres)
-        POSTGRES_PASSWORD: Database password (required)
+    Yields:
+        PostgresRepository instance with clean test database
     """
+    # Check if PostgreSQL testing is enabled
+    if not os.environ.get("POSTGRES_PASSWORD"):
+        pytest.skip("POSTGRES_PASSWORD not set - skipping PostgreSQL tests")
+    if os.environ.get("TEST_POSTGRES", "0") != "1":
+        pytest.skip("TEST_POSTGRES=1 not set - skipping PostgreSQL tests")
+
     from src.adapters.postgres_repository import PostgresRepository
 
-    # Check if PostgreSQL test environment is configured
-    postgres_password = os.getenv("POSTGRES_PASSWORD")
-    if not postgres_password:
-        pytest.skip(
-            "PostgreSQL test database not configured (POSTGRES_PASSWORD not set)"
-        )
+    # Connect to test database
+    test_db_name = "slack_events_test"
+    password = os.environ.get("POSTGRES_PASSWORD")
+    if not password:
+        pytest.skip("POSTGRES_PASSWORD not set")
 
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = int(os.getenv("POSTGRES_PORT", "5432"))
-    database = os.getenv("POSTGRES_DATABASE", "postgres")
-    user = os.getenv("POSTGRES_USER", "postgres")
-
-    # Create repository
     repo = PostgresRepository(
-        host=host, port=port, database=database, user=user, password=postgres_password
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=int(os.environ.get("POSTGRES_PORT", "5432")),
+        database=test_db_name,
+        user=os.environ.get("POSTGRES_USER", "postgres"),
+        password=password,
+        minconn=1,
+        maxconn=2,
     )
 
-    # Clean up tables before tests
-    try:
-        with repo._get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("DROP TABLE IF EXISTS ingestion_state CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS channel_watermarks CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS llm_calls CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS events CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS event_candidates CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS raw_slack_messages CASCADE")
+    # Clean up: drop all tables before test
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DROP TABLE IF EXISTS ingestion_state CASCADE;
+                DROP TABLE IF EXISTS channel_watermarks CASCADE;
+                DROP TABLE IF EXISTS llm_calls CASCADE;
+                DROP TABLE IF EXISTS events CASCADE;
+                DROP TABLE IF EXISTS event_candidates CASCADE;
+                DROP TABLE IF EXISTS raw_slack_messages CASCADE;
+            """)
             conn.commit()
-    except Exception:
-        pass  # Tables might not exist yet
+
+    # Run migrations
+    import subprocess
+
+    subprocess.run(
+        ["alembic", "upgrade", "head"],
+        check=True,
+        capture_output=True,
+    )
 
     yield repo
 
-    # Cleanup after tests
+    # Cleanup after test
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DROP TABLE IF EXISTS ingestion_state CASCADE;
+                DROP TABLE IF EXISTS channel_watermarks CASCADE;
+                DROP TABLE IF EXISTS llm_calls CASCADE;
+                DROP TABLE IF EXISTS events CASCADE;
+                DROP TABLE IF EXISTS event_candidates CASCADE;
+                DROP TABLE IF EXISTS raw_slack_messages CASCADE;
+            """)
+            conn.commit()
+
     repo.close()

@@ -31,7 +31,8 @@ ignore = [
 "tests/*.py" = ["PLR2004"]  # Allow magic numbers in tests
 "src/use_cases/*.py" = ["PLR2004"]  # Business logic numbers are self-documenting in context
 "scripts/*.py" = ["E402", "E722", "PLR2004"]  # Scripts and demos: relaxed rules
-"src/adapters/postgres_repository.py" = ["N812"]  # psycopg2 type aliases
+"src/adapters/postgres_repository.py" = ["N812"]  # Allow lowercase Connection/Cursor type aliases
+"alembic/env.py" = ["E402"]  # Alembic: path setup before imports
 
 [tool.mypy]
 python_version = "3.11"
@@ -52,6 +53,7 @@ module = [
     "openai.*",
     "rapidfuzz.*",
     "psycopg2.*",
+    "alembic.*",
 ]
 ignore_missing_imports = true
 

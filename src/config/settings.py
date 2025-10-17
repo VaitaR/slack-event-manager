@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.config.channels import MONITORED_CHANNELS
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if Path(".env").exists() else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -59,18 +59,24 @@ class Settings(BaseSettings):
     # OpenAI configuration
     openai_api_key: SecretStr = Field(..., description="OpenAI API key (from .env)")
 
-    # PostgreSQL configuration (secrets from .env)
+    # PostgreSQL password (optional, only needed if using PostgreSQL)
     postgres_password: SecretStr | None = Field(
         default=None, description="PostgreSQL password (from .env, optional)"
     )
 
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
 
-    def __init__(self, **data: Any):
-        """Initialize settings with config.yaml defaults."""
+    @model_validator(mode="before")
+    @classmethod
+    def load_config_yaml_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Load config.yaml values as defaults if not set by environment variables.
+
+        Environment variables always take precedence over config.yaml.
+        Priority: env vars > config.yaml > Field defaults
+        """
         config = load_config_yaml()
 
-        # Apply config.yaml values as defaults (can be overridden by .env)
+        # Apply config.yaml values as defaults (env vars override via setdefault)
         if "llm" in config:
             data.setdefault("llm_model", config["llm"].get("model", "gpt-5-nano"))
             data.setdefault("llm_temperature", config["llm"].get("temperature", 1.0))
@@ -84,8 +90,20 @@ class Settings(BaseSettings):
                 "llm_max_events_per_msg", config["llm"].get("max_events_per_msg", 5)
             )
 
-        # NOTE: database settings (database_type, postgres_*) are NOT loaded from config.yaml
-        # to allow environment variables to take precedence. Use defaults in Field() or env vars.
+        if "database" in config:
+            # Load database type (sqlite or postgres) - env var takes precedence
+            data.setdefault("database_type", config["database"].get("type", "sqlite"))
+            # Load SQLite path
+            data.setdefault(
+                "db_path", config["database"].get("path", "data/slack_events.db")
+            )
+            # Load PostgreSQL settings if present
+            if "postgres" in config["database"]:
+                pg = config["database"]["postgres"]
+                data.setdefault("postgres_host", pg.get("host", "localhost"))
+                data.setdefault("postgres_port", pg.get("port", 5432))
+                data.setdefault("postgres_database", pg.get("database", "slack_events"))
+                data.setdefault("postgres_user", pg.get("user", "postgres"))
 
         if "slack" in config:
             data.setdefault(
@@ -131,30 +149,7 @@ class Settings(BaseSettings):
         if "logging" in config:
             data.setdefault("log_level", config["logging"].get("level", "INFO"))
 
-        if "digest" in config:
-            data.setdefault("digest_max_events", config["digest"].get("max_events", 10))
-            data.setdefault(
-                "digest_min_confidence", config["digest"].get("min_confidence", 0.7)
-            )
-            data.setdefault(
-                "digest_lookback_hours", config["digest"].get("lookback_hours", 48)
-            )
-            data.setdefault(
-                "digest_category_priorities",
-                config["digest"].get(
-                    "category_priorities",
-                    {
-                        "product": 1,
-                        "risk": 2,
-                        "process": 3,
-                        "marketing": 4,
-                        "org": 5,
-                        "unknown": 6,
-                    },
-                ),
-            )
-
-        super().__init__(**data)
+        return data
 
     # Slack channels (from code, not config file)
     slack_channels: list[ChannelConfig] = Field(
@@ -279,5 +274,5 @@ def get_settings() -> Settings:
     """
     global _settings
     if _settings is None:
-        _settings = Settings()
+        _settings = Settings()  # type: ignore[call-arg]
     return _settings

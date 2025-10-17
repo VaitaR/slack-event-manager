@@ -1,10 +1,13 @@
-"""Initial schema for Slack Event Manager.
+"""Initial PostgreSQL schema
 
 Revision ID: 001
 Revises:
-Create Date: 2025-10-16
+Create Date: 2025-10-16 22:00:00.000000
 
 """
+
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -16,147 +19,144 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """Create all tables for Slack Event Manager."""
+    """Create initial schema for Slack Event Manager."""
 
-    # Table: raw_slack_messages
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS raw_slack_messages (
-            message_id TEXT PRIMARY KEY,
-            channel TEXT NOT NULL,
-            ts TEXT NOT NULL,
-            ts_dt TIMESTAMP WITH TIME ZONE NOT NULL,
-            "user" TEXT,
-            user_real_name TEXT,
-            user_display_name TEXT,
-            user_email TEXT,
-            user_profile_image TEXT,
-            is_bot BOOLEAN,
-            subtype TEXT,
-            text TEXT,
-            blocks_text TEXT,
-            text_norm TEXT,
-            links_raw JSONB,
-            links_norm JSONB,
-            anchors JSONB,
-            attachments_count INTEGER DEFAULT 0,
-            files_count INTEGER DEFAULT 0,
-            reactions JSONB,
-            total_reactions INTEGER DEFAULT 0,
-            reply_count INTEGER DEFAULT 0,
-            permalink TEXT,
-            edited_ts TEXT,
-            edited_user TEXT,
-            ingested_at TIMESTAMP WITH TIME ZONE
-        )
-    """
+    # 1. raw_slack_messages table (matching SQLite schema)
+    op.create_table(
+        "raw_slack_messages",
+        sa.Column("message_id", sa.String(length=50), nullable=False),
+        sa.Column("channel_id", sa.String(length=50), nullable=False),
+        sa.Column("ts", sa.String(length=50), nullable=False),
+        sa.Column("ts_dt", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("user", sa.String(length=50), nullable=True),  # Quoted in queries
+        sa.Column("user_real_name", sa.String(length=200), nullable=True),
+        sa.Column("user_display_name", sa.String(length=200), nullable=True),
+        sa.Column("user_email", sa.String(length=200), nullable=True),
+        sa.Column("user_profile_image", sa.Text(), nullable=True),
+        sa.Column("is_bot", sa.Boolean(), nullable=True),
+        sa.Column("subtype", sa.String(length=50), nullable=True),
+        sa.Column("text_raw", sa.Text(), nullable=True),
+        sa.Column("blocks_text", sa.Text(), nullable=True),
+        sa.Column("text_norm", sa.Text(), nullable=True),
+        sa.Column("links_raw", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("links_norm", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("anchors", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column(
+            "attachments_count", sa.Integer(), nullable=False, server_default="0"
+        ),
+        sa.Column("files_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("reactions", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("total_reactions", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("reply_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("permalink", sa.Text(), nullable=True),
+        sa.Column("edited_ts", sa.String(length=50), nullable=True),
+        sa.Column("edited_user", sa.String(length=50), nullable=True),
+        sa.Column("ingested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("message_id"),
+    )
+    op.create_index(
+        "idx_raw_messages_channel_ts", "raw_slack_messages", ["channel_id", "ts"]
     )
 
-    # Table: event_candidates
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS event_candidates (
-            message_id TEXT PRIMARY KEY,
-            channel TEXT NOT NULL,
-            ts_dt TIMESTAMP WITH TIME ZONE NOT NULL,
-            text_norm TEXT,
-            links_norm JSONB,
-            anchors JSONB,
-            score REAL,
-            status TEXT CHECK(status IN ('new', 'llm_ok', 'llm_fail')),
-            features_json JSONB
-        )
-    """
+    # 2. event_candidates table (matching SQLite schema)
+    op.create_table(
+        "event_candidates",
+        sa.Column("message_id", sa.String(length=50), nullable=False),
+        sa.Column("channel", sa.String(length=50), nullable=False),
+        sa.Column("ts_dt", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("text_norm", sa.Text(), nullable=True),
+        sa.Column("links_norm", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("anchors", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("score", sa.Float(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column(
+            "features_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.CheckConstraint(
+            "status IN ('new', 'llm_ok', 'llm_fail')", name="status_check"
+        ),
+        sa.PrimaryKeyConstraint("message_id"),
     )
 
-    # Table: events
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS events (
-            event_id TEXT PRIMARY KEY,
-            version INTEGER DEFAULT 1,
-            message_id TEXT NOT NULL,
-            source_msg_event_idx INTEGER,
-            dedup_key TEXT UNIQUE,
-            event_date TIMESTAMP WITH TIME ZONE NOT NULL,
-            event_end TIMESTAMP WITH TIME ZONE,
-            category TEXT,
-            title TEXT,
-            summary TEXT,
-            impact_area JSONB,
-            tags JSONB,
-            links JSONB,
-            anchors JSONB,
-            confidence REAL,
-            source_channels JSONB,
-            ingested_at TIMESTAMP WITH TIME ZONE
-        )
-    """
+    # 3. events table (matching SQLite schema)
+    op.create_table(
+        "events",
+        sa.Column("event_id", sa.String(length=100), nullable=False),
+        sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("message_id", sa.String(length=50), nullable=False),
+        sa.Column("source_msg_event_idx", sa.Integer(), nullable=True),
+        sa.Column("dedup_key", sa.String(length=64), nullable=True),
+        sa.Column("event_date", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("event_end", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("category", sa.String(length=50), nullable=True),
+        sa.Column("title", sa.String(length=500), nullable=True),
+        sa.Column("summary", sa.Text(), nullable=True),
+        sa.Column(
+            "impact_area", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("tags", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("links", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("anchors", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("confidence", sa.Float(), nullable=True),
+        sa.Column(
+            "source_channels", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("ingested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("event_id"),
+        sa.UniqueConstraint("dedup_key"),
+    )
+    op.create_index("idx_events_dedup_key", "events", ["dedup_key"])
+    op.create_index("idx_events_date", "events", ["event_date"])
+
+    # 4. llm_calls table
+    op.create_table(
+        "llm_calls",
+        sa.Column("call_id", sa.String(length=100), nullable=False),
+        sa.Column("message_id", sa.String(length=50), nullable=True),
+        sa.Column("model", sa.String(length=100), nullable=False),
+        sa.Column("temperature", sa.Float(), nullable=False),
+        sa.Column("prompt_hash", sa.String(length=64), nullable=False),
+        sa.Column("prompt_tokens", sa.Integer(), nullable=False),
+        sa.Column("completion_tokens", sa.Integer(), nullable=False),
+        sa.Column("total_tokens", sa.Integer(), nullable=False),
+        sa.Column("cost_usd", sa.Float(), nullable=False),
+        sa.Column("latency_ms", sa.Integer(), nullable=False),
+        sa.Column("success", sa.Boolean(), nullable=False),
+        sa.Column("error_msg", sa.Text(), nullable=True),
+        sa.Column(
+            "response_cached", sa.Boolean(), nullable=False, server_default="false"
+        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("call_id"),
     )
 
-    # Create indexes for events table
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_events_dedup_key
-        ON events(dedup_key)
-    """
+    # 5. channel_watermarks table
+    op.create_table(
+        "channel_watermarks",
+        sa.Column("channel_id", sa.String(length=50), nullable=False),
+        sa.Column("ts", sa.String(length=50), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("channel_id"),
     )
 
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_events_date
-        ON events(event_date)
-    """
-    )
-
-    # Table: llm_calls
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS llm_calls (
-            id SERIAL PRIMARY KEY,
-            message_id TEXT,
-            prompt_hash TEXT,
-            model TEXT,
-            tokens_in INTEGER,
-            tokens_out INTEGER,
-            cost_usd REAL,
-            latency_ms INTEGER,
-            cached BOOLEAN,
-            response_json TEXT,
-            ts TIMESTAMP WITH TIME ZONE
-        )
-    """
-    )
-
-    # Table: channel_watermarks
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS channel_watermarks (
-            channel TEXT PRIMARY KEY,
-            processing_ts TIMESTAMP WITH TIME ZONE,
-            committed_ts TEXT
-        )
-    """
-    )
-
-    # Table: ingestion_state
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ingestion_state (
-            channel_id TEXT PRIMARY KEY,
-            last_ts REAL NOT NULL
-        )
-    """
+    # 6. ingestion_state table
+    op.create_table(
+        "ingestion_state",
+        sa.Column("channel_id", sa.String(length=50), nullable=False),
+        sa.Column("last_processed_ts", sa.String(length=50), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("channel_id"),
     )
 
 
 def downgrade() -> None:
     """Drop all tables."""
-    op.execute("DROP TABLE IF EXISTS ingestion_state")
-    op.execute("DROP TABLE IF EXISTS channel_watermarks")
-    op.execute("DROP TABLE IF EXISTS llm_calls")
-    op.execute("DROP INDEX IF EXISTS idx_events_date")
-    op.execute("DROP INDEX IF EXISTS idx_events_dedup_key")
-    op.execute("DROP TABLE IF EXISTS events")
-    op.execute("DROP TABLE IF EXISTS event_candidates")
-    op.execute("DROP TABLE IF EXISTS raw_slack_messages")
+    op.drop_table("ingestion_state")
+    op.drop_table("channel_watermarks")
+    op.drop_table("llm_calls")
+    op.drop_index("idx_events_date", table_name="events")
+    op.drop_index("idx_events_dedup_key", table_name="events")
+    op.drop_table("events")
+    op.drop_table("event_candidates")
+    op.drop_index("idx_raw_messages_channel_ts", table_name="raw_slack_messages")
+    op.drop_table("raw_slack_messages")

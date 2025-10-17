@@ -1,507 +1,348 @@
-# Migration Guide: SQLite to PostgreSQL
+# PostgreSQL Migration Guide
 
-**Last Updated:** 2025-10-16  
-**Status:** Production Ready
-
-## Overview
-
-This guide explains how to migrate the Slack Event Manager from SQLite to PostgreSQL for production deployment. The migration maintains backward compatibility with SQLite for local development.
-
-## Why PostgreSQL?
-
-### Advantages over SQLite
-
-- **Concurrent Access**: PostgreSQL supports multiple writers without database locks
-- **Scalability**: Better performance for large datasets and high traffic
-- **Production Ready**: Industry-standard database for microservices
-- **Advanced Features**: JSONB fields, full-text search, connection pooling
-- **ACID Compliance**: Stronger transaction guarantees
-
-### Use Cases
-
-- **SQLite**: Local development, testing, small deployments
-- **PostgreSQL**: Production microservices, Docker deployments, high availability
+This guide explains how to switch from SQLite (development) to PostgreSQL (production).
 
 ## Prerequisites
 
-### Required Software
-
-- PostgreSQL 16+ (PostgreSQL 16-alpine recommended for Docker)
-- Python 3.11+
-- All existing project dependencies (see `requirements.txt`)
-
-### Environment Setup
-
-1. **Install PostgreSQL** (if not using Docker):
-   ```bash
-   # macOS
-   brew install postgresql@16
-   
-   # Ubuntu/Debian
-   sudo apt-get install postgresql-16
-   
-   # Start PostgreSQL service
-   brew services start postgresql@16  # macOS
-   sudo systemctl start postgresql    # Linux
-   ```
-
-2. **Create Database**:
-   ```bash
-   # Create database
-   createdb slack_events
-   
-   # Or via psql
-   psql -U postgres
-   CREATE DATABASE slack_events;
-   \q
-   ```
+- **PostgreSQL 16+** installed (locally or in Docker)
+- **Python dependencies** installed: `alembic`, `psycopg2-binary`
+- **Environment variables** configured (see below)
 
 ## Configuration
 
-### Step 1: Update config.yaml
+### 1. Environment Variables
 
-Edit `config.yaml` to use PostgreSQL:
+Add to your `.env` file:
+
+```bash
+# Required for PostgreSQL
+DATABASE_TYPE=postgres
+POSTGRES_PASSWORD=your_secure_password
+
+# Optional (defaults shown)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DATABASE=slack_events
+POSTGRES_USER=postgres
+```
+
+### 2. Config File (Optional)
+
+You can also configure in `config.yaml` (environment variables take precedence):
 
 ```yaml
 database:
-  type: postgres  # Changed from sqlite
+  type: postgres  # or "sqlite" for development
+  path: data/slack_events.db  # Used only for SQLite
+  
   postgres:
     host: localhost
     port: 5432
     database: slack_events
     user: postgres
+    # Password MUST be in .env as POSTGRES_PASSWORD
 ```
 
-### Step 2: Set Environment Variables
+## Migration Steps
 
-Add PostgreSQL password to `.env`:
-
-```bash
-# Existing secrets
-SLACK_BOT_TOKEN=xoxb-your-token
-OPENAI_API_KEY=sk-your-key
-
-# PostgreSQL password (new)
-POSTGRES_PASSWORD=your_secure_password
-```
-
-**Security Note**: Never commit `.env` to version control!
-
-### Step 3: Run Database Migrations
+### Local Development
 
 ```bash
-# Set environment variables
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=5432
-export POSTGRES_DATABASE=slack_events
-export POSTGRES_USER=postgres
-export POSTGRES_PASSWORD=your_password
+# 1. Install dependencies
+pip install -r requirements.txt
 
-# Run Alembic migrations
+# 2. Start PostgreSQL (if using Docker)
+docker run -d \
+  --name postgres \
+  -e POSTGRES_PASSWORD=your_password \
+  -e POSTGRES_DB=slack_events \
+  -p 5432:5432 \
+  postgres:16-alpine
+
+# 3. Run migrations
 alembic upgrade head
+
+# 4. Test the application
+python scripts/run_pipeline.py
 ```
 
-Expected output:
-```
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Will assume transactional DDL.
-INFO  [alembic.runtime.migration] Running upgrade  -> 001, Initial schema
-```
-
-### Step 4: Verify Installation
+### Docker Compose (Recommended)
 
 ```bash
-# Test database connection
-python -c "from src.adapters.repository_factory import create_repository; \
-           from src.config.settings import get_settings; \
-           repo = create_repository(get_settings()); \
-           print('✅ PostgreSQL connection successful')"
-```
-
-## Docker Deployment
-
-### Using Docker Compose
-
-The easiest way to deploy with PostgreSQL:
-
-```bash
-# 1. Update .env with PostgreSQL password
+# 1. Set environment variables in .env
+echo "DATABASE_TYPE=postgres" >> .env
 echo "POSTGRES_PASSWORD=your_password" >> .env
 
 # 2. Build and start services
-docker compose build
 docker compose up -d
 
-# 3. View logs
-docker compose logs -f slack-bot
-
-# 4. Check PostgreSQL
-docker compose exec postgres psql -U postgres -d slack_events -c "\dt"
+# Migrations run automatically via docker-entrypoint.sh
 ```
 
-### Docker Compose Services
+## Verification
 
-The `docker-compose.yml` includes:
-
-1. **postgres**: PostgreSQL 16-alpine with persistent volume
-2. **slack-bot**: Main application with automatic migrations
-3. **streamlit-ui**: Dashboard interface
-
-## Migration Verification
-
-### Test Checklist
-
-Run these commands to verify the migration:
+### Check Database Connection
 
 ```bash
-# 1. Test configuration loading
-python -c "from src.config.settings import get_settings; \
-           s = get_settings(); \
-           print(f'Database type: {s.database_type}'); \
-           assert s.database_type == 'postgres'"
-
-# 2. Test repository creation
-python -c "from src.adapters.repository_factory import create_repository; \
-           from src.config.settings import get_settings; \
-           repo = create_repository(get_settings()); \
-           print('Repository created:', type(repo).__name__)"
-
-# 3. Run tests
-pytest tests/test_postgres_repository.py -v
-
-# 4. Run quick pipeline test
-python scripts/quick_test.py
-```
-
-### Database Inspection
-
-```bash
-# Connect to PostgreSQL
+# Using psql
 psql -h localhost -U postgres -d slack_events
 
 # List tables
 \dt
 
-# Check table schemas
-\d raw_slack_messages
-\d event_candidates
-\d events
-
-# Count records
-SELECT COUNT(*) FROM raw_slack_messages;
-SELECT COUNT(*) FROM events;
-
-# Exit
-\q
+# Expected tables:
+# - raw_slack_messages
+# - event_candidates
+# - events
+# - llm_calls
+# - channel_watermarks
+# - ingestion_state
 ```
 
-## Running the Application
-
-### Manual Start
+### Check Application Logs
 
 ```bash
-# Run pipeline once
-python scripts/run_pipeline.py
-
-# Run continuously (every hour)
-python scripts/run_pipeline.py --interval-seconds 3600
-
-# Generate digest
-python scripts/generate_digest.py --channel YOUR_CHANNEL_ID
-```
-
-### Docker Start
-
-```bash
-# Start all services
-docker compose up -d
-
-# View application logs
+# Docker
 docker compose logs -f slack-bot
 
-# Access Streamlit UI
-open http://localhost:8501
+# Look for:
+# 🐘 PostgreSQL database mode: postgres@localhost:5432/slack_events
+# ✅ Migrations completed!
 ```
 
-## Switching Between SQLite and PostgreSQL
+### Run Tests
 
-The system supports both databases simultaneously through configuration:
+```bash
+# All tests (uses SQLite by default)
+make test
 
-### Use SQLite (Development)
+# Type checking
+make typecheck
 
-```yaml
-# config.yaml
-database:
-  type: sqlite
-  path: data/slack_events.db
+# Linting
+make lint
 ```
 
-### Use PostgreSQL (Production)
+## Rollback to SQLite
 
-```yaml
-# config.yaml
-database:
-  type: postgres
-  postgres:
-    host: localhost
-    port: 5432
-    database: slack_events
-    user: postgres
+If you need to rollback:
+
+```bash
+# 1. Update .env
+DATABASE_TYPE=sqlite
+
+# 2. Restart services
+docker compose restart slack-bot streamlit-ui
 ```
 
-No code changes required! The `create_repository()` factory handles database selection.
+## Schema Compatibility
 
-## Troubleshooting
+PostgreSQL schema is **100% compatible** with SQLite schema:
+- ✅ Same table names
+- ✅ Same column names
+- ✅ Same data types (TEXT → String, INTEGER → Integer, JSONB → JSON)
+- ✅ Same indexes
+- ✅ Same constraints
 
-### Connection Errors
+**Key Differences:**
+- PostgreSQL uses **JSONB** for better performance
+- PostgreSQL has **timezone-aware timestamps**
+- PostgreSQL supports **concurrent access** (multiple workers)
 
-**Problem**: `RepositoryError: Failed to create connection pool`
+## Common Issues
 
-**Solutions**:
+### Issue: Connection refused
+
+**Solution:**
 ```bash
 # Check PostgreSQL is running
-pg_isready -h localhost -U postgres
+docker ps | grep postgres
 
-# Check credentials
-psql -h localhost -U postgres -d slack_events
-
-# Check firewall/network
-telnet localhost 5432
+# Check environment variables
+echo $POSTGRES_HOST
+echo $POSTGRES_PORT
 ```
 
-### Migration Errors
+### Issue: Password authentication failed
 
-**Problem**: `alembic.util.exc.CommandError: Can't locate revision identified by '001'`
-
-**Solutions**:
+**Solution:**
 ```bash
-# Check alembic version table
-psql -U postgres -d slack_events -c "SELECT * FROM alembic_version"
+# Verify password in .env
+cat .env | grep POSTGRES_PASSWORD
 
-# Reset migrations (WARNING: drops all tables)
+# Try connecting manually
+psql -h localhost -U postgres -d slack_events
+```
+
+### Issue: Migrations fail
+
+**Solution:**
+```bash
+# Check current migration status
+alembic current
+
+# Check migration history
+alembic history
+
+# Reset migrations (DANGER: drops all tables!)
 alembic downgrade base
 alembic upgrade head
 ```
 
-### Permission Errors
-
-**Problem**: `psycopg2.OperationalError: FATAL: role "postgres" does not exist`
-
-**Solutions**:
-```bash
-# Create PostgreSQL user
-createuser -s postgres
-
-# Or set different user in config.yaml
-database:
-  postgres:
-    user: your_username
-```
-
-### Docker Issues
-
-**Problem**: Services fail to start or can't connect to PostgreSQL
-
-**Solutions**:
-```bash
-# Check service status
-docker compose ps
-
-# View PostgreSQL logs
-docker compose logs postgres
-
-# Restart services
-docker compose restart slack-bot
-
-# Check network
-docker compose exec slack-bot ping postgres
-```
-
-### Port Conflicts
-
-**Problem**: `bind: address already in use`
-
-**Solutions**:
-```bash
-# Check what's using port 5432
-lsof -i :5432
-
-# Stop conflicting service
-brew services stop postgresql@16  # macOS
-sudo systemctl stop postgresql    # Linux
-
-# Or change port in docker-compose.yml
-services:
-  postgres:
-    ports:
-      - "5433:5432"  # Use port 5433 instead
-```
-
 ## Performance Tuning
 
-### Connection Pool Settings
+### Connection Pooling
 
-Adjust in repository initialization (see `postgres_repository.py`):
+PostgresRepository uses connection pooling by default:
+- **Min connections**: 1
+- **Max connections**: 10
+
+To adjust:
 
 ```python
-PostgresRepository(
-    host=host,
-    port=port,
-    database=database,
-    user=user,
-    password=password,
-    min_connections=2,   # Increase for high traffic
-    max_connections=20,  # Increase for concurrency
+from src.adapters.postgres_repository import PostgresRepository
+
+repo = PostgresRepository(
+    host="localhost",
+    port=5432,
+    database="slack_events",
+    user="postgres",
+    password="password",
+    minconn=2,  # Minimum connections
+    maxconn=20,  # Maximum connections
 )
-```
-
-### PostgreSQL Configuration
-
-For production, tune PostgreSQL settings in `/etc/postgresql/*/main/postgresql.conf`:
-
-```conf
-# Memory
-shared_buffers = 256MB
-effective_cache_size = 1GB
-
-# Connections
-max_connections = 100
-
-# Performance
-work_mem = 4MB
-maintenance_work_mem = 64MB
-
-# Logging
-log_statement = 'mod'  # Log modifications
-log_duration = on      # Log query duration
-```
-
-After changes:
-```bash
-sudo systemctl reload postgresql
 ```
 
 ### Indexes
 
-The initial migration creates two indexes:
-- `idx_events_dedup_key` on `events(dedup_key)`
-- `idx_events_date` on `events(event_date)`
+All critical indexes are created automatically:
+- `idx_raw_messages_channel_ts` - Message queries by channel and timestamp
+- `idx_events_dedup_key` - Fast deduplication lookups
+- `idx_events_date` - Event queries by date range
 
-Add more indexes for common queries:
+## Backup & Recovery
+
+### Backup
+
+```bash
+# Full database dump
+pg_dump -h localhost -U postgres slack_events > backup.sql
+
+# Specific table
+pg_dump -h localhost -U postgres -t events slack_events > events_backup.sql
+```
+
+### Restore
+
+```bash
+# Full restore
+psql -h localhost -U postgres slack_events < backup.sql
+
+# Specific table
+psql -h localhost -U postgres slack_events < events_backup.sql
+```
+
+## Monitoring
+
+### Check Database Size
+
 ```sql
--- If you frequently filter by category
-CREATE INDEX idx_events_category ON events(category);
-
--- If you frequently filter by confidence
-CREATE INDEX idx_events_confidence ON events(confidence);
+SELECT 
+    pg_database.datname,
+    pg_size_pretty(pg_database_size(pg_database.datname)) AS size
+FROM pg_database
+WHERE datname = 'slack_events';
 ```
 
-## Backup and Recovery
+### Check Table Sizes
 
-### Backup PostgreSQL Database
-
-```bash
-# Full backup
-pg_dump -U postgres slack_events > backup_$(date +%Y%m%d).sql
-
-# Compressed backup
-pg_dump -U postgres slack_events | gzip > backup_$(date +%Y%m%d).sql.gz
-
-# Docker backup
-docker compose exec postgres pg_dump -U postgres slack_events > backup.sql
+```sql
+SELECT 
+    relname AS table_name,
+    pg_size_pretty(pg_total_relation_size(relid)) AS size
+FROM pg_catalog.pg_statio_user_tables
+ORDER BY pg_total_relation_size(relid) DESC;
 ```
 
-### Restore from Backup
+### Check Active Connections
 
-```bash
-# Restore from backup
-psql -U postgres slack_events < backup_20251016.sql
-
-# Restore compressed backup
-gunzip -c backup_20251016.sql.gz | psql -U postgres slack_events
-
-# Docker restore
-cat backup.sql | docker compose exec -T postgres psql -U postgres slack_events
+```sql
+SELECT 
+    count(*),
+    state
+FROM pg_stat_activity
+WHERE datname = 'slack_events'
+GROUP BY state;
 ```
-
-### Automated Backups
-
-Add to crontab:
-```bash
-# Daily backup at 2 AM
-0 2 * * * pg_dump -U postgres slack_events | gzip > /backups/slack_events_$(date +\%Y\%m\%d).sql.gz
-
-# Keep only 7 days of backups
-0 3 * * * find /backups -name "slack_events_*.sql.gz" -mtime +7 -delete
-```
-
-## Rollback Plan
-
-### Switch Back to SQLite
-
-If you encounter critical issues:
-
-1. **Update config.yaml**:
-   ```yaml
-   database:
-     type: sqlite
-     path: data/slack_events.db
-   ```
-
-2. **Restart services**:
-   ```bash
-   # Docker
-   docker compose restart slack-bot
-   
-   # Manual
-   pkill -f "python scripts/run_pipeline.py"
-   python scripts/run_pipeline.py
-   ```
-
-3. **Verify**:
-   ```bash
-   python -c "from src.config.settings import get_settings; \
-              print(get_settings().database_type)"
-   # Output: sqlite
-   ```
-
-No data is lost during rollback since SQLite database remains unchanged.
 
 ## Production Checklist
 
-Before deploying to production:
+- ✅ Set strong `POSTGRES_PASSWORD`
+- ✅ Configure connection pooling
+- ✅ Set up regular backups
+- ✅ Monitor database size
+- ✅ Configure PostgreSQL logging
+- ✅ Set up alerts for connection errors
+- ✅ Test rollback procedure
+- ✅ Document recovery process
 
-- [ ] PostgreSQL 16+ installed and running
-- [ ] Database created (`slack_events`)
-- [ ] Migrations executed successfully (`alembic upgrade head`)
-- [ ] Environment variables set (`.env` file with `POSTGRES_PASSWORD`)
-- [ ] Configuration updated (`config.yaml` with `type: postgres`)
-- [ ] Connection pooling configured appropriately
-- [ ] Backup strategy implemented
-- [ ] Monitoring and alerts configured
-- [ ] All tests passing (`pytest tests/ -v`)
-- [ ] Docker Compose tested (`docker compose up -d`)
-- [ ] Performance tuning applied
-- [ ] Security review completed
+## Database Consistency
+
+### SQLite vs PostgreSQL Behavior
+
+Both databases now behave identically during message upserts:
+
+**SQLite:**
+```sql
+INSERT OR REPLACE INTO raw_slack_messages (...) VALUES (...)
+-- Replaces entire row on conflict
+```
+
+**PostgreSQL (fixed in v1.0.0):**
+```sql
+INSERT INTO raw_slack_messages (...) VALUES (...)
+ON CONFLICT (message_id) DO UPDATE SET
+    -- All 18 mutable fields are updated:
+    user_real_name = EXCLUDED.user_real_name,
+    user_display_name = EXCLUDED.user_display_name,
+    ...
+    attachments_count = EXCLUDED.attachments_count,
+    files_count = EXCLUDED.files_count,
+    total_reactions = EXCLUDED.total_reactions,
+    ...
+```
+
+### Why This Matters
+
+Slack messages can change after initial creation:
+- Users add reactions → `total_reactions` changes
+- Users add attachments → `attachments_count` increases
+- Users add files → `files_count` increases
+- Links and anchors are extracted later → `links_raw`, `anchors` update
+- User profiles change → `user_real_name`, `user_profile_image` update
+
+**Impact:**
+- Scoring engine uses these counts to prioritize messages
+- Stale data = incorrect scoring = missed important events
+- PostgreSQL now updates ALL mutable fields on conflict (18 fields total)
+
+### Verification
+
+Test that upserts work correctly:
+
+```bash
+# Run PostgreSQL-specific tests
+TEST_POSTGRES=1 POSTGRES_PASSWORD=your_password \
+    pytest tests/test_postgres_repository.py::test_postgres_message_upsert_updates_all_mutable_fields -v
+```
+
+Expected: All 18 mutable fields should be updated when the same message is ingested again.
 
 ## Support
 
 For issues or questions:
-
-1. Check this migration guide first
-2. Review troubleshooting section
-3. Check logs: `docker compose logs -f` or `logs/pipeline_*.log`
-4. Consult [AGENTS.md](AGENTS.md) for detailed project documentation
-5. Contact the platform team
-
-## Additional Resources
-
-- [Alembic Documentation](https://alembic.sqlalchemy.org/)
-- [PostgreSQL Documentation](https://www.postgresql.org/docs/16/)
-- [psycopg2 Documentation](https://www.psycopg.org/docs/)
-- [Docker Compose Documentation](https://docs.docker.com/compose/)
-
----
-
-**Migration completed successfully?** Update `AGENTS.md` with your production deployment notes!
+1. Check logs: `docker compose logs -f`
+2. Verify configuration: `make test`
+3. Review this guide
+4. Check `DATABASE_CONFIG_ANALYSIS.md` for advanced configuration details
 
