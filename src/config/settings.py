@@ -212,6 +212,28 @@ class Settings(BaseSettings):
         default=24, description="Default lookback for message ingestion (hours)"
     )
 
+    # Digest configuration
+    digest_max_events: int | None = Field(
+        default=10, description="Maximum events per digest (None = unlimited)"
+    )
+    digest_min_confidence: float = Field(
+        default=0.7, description="Minimum confidence score for digest inclusion"
+    )
+    digest_lookback_hours: int = Field(
+        default=48, description="Default lookback window for digest events"
+    )
+    digest_category_priorities: dict[str, int] = Field(
+        default_factory=lambda: {
+            "product": 1,
+            "risk": 2,
+            "process": 3,
+            "marketing": 4,
+            "org": 5,
+            "unknown": 6,
+        },
+        description="Category priority mapping for digest sorting",
+    )
+
     # Observability
     log_level: str = Field(default="INFO", description="Logging level")
 

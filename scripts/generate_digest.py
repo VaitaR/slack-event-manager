@@ -30,13 +30,25 @@ def main() -> None:
     parser.add_argument(
         "--lookback-hours",
         type=int,
-        default=48,
-        help="Hours to look back from date (default: 48)",
+        default=None,
+        help="Hours to look back from date (default: from config)",
     )
     parser.add_argument(
         "--channel",
         default=None,
         help="Override target channel ID",
+    )
+    parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=None,
+        help="Minimum confidence score 0.0-1.0 (default: from config)",
+    )
+    parser.add_argument(
+        "--max-events",
+        type=int,
+        default=None,
+        help="Maximum events to include (default: from config)",
     )
     parser.add_argument(
         "--dry-run",
@@ -72,7 +84,11 @@ def main() -> None:
 
     date_str = target_date.strftime("%Y-%m-%d")
     print(f"\nGenerating digest for {date_str}")
-    print(f"Lookback: {args.lookback_hours} hours")
+    print(f"Lookback: {args.lookback_hours or settings.digest_lookback_hours} hours")
+    print(
+        f"Min confidence: {args.min_confidence or settings.digest_min_confidence:.2f}"
+    )
+    print(f"Max events: {args.max_events or settings.digest_max_events or 'unlimited'}")
     print("=" * 60)
 
     # Generate and publish digest
@@ -83,6 +99,8 @@ def main() -> None:
         lookback_hours=args.lookback_hours,
         target_channel=args.channel,
         dry_run=args.dry_run,
+        min_confidence=args.min_confidence,
+        max_events=args.max_events,
     )
 
     print(f"\n✓ Events included: {digest_result.events_included}")

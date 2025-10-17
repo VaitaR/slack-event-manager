@@ -51,7 +51,10 @@ EOF
 # 3. Configure application (config.yaml with non-sensitive settings)
 # Edit config.yaml with your settings
 
-# 4. Verify configuration
+# 4. Set up pre-commit hooks (automatic code quality checks)
+pre-commit install
+
+# 5. Verify configuration
 python -c "from src.config.settings import get_settings; s = get_settings(); print(f'✅ Settings loaded: {s.llm_model}, temp={s.llm_temperature}')"
 ```
 
@@ -96,6 +99,7 @@ python -m pytest tests/ --cov=src --cov-report=html
 - **Type hints** required for all functions and variables
 - **Google-style docstrings** for all public APIs
 - **async/await** patterns for I/O operations where applicable
+- **Pre-commit hooks** automatically enforce code quality (see [PRE_COMMIT_SETUP.md](PRE_COMMIT_SETUP.md))
 
 ### Code Organization
 ```
@@ -270,7 +274,13 @@ llm:
   daily_budget_usd: 10.0
 
 database:
-  path: data/slack_events.db
+  type: sqlite  # or 'postgres' for production
+  path: data/slack_events.db  # used only for SQLite
+  postgres:  # used only when type: postgres
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
 
 slack:
   digest_channel_id: D07T451C1KK
@@ -335,12 +345,51 @@ Automatic retry with exponential backoff for transient failures:
 - **User IDs** should be handled carefully
 - **Consider data retention policies** for compliance
 
+## Database Configuration
+
+### SQLite (Development)
+- **Default configuration** for local development
+- **No additional setup** required
+- **File-based storage** in `data/` directory
+- **Perfect for testing** and prototyping
+
+```yaml
+# config.yaml
+database:
+  type: sqlite
+  path: data/slack_events.db
+```
+
+### PostgreSQL (Production)
+- **Recommended for production** microservices
+- **Connection pooling** for high concurrency
+- **ACID compliance** with strict transaction guarantees
+- **JSONB support** for efficient JSON querying
+
+Setup:
+1. Install PostgreSQL 16+
+2. Create database: `createdb slack_events`
+3. Update `config.yaml`:
+   ```yaml
+   database:
+     type: postgres
+     postgres:
+       host: localhost
+       port: 5432
+       database: slack_events
+       user: postgres
+   ```
+4. Set password in `.env`: `POSTGRES_PASSWORD=your_password`
+5. Run migrations: `alembic upgrade head`
+
+See **[MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md)** for complete guide.
+
 ## Performance Optimization
 
 ### Database Performance
-- **Batch inserts** for ClickHouse operations
-- **Connection pooling** for database connections
-- **Index optimization** based on query patterns
+- **Batch inserts** for PostgreSQL operations
+- **Connection pooling** for efficient resource management
+- **Index optimization** based on query patterns (dedup_key, event_date)
 
 ### API Efficiency
 - **Bulk message fetching** with appropriate limits
@@ -420,6 +469,121 @@ ls -lh data/*.db
 # View test database results
 sqlite3 data/test_real_pipeline.db "SELECT * FROM events;"
 ```
+
+## Digest Publishing
+
+### Overview
+
+The system includes flexible digest publishing functionality to send event summaries to Slack channels. Digests can be filtered by confidence score, limited by event count, and sorted by category priority.
+
+### Configuration
+
+Digest settings are configured in `config.yaml`:
+
+```yaml
+digest:
+  max_events: 10  # Default maximum events per digest (null = unlimited)
+  min_confidence: 0.7  # Minimum confidence score to include (0.0-1.0)
+  lookback_hours: 48  # Default lookback window for events
+  category_priorities:
+    product: 1
+    risk: 2
+    process: 3
+    marketing: 4
+    org: 5
+    unknown: 6
+```
+
+### Usage
+
+**CLI Script:**
+```bash
+# Generate digest with defaults from config
+python scripts/generate_digest.py --channel C06B5NJLY4B --dry-run
+
+# Generate digest with custom filters
+python scripts/generate_digest.py \
+  --channel C06B5NJLY4B \
+  --min-confidence 0.8 \
+  --max-events 20 \
+  --lookback-hours 72 \
+  --dry-run
+
+# Post digest to Slack (remove --dry-run)
+python scripts/generate_digest.py --channel C06B5NJLY4B
+```
+
+**Programmatic Usage:**
+```python
+from src.adapters.slack_client import SlackClient
+from src.adapters.sqlite_repository import SQLiteRepository
+from src.config.settings import get_settings
+from src.use_cases.publish_digest import publish_digest_use_case
+
+settings = get_settings()
+slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
+repository = SQLiteRepository(db_path=settings.db_path)
+
+# Generate and post digest
+result = publish_digest_use_case(
+    slack_client=slack_client,
+    repository=repository,
+    settings=settings,
+    target_channel="C06B5NJLY4B",
+    min_confidence=0.8,
+    max_events=10,
+    dry_run=False
+)
+
+print(f"Posted {result.messages_posted} messages with {result.events_included} events")
+```
+
+### Testing Digest Functionality
+
+**Run Unit Tests:**
+```bash
+# Run all digest unit tests
+python -m pytest tests/test_publish_digest.py -v
+
+# Test specific functionality
+python -m pytest tests/test_publish_digest.py::test_publish_digest_use_case_confidence_filter -v
+```
+
+**Run E2E Tests:**
+```bash
+# Run E2E tests without real Slack posting
+SKIP_SLACK_E2E=true python -m pytest tests/test_digest_e2e.py -v
+
+# Run E2E tests with real Slack posting
+SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real_posting -v -s
+```
+
+### Features
+
+**Confidence Filtering:**
+- Filter events by minimum confidence score (0.0-1.0)
+- Default: 0.7 (70% confidence)
+- Use `--min-confidence` to override
+
+**Event Limiting:**
+- Limit number of events in digest
+- Default: 10 events
+- Use `--max-events` to override
+- Set to `null` in config for unlimited
+
+**Category Priority Sorting:**
+- Events sorted by date, then category priority, then confidence
+- Product events appear first, followed by risk, process, marketing, org, unknown
+- Configurable via `category_priorities` in config.yaml
+
+**Dry-Run Mode:**
+- Test digest generation without posting to Slack
+- Use `--dry-run` flag in CLI
+
+**Flexible Lookback Window:**
+- Configure time window for event selection
+- Default: 48 hours
+- Use `--lookback-hours` to override
 
 ## Recent Changes
 

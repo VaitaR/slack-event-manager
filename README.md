@@ -332,7 +332,7 @@ Plus auxiliary tables:
 - **llm_calls**: LLM API call metadata and costs
 - **channel_watermarks**: Incremental processing state
 
-Schema is designed for easy migration to ClickHouse.
+Supports both SQLite (development) and PostgreSQL (production) through repository factory pattern.
 
 ## Development
 
@@ -455,6 +455,44 @@ sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY even
 - ✅ Average latency: 13.5s per LLM call
 - ✅ Rate limiting handled gracefully
 - ✅ Comprehensive logging added
+
+## Database Configuration
+
+### SQLite (Default - Development)
+Perfect for local development and testing. No additional setup required.
+
+```yaml
+# config.yaml
+database:
+  type: sqlite
+  path: data/slack_events.db
+```
+
+### PostgreSQL (Production)
+Recommended for production deployment with Docker.
+
+```yaml
+# config.yaml
+database:
+  type: postgres
+  postgres:
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
+```
+
+Set password in `.env`:
+```bash
+POSTGRES_PASSWORD=your_secure_password
+```
+
+Run migrations:
+```bash
+alembic upgrade head
+```
+
+See [MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md) for complete migration guide.
 
 ## Future Enhancements
 

@@ -35,6 +35,15 @@ services:
       POSTGRES_DATABASE: slack_events
       POSTGRES_USER: postgres
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_TYPE=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-slack_events}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -65,6 +74,17 @@ services:
       POSTGRES_DATABASE: slack_events
       POSTGRES_USER: postgres
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      slack-bot:
+        condition: service_started
+    environment:
+      - DATABASE_TYPE=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-slack_events}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
     ports:
       - "8501:8501"
     volumes:
@@ -92,3 +112,6 @@ networks:
   slack_network:
     driver: bridge
 
+networks:
+  slack_network:
+    driver: bridge
