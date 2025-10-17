@@ -29,6 +29,89 @@ class EventCategory(str, Enum):
     UNKNOWN = "unknown"
 
 
+class ActionType(str, Enum):
+    """Action type for event title slots (English only)."""
+
+    LAUNCH = "Launch"
+    DEPLOY = "Deploy"
+    MIGRATION = "Migration"
+    MOVE = "Move"
+    ROLLBACK = "Rollback"
+    POLICY = "Policy"
+    CAMPAIGN = "Campaign"
+    WEBINAR = "Webinar"
+    INCIDENT = "Incident"
+    RCA = "RCA"
+    AB_TEST = "A/B Test"
+    OTHER = "Other"
+
+
+class EventStatus(str, Enum):
+    """Event lifecycle status."""
+
+    PLANNED = "planned"
+    CONFIRMED = "confirmed"
+    STARTED = "started"
+    COMPLETED = "completed"
+    POSTPONED = "postponed"
+    CANCELED = "canceled"
+    ROLLED_BACK = "rolled_back"
+    UPDATED = "updated"
+
+
+class ChangeType(str, Enum):
+    """Type of change event represents."""
+
+    LAUNCH = "launch"
+    DEPLOY = "deploy"
+    MIGRATION = "migration"
+    ROLLBACK = "rollback"
+    AB_TEST = "ab_test"
+    POLICY = "policy"
+    CAMPAIGN = "campaign"
+    INCIDENT = "incident"
+    RCA = "rca"
+    OTHER = "other"
+
+
+class Environment(str, Enum):
+    """Deployment environment."""
+
+    PROD = "prod"
+    STAGING = "staging"
+    DEV = "dev"
+    MULTI = "multi"
+    UNKNOWN = "unknown"
+
+
+class Severity(str, Enum):
+    """Severity level for risk events."""
+
+    SEV1 = "sev1"
+    SEV2 = "sev2"
+    SEV3 = "sev3"
+    INFO = "info"
+    UNKNOWN = "unknown"
+
+
+class TimeSource(str, Enum):
+    """Source of time information."""
+
+    EXPLICIT = "explicit"
+    RELATIVE = "relative"
+    TS_FALLBACK = "ts_fallback"
+
+
+class RelationType(str, Enum):
+    """Type of relationship between events."""
+
+    PLANNED_FOR = "planned_for"
+    REALIZED_FROM = "realized_from"
+    RESCHEDULED_FROM = "rescheduled_from"
+    CANCELED_OF = "canceled_of"
+    UPDATES = "updates"
+
+
 class ChannelConfig(BaseModel):
     """Per-channel configuration for scoring and processing."""
 
@@ -126,53 +209,177 @@ class EventCandidate(BaseModel):
     features: ScoringFeatures
 
 
+class EventRelation(BaseModel):
+    """Relationship between two events."""
+
+    relation_type: RelationType = Field(..., description="Type of relationship")
+    target_event_id: UUID = Field(..., description="Target event ID")
+
+
+class ImportanceScore(BaseModel):
+    """Importance scoring breakdown."""
+
+    heuristic_score: int = Field(..., ge=0, le=100, description="Heuristic score (H)")
+    llm_score: float = Field(..., ge=0.0, le=1.0, description="LLM score (S)")
+    final_score: int = Field(..., ge=0, le=100, description="Final importance")
+
+
 class Event(BaseModel):
-    """Extracted event from Slack message."""
+    """Extracted event from Slack message with comprehensive structure.
 
-    event_id: UUID = Field(default_factory=uuid4)
-    version: int = Field(default=1, description="Version for deduplication")
+    Title is rendered from slots, not stored directly.
+    """
+
+    # 3.1 Identification
+    event_id: UUID = Field(default_factory=uuid4, description="Unique event ID")
     message_id: str = Field(..., description="Source message ID")
-    source_msg_event_idx: int = Field(
-        ..., description="Index within source message (0-4)"
+    source_channels: list[str] = Field(
+        default_factory=list, description="Source channel names"
     )
-    dedup_key: str = Field(..., description="SHA1 for deduplication")
-    event_date: datetime = Field(..., description="Event date/time in UTC")
-    event_end: datetime | None = Field(
-        default=None, description="End date for intervals"
+    extracted_at: datetime = Field(
+        default_factory=datetime.utcnow, description="Extraction timestamp"
     )
-    category: EventCategory = Field(default=EventCategory.UNKNOWN)
-    title: str = Field(..., max_length=140, description="Event title")
-    summary: str = Field(..., description="1-3 sentence summary")
-    impact_area: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
-    links: list[str] = Field(default_factory=list, max_length=3)
-    anchors: list[str] = Field(default_factory=list)
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
-    source_channels: list[str] = Field(default_factory=list)
-    ingested_at: datetime = Field(default_factory=datetime.utcnow)
 
-    @field_validator("title")
+    # 3.2 Title Slots (source of truth for title generation)
+    action: ActionType = Field(
+        ..., description="Action type from controlled vocabulary"
+    )
+    object_id: str | None = Field(
+        default=None, description="Canonical object ID from registry"
+    )
+    object_name_raw: str = Field(..., description="Raw object name from text")
+    qualifiers: list[str] = Field(
+        default_factory=list, max_length=2, description="Max 2 qualifiers"
+    )
+    stroke: str | None = Field(
+        default=None, description="Short semantic stroke from whitelist"
+    )
+    anchor: str | None = Field(
+        default=None, description="Brief identifier (ABC-123, repo#421)"
+    )
+
+    # 3.3 Classification & Lifecycle
+    category: EventCategory = Field(default=EventCategory.UNKNOWN)
+    status: EventStatus = Field(..., description="Lifecycle status")
+    change_type: ChangeType = Field(..., description="Type of change")
+    environment: Environment = Field(
+        default=Environment.UNKNOWN, description="Deployment environment"
+    )
+    severity: Severity | None = Field(
+        default=None, description="Severity for risk events"
+    )
+
+    # 3.4 Time Fields
+    planned_start: datetime | None = Field(default=None, description="Planned start")
+    planned_end: datetime | None = Field(default=None, description="Planned end")
+    actual_start: datetime | None = Field(default=None, description="Actual start")
+    actual_end: datetime | None = Field(default=None, description="Actual end")
+    time_source: TimeSource = Field(..., description="Source of time information")
+    time_confidence: float = Field(
+        ..., ge=0.0, le=1.0, description="Confidence in time data"
+    )
+
+    # 3.5 Content & Links
+    summary: str = Field(..., max_length=320, description="1-3 sentence summary")
+    why_it_matters: str | None = Field(
+        default=None, max_length=160, description="Why this matters (1 line)"
+    )
+    links: list[str] = Field(
+        default_factory=list, max_length=3, description="Canonicalized URLs (max 3)"
+    )
+    anchors: list[str] = Field(default_factory=list, description="Jira/PR/Doc IDs")
+    impact_area: list[str] = Field(
+        default_factory=list, max_length=3, description="Subsystems/components (max 3)"
+    )
+    impact_type: list[str] = Field(
+        default_factory=list,
+        description="Impact types (perf_degradation, downtime, etc.)",
+    )
+
+    # 3.6 Quality & Importance
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Extraction confidence")
+    importance: int = Field(
+        ..., ge=0, le=100, description="Final importance score (0-100)"
+    )
+
+    # 3.7 Clusters & Relations
+    cluster_key: str = Field(
+        ..., description="Common initiative key (without status/time)"
+    )
+    dedup_key: str = Field(
+        ..., description="Specific instance key (with status/time/environment)"
+    )
+    relations: list[EventRelation] = Field(
+        default_factory=list, description="Relationships to other events"
+    )
+
+    @field_validator("qualifiers")
     @classmethod
-    def title_not_empty(cls, v: str) -> str:
-        """Validate title is not empty."""
-        if not v.strip():
-            raise ValueError("Title cannot be empty")
+    def validate_qualifiers(cls, v: list[str]) -> list[str]:
+        """Validate max 2 qualifiers."""
+        if len(v) > 2:
+            raise ValueError("Maximum 2 qualifiers allowed")
+        return v
+
+    @field_validator("impact_area")
+    @classmethod
+    def validate_impact_area(cls, v: list[str]) -> list[str]:
+        """Validate max 3 impact areas."""
+        if len(v) > 3:
+            raise ValueError("Maximum 3 impact areas allowed")
+        return v
+
+    @field_validator("links")
+    @classmethod
+    def validate_links(cls, v: list[str]) -> list[str]:
+        """Validate max 3 links."""
+        if len(v) > 3:
+            raise ValueError("Maximum 3 links allowed")
         return v
 
 
 class LLMEvent(BaseModel):
-    """Single event from LLM extraction (before domain conversion)."""
+    """Single event from LLM extraction (before domain conversion).
 
-    title: str = Field(..., max_length=140)
-    summary: str = Field(..., description="1-3 sentences")
+    Matches new extraction schema with title slots and lifecycle fields.
+    """
+
+    # Title slots
+    action: str = Field(..., description="Action from vocabulary")
+    object_name_raw: str = Field(..., description="Raw object name")
+    qualifiers: list[str] = Field(
+        default_factory=list, max_length=2, description="Max 2 qualifiers"
+    )
+    stroke: str | None = Field(default=None, description="Semantic stroke or null")
+    anchor: str | None = Field(default=None, description="Brief identifier or null")
+
+    # Classification
     category: EventCategory
-    event_date: str = Field(..., description="ISO8601 datetime string")
-    event_end: str | None = Field(default=None, description="ISO8601 or null")
-    impact_area: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
+    status: str = Field(..., description="Lifecycle status")
+    change_type: str = Field(..., description="Type of change")
+    environment: str = Field(default="unknown", description="Environment")
+    severity: str | None = Field(default=None, description="Severity or null")
+
+    # Time
+    planned_start: str | None = Field(default=None, description="ISO8601 or null")
+    planned_end: str | None = Field(default=None, description="ISO8601 or null")
+    actual_start: str | None = Field(default=None, description="ISO8601 or null")
+    actual_end: str | None = Field(default=None, description="ISO8601 or null")
+    time_source: str = Field(..., description="explicit|relative|ts_fallback")
+    time_confidence: float = Field(..., ge=0.0, le=1.0)
+
+    # Content
+    summary: str = Field(..., max_length=320, description="1-3 sentences")
+    why_it_matters: str | None = Field(
+        default=None, max_length=160, description="Why it matters or null"
+    )
     links: list[str] = Field(default_factory=list, max_length=3)
+    anchors: list[str] = Field(default_factory=list)
+    impact_area: list[str] = Field(default_factory=list, max_length=3)
+    impact_type: list[str] = Field(default_factory=list)
+
+    # Quality
     confidence: float = Field(..., ge=0.0, le=1.0)
-    source_channels: list[str] = Field(default_factory=list)
 
 
 class LLMResponse(BaseModel):

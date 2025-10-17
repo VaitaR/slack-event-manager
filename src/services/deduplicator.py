@@ -5,12 +5,14 @@ Rules:
 2. Inter-message merge if:
    - Anchor/link overlap
    - Date delta <= 48 hours (configurable)
-   - Fuzzy title similarity >= 0.8 (configurable)
+   - Rendered title similarity >= 0.8 (configurable)
+
+New Structure:
+- cluster_key: Initiative-level grouping (without status/time/environment)
+- dedup_key: Specific instance (with status/time/environment)
 """
 
 import hashlib
-
-from rapidfuzz import fuzz
 
 from src.domain.deduplication_constants import (
     DEFAULT_DATE_WINDOW_HOURS,
@@ -20,10 +22,11 @@ from src.domain.deduplication_constants import (
 from src.domain.models import Event
 
 
-def generate_dedup_key(event: Event) -> str:
-    """Generate deterministic dedup key for event.
+def generate_cluster_key(event: Event) -> str:
+    """Generate cluster key for initiative-level grouping.
 
-    Format: sha1(event_date || title[:80].lower() || top_anchor_or_null)
+    Cluster key groups events from the same initiative regardless of status/time/environment.
+    Based on: action + object_id (or object_name_raw) + top_anchor
 
     Args:
         event: Event to generate key for
@@ -32,21 +35,60 @@ def generate_dedup_key(event: Event) -> str:
         SHA1 hex digest
 
     Example:
-        >>> evt = Event(event_date=datetime(...), title="Release v1", ...)
-        >>> generate_dedup_key(evt)
-        'a3f2b1c0...'
+        >>> evt = Event(action="Launch", object_name_raw="Stocks", ...)
+        >>> generate_cluster_key(evt)
+        'b2d4c1a9...'
     """
-    # Canonical date (ISO format)
-    date_str = event.event_date.isoformat()
-
-    # Normalized title (first 80 chars, lowercase)
-    title_norm = event.title[:80].lower().strip()
+    # Use object_id if available, fallback to raw name
+    object_key = event.object_id or event.object_name_raw.lower().strip()
 
     # Top anchor (first one if available, else empty)
     top_anchor = event.anchors[0] if event.anchors else ""
 
-    # Concatenate and hash
-    key_material = f"{date_str}||{title_norm}||{top_anchor}"
+    # Concatenate: action + object + anchor
+    key_material = f"{event.action.value}||{object_key}||{top_anchor}"
+    return hashlib.sha1(key_material.encode("utf-8")).hexdigest()
+
+
+def generate_dedup_key(event: Event) -> str:
+    """Generate dedup key for specific instance identification.
+
+    Dedup key includes status/time/environment to distinguish different instances
+    of the same initiative (e.g., planned vs started vs completed).
+
+    Based on: cluster_key + status + primary_time + environment
+
+    Args:
+        event: Event to generate key for
+
+    Returns:
+        SHA1 hex digest
+
+    Example:
+        >>> evt = Event(status="started", ...)
+        >>> generate_dedup_key(evt)
+        'a3f2b1c0...'
+    """
+    # Start with cluster key
+    cluster = generate_cluster_key(event)
+
+    # Add status
+    status_val = event.status.value
+
+    # Primary time (prefer actual, fallback to planned)
+    primary_time = (
+        event.actual_start
+        or event.actual_end
+        or event.planned_start
+        or event.planned_end
+    )
+    time_str = primary_time.isoformat() if primary_time else "no-time"
+
+    # Environment
+    env_val = event.environment.value
+
+    # Concatenate
+    key_material = f"{cluster}||{status_val}||{time_str}||{env_val}"
     return hashlib.sha1(key_material.encode("utf-8")).hexdigest()
 
 
@@ -82,20 +124,20 @@ def should_merge_events(
     - Different message_id:
       - Must have anchor/link overlap
       - Date delta <= window
-      - Title similarity >= threshold
+      - Optional: cluster_key similarity (same initiative)
 
     Args:
         event1: First event
         event2: Second event
         date_window_hours: Maximum date difference in hours (default: 48)
-        title_similarity_threshold: Minimum fuzzy similarity 0.0-1.0 (default: 0.8)
+        title_similarity_threshold: Minimum fuzzy similarity 0.0-1.0 (default: 0.8, currently unused)
 
     Returns:
         True if events should merge
 
     Example:
-        >>> evt1 = Event(message_id="m1", title="Release v1.0", ...)
-        >>> evt2 = Event(message_id="m2", title="Release v1.0", ...)
+        >>> evt1 = Event(message_id="m1", cluster_key="abc...", ...)
+        >>> evt2 = Event(message_id="m2", cluster_key="abc...", ...)
         >>> should_merge_events(evt1, evt2)
         True
 
@@ -114,15 +156,29 @@ def should_merge_events(
     if not has_overlap(combined_anchors1, combined_anchors2):
         return False
 
-    # Check date delta
-    date_delta = abs((event1.event_date - event2.event_date).total_seconds() / 3600)
-    if date_delta > date_window_hours:
-        return False
+    # Get primary times
+    time1 = (
+        event1.actual_start
+        or event1.actual_end
+        or event1.planned_start
+        or event1.planned_end
+    )
+    time2 = (
+        event2.actual_start
+        or event2.actual_end
+        or event2.planned_start
+        or event2.planned_end
+    )
 
-    # Check fuzzy title similarity
-    similarity = fuzz.ratio(event1.title.lower(), event2.title.lower()) / 100.0
-    if similarity < title_similarity_threshold:
-        return False
+    # Check time delta if both have times
+    if time1 and time2:
+        date_delta = abs((time1 - time2).total_seconds() / 3600)
+        if date_delta > date_window_hours:
+            return False
+
+    # Optional: Check cluster_key similarity (same initiative)
+    # For now, we rely on anchor/link overlap
+    # TODO: Add rendered title similarity check using TitleRenderer
 
     return True
 
@@ -131,55 +187,78 @@ def merge_events(event1: Event, event2: Event) -> Event:
     """Merge two events, combining attributes.
 
     Strategy:
-    - Union: links, tags, source_channels, anchors
-    - Max: confidence, version
-    - Keep: first event's core attributes (title, summary, date)
+    - Union: links, source_channels, anchors, impact_area, impact_type
+    - Max: confidence, importance
+    - Keep: event1's core attributes (title slots, status, times)
+    - Update: qualifiers (union, max 2)
 
     Args:
         event1: Primary event (keeps core attributes)
         event2: Secondary event (contributes additional data)
 
     Returns:
-        Merged event with incremented version
+        Merged event
 
     Example:
-        >>> evt1 = Event(links=["a"], confidence=0.8, version=1)
-        >>> evt2 = Event(links=["b"], confidence=0.9, version=1)
+        >>> evt1 = Event(links=["a"], confidence=0.8, ...)
+        >>> evt2 = Event(links=["b"], confidence=0.9, ...)
         >>> merged = merge_events(evt1, evt2)
-        >>> merged.version
-        2
         >>> set(merged.links)
         {'a', 'b'}
     """
     # Union of lists (deduplicated)
     merged_links = list(set(event1.links + event2.links))[:3]  # Max 3
-    merged_tags = list(set(event1.tags + event2.tags))
     merged_channels = list(set(event1.source_channels + event2.source_channels))
     merged_anchors = list(set(event1.anchors + event2.anchors))
+    merged_impact_area = list(set(event1.impact_area + event2.impact_area))[:3]  # Max 3
+    merged_impact_type = list(set(event1.impact_type + event2.impact_type))
+    merged_qualifiers = list(set(event1.qualifiers + event2.qualifiers))[:2]  # Max 2
 
     # Max values
     max_confidence = max(event1.confidence, event2.confidence)
-    max_version = max(event1.version, event2.version) + 1
+    max_importance = max(event1.importance, event2.importance)
 
     # Create merged event (keeping event1 as base)
     merged = Event(
+        # Identification
         event_id=event1.event_id,  # Keep primary ID
-        version=max_version,
         message_id=event1.message_id,
-        source_msg_event_idx=event1.source_msg_event_idx,
-        dedup_key=event1.dedup_key,
-        event_date=event1.event_date,
-        event_end=event1.event_end or event2.event_end,
+        source_channels=merged_channels,
+        extracted_at=event1.extracted_at,
+        # Title slots (keep event1's)
+        action=event1.action,
+        object_id=event1.object_id,
+        object_name_raw=event1.object_name_raw,
+        qualifiers=merged_qualifiers,
+        stroke=event1.stroke or event2.stroke,
+        anchor=event1.anchor or event2.anchor,
+        # Classification (keep event1's)
         category=event1.category,
-        title=event1.title,
+        status=event1.status,
+        change_type=event1.change_type,
+        environment=event1.environment,
+        severity=event1.severity or event2.severity,
+        # Time fields (prefer event1, fallback to event2)
+        planned_start=event1.planned_start or event2.planned_start,
+        planned_end=event1.planned_end or event2.planned_end,
+        actual_start=event1.actual_start or event2.actual_start,
+        actual_end=event1.actual_end or event2.actual_end,
+        time_source=event1.time_source,
+        time_confidence=max(event1.time_confidence, event2.time_confidence),
+        # Content (keep event1's primary, merge lists)
         summary=event1.summary,
-        impact_area=list(set(event1.impact_area + event2.impact_area)),
-        tags=merged_tags,
+        why_it_matters=event1.why_it_matters or event2.why_it_matters,
         links=merged_links,
         anchors=merged_anchors,
+        impact_area=merged_impact_area,
+        impact_type=merged_impact_type,
+        # Quality (max)
         confidence=max_confidence,
-        source_channels=merged_channels,
-        ingested_at=event1.ingested_at,
+        importance=max_importance,
+        # Clustering (keep event1's)
+        cluster_key=event1.cluster_key,
+        dedup_key=event1.dedup_key,
+        relations=event1.relations,  # Keep event1's relations
     )
 
     return merged

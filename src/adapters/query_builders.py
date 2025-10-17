@@ -36,11 +36,11 @@ class EventQueryCriteria:
     end_date: datetime | None = None
     """Filter events with event_date <= end_date"""
 
-    ingested_after: datetime | None = None
-    """Filter events ingested after this timestamp"""
+    extracted_after: datetime | None = None
+    """Filter events extracted after this timestamp"""
 
-    ingested_before: datetime | None = None
-    """Filter events ingested before this timestamp"""
+    extracted_before: datetime | None = None
+    """Filter events extracted before this timestamp"""
 
     # Category and confidence filters
     categories: list[EventCategory] | None = None
@@ -108,14 +108,14 @@ class EventQueryCriteria:
             conditions.append("event_date <= ?")
             params.append(self.end_date.isoformat())
 
-        # Ingestion time filters
-        if self.ingested_after:
-            conditions.append("ingested_at >= ?")
-            params.append(self.ingested_after.isoformat())
+        # Extraction time filters
+        if self.extracted_after:
+            conditions.append("extracted_at >= ?")
+            params.append(self.extracted_after.isoformat())
 
-        if self.ingested_before:
-            conditions.append("ingested_at <= ?")
-            params.append(self.ingested_before.isoformat())
+        if self.extracted_before:
+            conditions.append("extracted_at <= ?")
+            params.append(self.extracted_before.isoformat())
 
         # Category filter (OR logic)
         if self.categories:
@@ -331,8 +331,8 @@ def recent_events_criteria(days: int = 7) -> EventQueryCriteria:
 
     now = datetime.utcnow()
     return EventQueryCriteria(
-        ingested_after=now - timedelta(days=days),
-        order_by="ingested_at",
+        extracted_after=now - timedelta(days=days),
+        order_by="extracted_at",
         order_desc=True,
     )
 

@@ -112,32 +112,75 @@ class SQLiteRepository:
         """
         )
 
-        # Events table
+        # Events table (new structure with title slots)
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
+                -- Identification
                 event_id TEXT PRIMARY KEY,
-                version INTEGER DEFAULT 1,
                 message_id TEXT NOT NULL,
-                source_msg_event_idx INTEGER,
-                dedup_key TEXT UNIQUE,
-                event_date TEXT NOT NULL,
-                event_end TEXT,
-                category TEXT,
-                title TEXT,
-                summary TEXT,
-                impact_area TEXT,
-                tags TEXT,
+                source_channels TEXT NOT NULL,
+                extracted_at TEXT NOT NULL,
+
+                -- Title Slots (source of truth)
+                action TEXT NOT NULL,
+                object_id TEXT,
+                object_name_raw TEXT NOT NULL,
+                qualifiers TEXT,
+                stroke TEXT,
+                anchor TEXT,
+
+                -- Classification & Lifecycle
+                category TEXT NOT NULL,
+                status TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                environment TEXT NOT NULL,
+                severity TEXT,
+
+                -- Time Fields
+                planned_start TEXT,
+                planned_end TEXT,
+                actual_start TEXT,
+                actual_end TEXT,
+                time_source TEXT NOT NULL,
+                time_confidence REAL NOT NULL,
+
+                -- Content & Links
+                summary TEXT NOT NULL,
+                why_it_matters TEXT,
                 links TEXT,
                 anchors TEXT,
-                confidence REAL,
-                source_channels TEXT,
-                ingested_at TEXT
+                impact_area TEXT,
+                impact_type TEXT,
+
+                -- Quality & Importance
+                confidence REAL NOT NULL,
+                importance INTEGER NOT NULL,
+
+                -- Clustering
+                cluster_key TEXT NOT NULL,
+                dedup_key TEXT UNIQUE NOT NULL
             )
         """
         )
 
-        # Create index on dedup_key
+        # Event relations table
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS event_relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_event_id TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                target_event_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (source_event_id) REFERENCES events(event_id),
+                FOREIGN KEY (target_event_id) REFERENCES events(event_id),
+                UNIQUE(source_event_id, target_event_id, relation_type)
+            )
+        """
+        )
+
+        # Create indexes on events
         cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_events_dedup_key
@@ -145,11 +188,46 @@ class SQLiteRepository:
         """
         )
 
-        # Create index on event_date
         cursor.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_events_date
-            ON events(event_date)
+            CREATE INDEX IF NOT EXISTS idx_events_cluster_key
+            ON events(cluster_key)
+        """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_status
+            ON events(status)
+        """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_importance
+            ON events(importance)
+        """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_object_id
+            ON events(object_id)
+        """
+        )
+
+        # Create index on event_relations
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_relations_source
+            ON event_relations(source_event_id)
+        """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_relations_target
+            ON event_relations(target_event_id)
         """
         )
 
@@ -472,7 +550,7 @@ class SQLiteRepository:
             raise RepositoryError(f"Failed to update candidate status: {e}")
 
     def save_events(self, events: list[Event]) -> int:
-        """Save events with versioning (upsert by dedup_key).
+        """Save events with new comprehensive structure (upsert by dedup_key).
 
         Args:
             events: List of events
@@ -490,74 +568,148 @@ class SQLiteRepository:
             for event in events:
                 # Check if dedup_key exists
                 cursor.execute(
-                    "SELECT version FROM events WHERE dedup_key = ?", (event.dedup_key,)
+                    "SELECT event_id FROM events WHERE dedup_key = ?",
+                    (event.dedup_key,),
                 )
                 existing = cursor.fetchone()
 
                 if existing:
-                    # Update with incremented version
+                    # Update existing event
                     cursor.execute(
                         """
                         UPDATE events SET
-                            version = ?,
-                            title = ?,
-                            summary = ?,
+                            action = ?,
+                            object_id = ?,
+                            object_name_raw = ?,
+                            qualifiers = ?,
+                            stroke = ?,
+                            anchor = ?,
                             category = ?,
-                            event_date = ?,
-                            event_end = ?,
-                            impact_area = ?,
-                            tags = ?,
+                            status = ?,
+                            change_type = ?,
+                            environment = ?,
+                            severity = ?,
+                            planned_start = ?,
+                            planned_end = ?,
+                            actual_start = ?,
+                            actual_end = ?,
+                            time_source = ?,
+                            time_confidence = ?,
+                            summary = ?,
+                            why_it_matters = ?,
                             links = ?,
                             anchors = ?,
+                            impact_area = ?,
+                            impact_type = ?,
                             confidence = ?,
-                            source_channels = ?
+                            importance = ?,
+                            cluster_key = ?
                         WHERE dedup_key = ?
                         """,
                         (
-                            event.version,
-                            event.title,
-                            event.summary,
+                            event.action.value,
+                            event.object_id,
+                            event.object_name_raw,
+                            json.dumps(event.qualifiers),
+                            event.stroke,
+                            event.anchor,
                             event.category.value,
-                            event.event_date.isoformat(),
-                            event.event_end.isoformat() if event.event_end else None,
-                            json.dumps(event.impact_area),
-                            json.dumps(event.tags),
+                            event.status.value,
+                            event.change_type.value,
+                            event.environment.value,
+                            event.severity.value if event.severity else None,
+                            event.planned_start.isoformat()
+                            if event.planned_start
+                            else None,
+                            event.planned_end.isoformat()
+                            if event.planned_end
+                            else None,
+                            event.actual_start.isoformat()
+                            if event.actual_start
+                            else None,
+                            event.actual_end.isoformat() if event.actual_end else None,
+                            event.time_source.value,
+                            event.time_confidence,
+                            event.summary,
+                            event.why_it_matters,
                             json.dumps(event.links),
                             json.dumps(event.anchors),
+                            json.dumps(event.impact_area),
+                            json.dumps(event.impact_type),
                             event.confidence,
-                            json.dumps(event.source_channels),
+                            event.importance,
+                            event.cluster_key,
                             event.dedup_key,
                         ),
                     )
                 else:
-                    # Insert new
+                    # Insert new event
                     cursor.execute(
                         """
                         INSERT INTO events (
-                            event_id, version, message_id, source_msg_event_idx,
-                            dedup_key, event_date, event_end, category, title,
-                            summary, impact_area, tags, links, anchors,
-                            confidence, source_channels, ingested_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            event_id, message_id, source_channels, extracted_at,
+                            action, object_id, object_name_raw, qualifiers, stroke, anchor,
+                            category, status, change_type, environment, severity,
+                            planned_start, planned_end, actual_start, actual_end,
+                            time_source, time_confidence,
+                            summary, why_it_matters, links, anchors, impact_area, impact_type,
+                            confidence, importance, cluster_key, dedup_key
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             str(event.event_id),
-                            event.version,
                             event.message_id,
-                            event.source_msg_event_idx,
-                            event.dedup_key,
-                            event.event_date.isoformat(),
-                            event.event_end.isoformat() if event.event_end else None,
+                            json.dumps(event.source_channels),
+                            event.extracted_at.isoformat(),
+                            event.action.value,
+                            event.object_id,
+                            event.object_name_raw,
+                            json.dumps(event.qualifiers),
+                            event.stroke,
+                            event.anchor,
                             event.category.value,
-                            event.title,
+                            event.status.value,
+                            event.change_type.value,
+                            event.environment.value,
+                            event.severity.value if event.severity else None,
+                            event.planned_start.isoformat()
+                            if event.planned_start
+                            else None,
+                            event.planned_end.isoformat()
+                            if event.planned_end
+                            else None,
+                            event.actual_start.isoformat()
+                            if event.actual_start
+                            else None,
+                            event.actual_end.isoformat() if event.actual_end else None,
+                            event.time_source.value,
+                            event.time_confidence,
                             event.summary,
-                            json.dumps(event.impact_area),
-                            json.dumps(event.tags),
+                            event.why_it_matters,
                             json.dumps(event.links),
                             json.dumps(event.anchors),
+                            json.dumps(event.impact_area),
+                            json.dumps(event.impact_type),
                             event.confidence,
-                            json.dumps(event.source_channels),
-                            event.ingested_at.isoformat(),
+                            event.importance,
+                            event.cluster_key,
+                            event.dedup_key,
+                        ),
+                    )
+
+                # Save relations
+                for relation in event.relations:
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO event_relations
+                        (source_event_id, relation_type, target_event_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            str(event.event_id),
+                            relation.relation_type.value,
+                            str(relation.target_event_id),
+                            datetime.utcnow().isoformat(),
                         ),
                     )
 
@@ -586,8 +738,9 @@ class SQLiteRepository:
             cursor.execute(
                 """
                 SELECT * FROM events
-                WHERE event_date >= ? AND event_date <= ?
-                ORDER BY event_date ASC
+                WHERE COALESCE(actual_start, actual_end, planned_start, planned_end) >= ?
+                  AND COALESCE(actual_start, actual_end, planned_start, planned_end) <= ?
+                ORDER BY COALESCE(actual_start, actual_end, planned_start, planned_end) ASC
                 """,
                 (start_dt.isoformat(), end_dt.isoformat()),
             )
@@ -634,9 +787,10 @@ class SQLiteRepository:
             # Build query with confidence filter
             query = """
                 SELECT * FROM events
-                WHERE event_date >= ? AND event_date <= ?
-                AND confidence >= ?
-                ORDER BY event_date ASC
+                WHERE COALESCE(actual_start, actual_end, planned_start, planned_end) >= ?
+                  AND COALESCE(actual_start, actual_end, planned_start, planned_end) <= ?
+                  AND confidence >= ?
+                ORDER BY COALESCE(actual_start, actual_end, planned_start, planned_end) ASC
             """
 
             params: list[Any] = [
@@ -939,33 +1093,74 @@ class SQLiteRepository:
         )
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
-        """Convert database row to Event."""
+        """Convert database row to Event with new comprehensive structure."""
+        from src.domain.models import (
+            ActionType,
+            ChangeType,
+            Environment,
+            EventStatus,
+            Severity,
+            TimeSource,
+        )
+
         return Event(
+            # Identification
             event_id=UUID(row["event_id"]),
-            version=int(row["version"]),
             message_id=row["message_id"],
-            source_msg_event_idx=int(row["source_msg_event_idx"]),
-            dedup_key=row["dedup_key"],
-            event_date=datetime.fromisoformat(row["event_date"]).replace(
+            source_channels=json.loads(row["source_channels"] or "[]"),
+            extracted_at=datetime.fromisoformat(row["extracted_at"]).replace(
                 tzinfo=pytz.UTC
             ),
-            event_end=(
-                datetime.fromisoformat(row["event_end"]).replace(tzinfo=pytz.UTC)
-                if row["event_end"]
+            # Title slots
+            action=ActionType(row["action"]),
+            object_id=row["object_id"],
+            object_name_raw=row["object_name_raw"],
+            qualifiers=json.loads(row["qualifiers"] or "[]"),
+            stroke=row["stroke"],
+            anchor=row["anchor"],
+            # Classification
+            category=EventCategory(row["category"]),
+            status=EventStatus(row["status"]),
+            change_type=ChangeType(row["change_type"]),
+            environment=Environment(row["environment"]),
+            severity=Severity(row["severity"]) if row["severity"] else None,
+            # Time fields
+            planned_start=(
+                datetime.fromisoformat(row["planned_start"]).replace(tzinfo=pytz.UTC)
+                if row["planned_start"]
                 else None
             ),
-            category=EventCategory(row["category"]),
-            title=row["title"],
+            planned_end=(
+                datetime.fromisoformat(row["planned_end"]).replace(tzinfo=pytz.UTC)
+                if row["planned_end"]
+                else None
+            ),
+            actual_start=(
+                datetime.fromisoformat(row["actual_start"]).replace(tzinfo=pytz.UTC)
+                if row["actual_start"]
+                else None
+            ),
+            actual_end=(
+                datetime.fromisoformat(row["actual_end"]).replace(tzinfo=pytz.UTC)
+                if row["actual_end"]
+                else None
+            ),
+            time_source=TimeSource(row["time_source"]),
+            time_confidence=float(row["time_confidence"]),
+            # Content
             summary=row["summary"],
-            impact_area=json.loads(row["impact_area"] or "[]"),
-            tags=json.loads(row["tags"] or "[]"),
+            why_it_matters=row["why_it_matters"],
             links=json.loads(row["links"] or "[]"),
             anchors=json.loads(row["anchors"] or "[]"),
+            impact_area=json.loads(row["impact_area"] or "[]"),
+            impact_type=json.loads(row["impact_type"] or "[]"),
+            # Quality
             confidence=float(row["confidence"]),
-            source_channels=json.loads(row["source_channels"] or "[]"),
-            ingested_at=datetime.fromisoformat(row["ingested_at"]).replace(
-                tzinfo=pytz.UTC
-            ),
+            importance=int(row["importance"]),
+            # Clustering
+            cluster_key=row["cluster_key"],
+            dedup_key=row["dedup_key"],
+            relations=[],  # Relations loaded separately if needed
         )
 
     def get_last_processed_ts(self, channel_id: str) -> float | None:
@@ -1027,3 +1222,69 @@ class SQLiteRepository:
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to update last processed ts: {e}")
+
+    def get_related_events(self, event_id: UUID) -> list[Event]:
+        """Get events related to the given event.
+
+        Args:
+            event_id: Event ID to find relations for
+
+        Returns:
+            List of related events
+
+        Raises:
+            RepositoryError: On database errors
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT e.* FROM events e
+                JOIN event_relations r ON e.event_id = r.target_event_id
+                WHERE r.source_event_id = ?
+                """,
+                (str(event_id),),
+            )
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [self._row_to_event(row) for row in rows]
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to get related events: {e}")
+
+    def get_events_by_cluster_key(self, cluster_key: str) -> list[Event]:
+        """Get all events in the same cluster (same initiative).
+
+        Args:
+            cluster_key: Cluster key
+
+        Returns:
+            List of events in cluster
+
+        Raises:
+            RepositoryError: On database errors
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT * FROM events
+                WHERE cluster_key = ?
+                ORDER BY extracted_at ASC
+                """,
+                (cluster_key,),
+            )
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [self._row_to_event(row) for row in rows]
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to get events by cluster: {e}")

@@ -47,12 +47,12 @@ def deduplicate_events_use_case(
     """
     # Get events from lookback window using Criteria pattern
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    ingested_after = now - timedelta(days=lookback_days)
+    extracted_after = now - timedelta(days=lookback_days)
 
     # Use EventQueryCriteria instead of raw date window
     criteria = EventQueryCriteria(
-        ingested_after=ingested_after,
-        order_by="ingested_at",
+        extracted_after=extracted_after,
+        order_by="extracted_at",
         order_desc=False,  # Chronological order
     )
 
