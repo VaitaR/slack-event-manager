@@ -9,10 +9,11 @@ AI-powered event extraction and digest system for Slack channels. Automatically 
 - 🔗 **Anchor detection**: Extracts Jira keys, GitHub issues, meeting links, document IDs
 - 📅 **Smart date resolution**: Handles absolute, relative dates, ranges, and timezones
 - 🔄 **Deduplication**: Merges similar events across messages with fuzzy matching
-- 💾 **Local storage**: SQLite database (easy migration to ClickHouse later)
+- 💾 **Dual database**: PostgreSQL (production) or SQLite (development) with seamless switching
 - 💰 **Budget control**: Daily LLM cost tracking with graceful degradation
 - 🌍 **Multi-channel**: Whitelist channels with per-channel configurations
 - 📨 **Digest publishing**: Beautiful Slack Block Kit digests
+- 🐳 **Docker-ready**: Full Docker Compose setup with PostgreSQL, auto-migrations, and Streamlit UI
 
 ## Architecture
 
@@ -37,7 +38,9 @@ src/
 │   ├── slack_client.py
 │   ├── llm_client.py
 │   ├── sqlite_repository.py
-│   └── query_builders.py         # Type-safe queries (NEW)
+│   ├── postgres_repository.py    # PostgreSQL adapter (NEW)
+│   ├── repository_factory.py     # DB selection (NEW)
+│   └── query_builders.py         # Type-safe queries
 ├── use_cases/          # Application orchestration
 │   ├── ingest_messages.py
 │   ├── build_candidates.py
@@ -49,9 +52,10 @@ src/
 ```
 
 **Design Patterns:**
+- **Repository Pattern**: Abstract data access with dual SQLite/PostgreSQL support
+- **Factory Pattern**: Database selection based on configuration
 - **Specification Pattern**: Composable business rules with AND/OR/NOT logic
 - **Query Builder (Criteria)**: Type-safe database queries without string literals
-- **Repository Pattern**: Abstract data access layer
 - **Use Case Pattern**: Clean orchestration of business logic
 
 ## Prerequisites
@@ -98,7 +102,13 @@ llm:
   daily_budget_usd: 10.0
 
 database:
-  path: data/slack_events.db
+  type: sqlite  # or postgres for production
+  path: data/slack_events.db  # for SQLite
+  postgres:  # for PostgreSQL
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
 
 slack:
   digest_channel_id: C789012
@@ -115,7 +125,7 @@ logging:
   level: INFO
 ```
 
-**Note:** `.env` contains ONLY secrets. All other settings are in `config.yaml`.
+**Note:** `.env` contains ONLY secrets (tokens, passwords). All other settings are in `config.yaml`.
 
 ### 3. Run Pipeline
 
@@ -394,6 +404,24 @@ sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY even
 
 ## Recent Updates
 
+### 2025-10-17: PostgreSQL Support ✅
+
+**Production-Ready Database:**
+- ✅ Full PostgreSQL integration with Alembic migrations
+- ✅ Repository factory pattern for seamless DB switching
+- ✅ Docker Compose with PostgreSQL 16 Alpine
+- ✅ Auto-migration on container startup
+- ✅ 100% backward compatible with SQLite
+- ✅ Streamlit UI supports both databases
+- ✅ See `MIGRATION_TO_POSTGRES.md` for migration guide
+
+**Key Features:**
+- Configuration via `DATABASE_TYPE` environment variable
+- Identical schema for SQLite and PostgreSQL
+- JSONB support for structured data in PostgreSQL
+- Health checks and connection pooling
+- 84 tests passing (13 PostgreSQL-specific)
+
 ### 2025-10-10: Configuration Refactoring ✅
 
 **Secrets vs Config Separation:**
@@ -430,16 +458,15 @@ sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY even
 
 ## Future Enhancements
 
-Planned for post-MVP:
+Planned for future releases:
 
-- [ ] ClickHouse migration for production scale
-- [ ] Airflow DAG orchestration (hourly/daily)
 - [ ] Thread/reply processing
 - [ ] Edit/delete event handling
 - [ ] Semantic search with embeddings
 - [ ] Calendar export (Google Calendar, ICS)
 - [ ] Real-time streaming mode
-- [ ] Web dashboard for monitoring
+- [ ] Enhanced web dashboard with analytics
+- [ ] Multi-workspace support
 
 ## License
 

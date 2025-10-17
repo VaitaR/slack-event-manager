@@ -1,19 +1,19 @@
 # AGENTS.md
 
-**Last Updated:** 2025-10-10  
-**Status:** ✅ MVP Complete - Production Ready + Code Quality Enhanced
+**Last Updated:** 2025-10-17  
+**Status:** ✅ Production Ready - PostgreSQL Support Added
 
 ## Project Overview
 
-This is a **Slack Event Manager** that processes messages from Slack channels to extract and categorize release information, product updates, and other relevant events. The system uses AI (OpenAI LLM) to parse unstructured Slack messages and stores structured data in SQLite (with ClickHouse migration path) for analysis and monitoring.
+This is a **Slack Event Manager** that processes messages from Slack channels to extract and categorize release information, product updates, and other relevant events. The system uses AI (OpenAI LLM) to parse unstructured Slack messages and stores structured data in **PostgreSQL or SQLite** for analysis and monitoring.
 
 **Key Components:**
 - **Slack API Integration**: Fetches messages from specified Slack channels (✅ with rate limit handling)
 - **LLM Processing**: Uses OpenAI GPT-5-nano to extract structured data (✅ with comprehensive logging)
 - **Scoring Engine**: Intelligent candidate selection with configurable weights
-- **SQLite Storage**: Stores processed events (easy ClickHouse migration path)
+- **Dual Database Support**: PostgreSQL (production) or SQLite (development) with seamless switching
 - **Deduplication**: Merges similar events across messages using fuzzy matching
-- **Airflow Orchestration**: DAG file ready for automation
+- **Docker Orchestration**: Full Docker Compose setup with PostgreSQL
 
 **Data Flow:**
 ```
@@ -34,7 +34,8 @@ Candidate Building → LLM Extraction → Deduplication → Storage → Digest P
 - Python 3.11+
 - Slack Bot Token with appropriate permissions (channels:read, channels:history, groups:read, groups:history)
 - OpenAI API Key
-- SQLite (included with Python)
+- **Database**: SQLite (included) or PostgreSQL 16+ (recommended for production)
+- **Docker** (optional, for PostgreSQL deployment)
 
 ### Installation
 ```bash
@@ -110,6 +111,8 @@ src/
 │   ├── slack_client.py
 │   ├── llm_client.py
 │   ├── sqlite_repository.py
+│   ├── postgres_repository.py    # PostgreSQL adapter (NEW 2025-10-17)
+│   ├── repository_factory.py     # DB selection (NEW 2025-10-17)
 │   └── query_builders.py         # Query criteria (NEW 2025-10-10)
 ├── services/           # Domain services
 │   ├── text_normalizer.py
@@ -419,6 +422,55 @@ sqlite3 data/test_real_pipeline.db "SELECT * FROM events;"
 ```
 
 ## Recent Changes
+
+### 2025-10-17: PostgreSQL Support ✅
+
+**Full PostgreSQL Integration:**
+- ✅ PostgresRepository implementing RepositoryProtocol
+- ✅ Repository factory pattern for seamless DB switching
+- ✅ Alembic migrations for versioned schema management
+- ✅ Docker Compose with PostgreSQL 16 Alpine
+- ✅ Auto-migration via docker-entrypoint.sh
+- ✅ 100% backward compatible with SQLite
+- ✅ Streamlit UI works with both databases
+- ✅ 13 comprehensive PostgreSQL tests
+
+**Configuration:**
+```yaml
+database:
+  type: sqlite  # or postgres
+  path: data/slack_events.db  # for SQLite
+  postgres:
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
+```
+
+**Environment Variables:**
+```bash
+DATABASE_TYPE=postgres  # or sqlite
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DATABASE=slack_events
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_password
+```
+
+**Docker Deployment:**
+- PostgreSQL enabled by default in docker-compose.yml
+- Automatic schema migrations on startup
+- Health checks and connection pooling configured
+- Volume persistence for data
+
+**Testing:**
+- ✅ 84 tests passing (13 PostgreSQL tests when env configured)
+- ✅ All linters passing
+- ✅ Zero breaking changes
+
+**Documentation:**
+- See `MIGRATION_TO_POSTGRES.md` for complete migration guide
+- See `DOCKER_DEPLOYMENT.md` for Docker setup
 
 ### 2025-10-10: Configuration Refactoring ✅
 
