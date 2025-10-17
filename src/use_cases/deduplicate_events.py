@@ -73,13 +73,18 @@ def deduplicate_events_use_case(
     # Show all events before deduplication
     print("   📋 Events BEFORE deduplication:")
     for i, evt in enumerate(all_events, 1):
-        print(f"   {i}. {evt.title[:60]}")
-        print(
-            f"      Message ID: {evt.message_id[:8]}... (idx: {evt.source_msg_event_idx})"
+        title = f"{evt.action.value}: {evt.object_name_raw}"
+        primary_time = (
+            evt.actual_start
+            or evt.actual_end
+            or evt.planned_start
+            or evt.planned_end
+            or evt.extracted_at
         )
-        print(f"      Date: {evt.event_date.isoformat()}")
-        print(f"      Links: {evt.links}")
-        print(f"      Anchors: {evt.anchors}")
+        print(f"   {i}. {title[:60]}")
+        print(f"      Message ID: {evt.message_id[:8]}...")
+        print(f"      Date: {primary_time.isoformat()}")
+        print(f"      Links: {evt.links[:2]}")  # Show first 2 links
         print(f"      Dedup key: {evt.dedup_key[:16]}...")
         print("")
     sys.stdout.flush()
@@ -106,13 +111,19 @@ def deduplicate_events_use_case(
     # Show events after deduplication
     print("   📋 Events AFTER deduplication:")
     for i, evt in enumerate(deduplicated_events, 1):
-        print(f"   {i}. {evt.title[:60]}")
-        print(
-            f"      Message ID: {evt.message_id[:8]}... (idx: {evt.source_msg_event_idx})"
+        title = f"{evt.action.value}: {evt.object_name_raw}"
+        primary_time = (
+            evt.actual_start
+            or evt.actual_end
+            or evt.planned_start
+            or evt.planned_end
+            or evt.extracted_at
         )
-        print(f"      Date: {evt.event_date.isoformat()}")
-        print(f"      Version: {evt.version}")
+        print(f"   {i}. {title[:60]}")
+        print(f"      Message ID: {evt.message_id[:8]}...")
+        print(f"      Date: {primary_time.isoformat()}")
         print(f"      Channels: {evt.source_channels}")
+        print(f"      Importance: {evt.importance}")
         print("")
     sys.stdout.flush()
 

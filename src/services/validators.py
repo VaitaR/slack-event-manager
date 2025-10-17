@@ -7,14 +7,15 @@ import re
 from typing import Final
 
 from src.domain.models import Event, EventCategory, EventStatus
-
-# Validation thresholds
-MIN_CONFIDENCE_DEFAULT: Final[float] = 0.6
-MIN_IMPORTANCE_DEFAULT: Final[int] = 60
-MAX_TITLE_LENGTH: Final[int] = 140
-MAX_QUALIFIERS: Final[int] = 2
-MAX_LINKS: Final[int] = 3
-MAX_IMPACT_AREA: Final[int] = 3
+from src.domain.validation_constants import (
+    MAX_IMPACT_AREAS,
+    MAX_LINKS,
+    MAX_QUALIFIERS,
+    MAX_SUMMARY_LENGTH,
+    MAX_TITLE_LENGTH,
+    MIN_CONFIDENCE_DEFAULT,
+    MIN_IMPORTANCE_DEFAULT,
+)
 
 # Patterns for forbidden elements
 URL_PATTERN: Final[re.Pattern[str]] = re.compile(r"https?://", re.IGNORECASE)
@@ -123,8 +124,10 @@ class EventValidator:
         # Summary required
         if not event.summary or not event.summary.strip():
             errors.append("Summary is required")
-        elif len(event.summary) > 320:
-            errors.append(f"Summary too long: {len(event.summary)} chars (max 320)")
+        elif len(event.summary) > MAX_SUMMARY_LENGTH:
+            errors.append(
+                f"Summary too long: {len(event.summary)} chars (max {MAX_SUMMARY_LENGTH})"
+            )
 
         # Category warning
         if event.category == EventCategory.UNKNOWN:
@@ -152,9 +155,9 @@ class EventValidator:
                 errors.append(f"Invalid link format: {link}")
 
         # Impact area limit
-        if len(event.impact_area) > MAX_IMPACT_AREA:
+        if len(event.impact_area) > MAX_IMPACT_AREAS:
             errors.append(
-                f"Too many impact areas: {len(event.impact_area)} (max {MAX_IMPACT_AREA})"
+                f"Too many impact areas: {len(event.impact_area)} (max {MAX_IMPACT_AREAS})"
             )
 
         return errors

@@ -13,6 +13,7 @@ New Structure:
 """
 
 import hashlib
+from datetime import datetime
 
 from src.domain.deduplication_constants import (
     DEFAULT_DATE_WINDOW_HOURS,
@@ -326,8 +327,18 @@ def deduplicate_event_list(
     if not events:
         return []
 
+    # Helper to get primary time for sorting
+    def get_primary_time(event: Event) -> datetime:
+        return (
+            event.actual_start
+            or event.actual_end
+            or event.planned_start
+            or event.planned_end
+            or event.extracted_at
+        )
+
     # Sort by date to process chronologically
-    sorted_events = sorted(events, key=lambda e: e.event_date)
+    sorted_events = sorted(events, key=get_primary_time)
 
     deduplicated: list[Event] = []
     processed_dedup_keys: set[str] = set()

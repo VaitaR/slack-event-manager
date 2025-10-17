@@ -9,6 +9,12 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.domain.validation_constants import (
+    MAX_IMPACT_AREAS,
+    MAX_LINKS,
+    MAX_QUALIFIERS,
+)
+
 
 class CandidateStatus(str, Enum):
     """Status of event candidate processing."""
@@ -316,25 +322,25 @@ class Event(BaseModel):
     @field_validator("qualifiers")
     @classmethod
     def validate_qualifiers(cls, v: list[str]) -> list[str]:
-        """Validate max 2 qualifiers."""
-        if len(v) > 2:
-            raise ValueError("Maximum 2 qualifiers allowed")
+        """Validate max qualifiers."""
+        if len(v) > MAX_QUALIFIERS:
+            raise ValueError(f"Maximum {MAX_QUALIFIERS} qualifiers allowed")
         return v
 
     @field_validator("impact_area")
     @classmethod
     def validate_impact_area(cls, v: list[str]) -> list[str]:
-        """Validate max 3 impact areas."""
-        if len(v) > 3:
-            raise ValueError("Maximum 3 impact areas allowed")
+        """Validate max impact areas."""
+        if len(v) > MAX_IMPACT_AREAS:
+            raise ValueError(f"Maximum {MAX_IMPACT_AREAS} impact areas allowed")
         return v
 
     @field_validator("links")
     @classmethod
     def validate_links(cls, v: list[str]) -> list[str]:
-        """Validate max 3 links."""
-        if len(v) > 3:
-            raise ValueError("Maximum 3 links allowed")
+        """Validate max links."""
+        if len(v) > MAX_LINKS:
+            raise ValueError(f"Maximum {MAX_LINKS} links allowed")
         return v
 
 

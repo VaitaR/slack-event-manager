@@ -7,6 +7,7 @@ import re
 from typing import Final
 
 from src.domain.models import Event, EventCategory, Severity
+from src.domain.validation_constants import MAX_QUALIFIERS
 
 # Title format: <Action>: <Object> — <Qualifier>[, <Stroke>] (<Anchor>)
 # Max length constraints
@@ -249,8 +250,10 @@ class TitleRenderer:
         errors: list[str] = []
 
         # Max qualifiers
-        if len(event.qualifiers) > 2:
-            errors.append(f"Too many qualifiers: {len(event.qualifiers)} (max 2)")
+        if len(event.qualifiers) > MAX_QUALIFIERS:
+            errors.append(
+                f"Too many qualifiers: {len(event.qualifiers)} (max {MAX_QUALIFIERS})"
+            )
 
         # Check for forbidden elements in slots
         all_text = " ".join(

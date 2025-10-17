@@ -17,6 +17,12 @@ from src.domain.models import (
     ImportanceScore,
     Severity,
 )
+from src.domain.validation_constants import (
+    IMPORTANCE_CRITICAL,
+    IMPORTANCE_HIGH,
+    IMPORTANCE_MEDIUM,
+    MAX_IMPACT_AREAS,
+)
 
 # Category base scores
 CATEGORY_BASE_SCORES: Final[dict[EventCategory, int]] = {
@@ -137,9 +143,9 @@ class ImportanceScorer:
         scope_mult = 1.0
 
         # Impact area count
-        if len(event.impact_area) >= 3:
+        if len(event.impact_area) >= MAX_IMPACT_AREAS:
             scope_mult *= 1.3
-        elif len(event.impact_area) >= 2:
+        elif len(event.impact_area) >= (MAX_IMPACT_AREAS - 1):
             scope_mult *= 1.15
         elif len(event.impact_area) >= 1:
             scope_mult *= 1.0
@@ -261,11 +267,11 @@ class ImportanceScorer:
             >>> scorer.get_importance_label(85)
             'high'
         """
-        if importance >= 80:
+        if importance >= IMPORTANCE_CRITICAL:
             return "critical"
-        elif importance >= 60:
+        elif importance >= IMPORTANCE_HIGH:
             return "high"
-        elif importance >= 40:
+        elif importance >= IMPORTANCE_MEDIUM:
             return "medium"
         else:
             return "low"

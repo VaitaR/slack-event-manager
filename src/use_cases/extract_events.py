@@ -53,7 +53,9 @@ def _get_importance_scorer() -> ImportanceScorer:
     return _importance_scorer
 
 
-def _parse_datetime(dt_str: str | None, fallback: datetime) -> datetime | None:
+def _parse_datetime(
+    dt_str: str | None, fallback: datetime | None = None
+) -> datetime | None:
     """Parse ISO8601 datetime string with fallback."""
     if not dt_str:
         return None
@@ -63,7 +65,7 @@ def _parse_datetime(dt_str: str | None, fallback: datetime) -> datetime | None:
             dt = dt.replace(tzinfo=pytz.UTC)
         return dt
     except (ValueError, AttributeError):
-        return fallback if dt_str else None
+        return fallback
 
 
 def convert_llm_event_to_domain(
