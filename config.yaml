@@ -11,8 +11,18 @@ llm:
   max_events_per_msg: 5
 
 # Database Configuration
+# database.type can be overridden by DATABASE_TYPE environment variable
 database:
-  path: data/slack_events.db
+  type: sqlite  # Options: "sqlite" (development) or "postgres" (production)
+  path: data/slack_events.db  # Used only for SQLite
+  
+  # PostgreSQL settings (used only when type: postgres)
+  # Password must be set in .env as POSTGRES_PASSWORD=your_password
+  postgres:
+    host: localhost
+    port: 5432
+    database: slack_events
+    user: postgres
 
 # Slack Configuration
 slack:

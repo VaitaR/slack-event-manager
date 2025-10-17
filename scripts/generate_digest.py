@@ -13,8 +13,8 @@ import pytz
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import get_settings
 from src.use_cases.publish_digest import publish_digest_use_case
 
@@ -68,7 +68,7 @@ def main() -> None:
     # Initialize adapters
     print("Initializing clients...")
     slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
-    repository = SQLiteRepository(db_path=settings.db_path)
+    repository = create_repository(settings)
 
     date_str = target_date.strftime("%Y-%m-%d")
     print(f"\nGenerating digest for {date_str}")

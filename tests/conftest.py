@@ -1,5 +1,6 @@
 """Pytest configuration and shared fixtures."""
 
+import os
 from datetime import datetime
 from unittest.mock import Mock
 
@@ -159,3 +160,88 @@ def mock_repository() -> Mock:
     mock.get_daily_llm_cost.return_value = 0.0
     mock.get_cached_llm_response.return_value = None
     return mock
+
+
+@pytest.fixture
+def postgres_available() -> bool:
+    """Check if PostgreSQL is available for testing."""
+    return (
+        os.environ.get("POSTGRES_PASSWORD") is not None
+        and os.environ.get("TEST_POSTGRES", "0") == "1"
+    )
+
+
+@pytest.fixture
+def postgres_test_db():
+    """Setup and teardown PostgreSQL test database.
+
+    Requires:
+        - POSTGRES_PASSWORD environment variable
+        - TEST_POSTGRES=1 environment variable
+        - PostgreSQL running on localhost:5432
+
+    Yields:
+        PostgresRepository instance with clean test database
+    """
+    # Check if PostgreSQL testing is enabled
+    if not os.environ.get("POSTGRES_PASSWORD"):
+        pytest.skip("POSTGRES_PASSWORD not set - skipping PostgreSQL tests")
+    if os.environ.get("TEST_POSTGRES", "0") != "1":
+        pytest.skip("TEST_POSTGRES=1 not set - skipping PostgreSQL tests")
+
+    from src.adapters.postgres_repository import PostgresRepository
+
+    # Connect to test database
+    test_db_name = "slack_events_test"
+    password = os.environ.get("POSTGRES_PASSWORD")
+    if not password:
+        pytest.skip("POSTGRES_PASSWORD not set")
+
+    repo = PostgresRepository(
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=int(os.environ.get("POSTGRES_PORT", "5432")),
+        database=test_db_name,
+        user=os.environ.get("POSTGRES_USER", "postgres"),
+        password=password,
+        minconn=1,
+        maxconn=2,
+    )
+
+    # Clean up: drop all tables before test
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DROP TABLE IF EXISTS ingestion_state CASCADE;
+                DROP TABLE IF EXISTS channel_watermarks CASCADE;
+                DROP TABLE IF EXISTS llm_calls CASCADE;
+                DROP TABLE IF EXISTS events CASCADE;
+                DROP TABLE IF EXISTS event_candidates CASCADE;
+                DROP TABLE IF EXISTS raw_slack_messages CASCADE;
+            """)
+            conn.commit()
+
+    # Run migrations
+    import subprocess
+
+    subprocess.run(
+        ["alembic", "upgrade", "head"],
+        check=True,
+        capture_output=True,
+    )
+
+    yield repo
+
+    # Cleanup after test
+    with repo._get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DROP TABLE IF EXISTS ingestion_state CASCADE;
+                DROP TABLE IF EXISTS channel_watermarks CASCADE;
+                DROP TABLE IF EXISTS llm_calls CASCADE;
+                DROP TABLE IF EXISTS events CASCADE;
+                DROP TABLE IF EXISTS event_candidates CASCADE;
+                DROP TABLE IF EXISTS raw_slack_messages CASCADE;
+            """)
+            conn.commit()
+
+    repo.close()
