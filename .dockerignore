@@ -44,8 +44,6 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
-# Airflow (not using)
-airflow/
 
 # Scripts not needed in container (commented out for Docker testing)
 # scripts/demo_e2e.py

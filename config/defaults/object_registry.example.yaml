@@ -31,11 +31,6 @@ objects:
     - Message queue
     - Event streaming
 
-  data.airflow:
-    - Airflow
-    - DAG orchestration
-    - Workflow engine
-
   # Example: Backend Services
   backend.api:
     - API Gateway

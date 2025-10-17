@@ -82,10 +82,6 @@ data/
 logs/
 *.log
 
-# Airflow (for future)
-airflow/logs/
-airflow.cfg
-airflow.db
 
 # OS
 Thumbs.db

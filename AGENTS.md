@@ -13,7 +13,6 @@ This is a **Slack Event Manager** that processes messages from Slack channels to
 - **Scoring Engine**: Intelligent candidate selection with configurable weights
 - **Postgres or SQLlite Storage**: Stores processed events 
 - **Deduplication**: Merges similar events across messages using fuzzy matching
-- **Airflow Orchestration**: DAG file ready for automation
 
 **Data Flow:**
 ```
@@ -422,7 +421,6 @@ python -c "import openai; print(openai.api_key is not None)"
 ```
 
 ### Log Locations
-- **Airflow logs**: `./logs/` directory
 - **Application logs**: Console output or configured log files
 - **Docker logs**: `docker-compose logs [service-name]`
 
