@@ -44,9 +44,6 @@ venv.bak/
 .env.*
 !.env.example
 
-# Configuration
-config.yaml
-
 # Testing
 .pytest_cache/
 .coverage
