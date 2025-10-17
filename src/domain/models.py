@@ -5,6 +5,7 @@ All models use Pydantic v2 for validation and serialization.
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -302,6 +303,18 @@ class Event(BaseModel):
         description="Impact types (perf_degradation, downtime, etc.)",
     )
 
+    @field_validator("impact_type", mode="before")
+    @classmethod
+    def validate_impact_type(cls, v: Any) -> list[str]:
+        """Convert impact_type to list if it's a string or None."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v] if v else []
+        if isinstance(v, list):
+            return v
+        return []
+
     # 3.6 Quality & Importance
     confidence: float = Field(..., ge=0.0, le=1.0, description="Extraction confidence")
     importance: int = Field(
@@ -383,6 +396,18 @@ class LLMEvent(BaseModel):
     anchors: list[str] = Field(default_factory=list)
     impact_area: list[str] = Field(default_factory=list, max_length=3)
     impact_type: list[str] = Field(default_factory=list)
+
+    @field_validator("impact_type", mode="before")
+    @classmethod
+    def validate_impact_type(cls, v: Any) -> list[str]:
+        """Convert impact_type to list if it's a string or None."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v] if v else []
+        if isinstance(v, list):
+            return v
+        return []
 
     # Quality
     confidence: float = Field(..., ge=0.0, le=1.0)

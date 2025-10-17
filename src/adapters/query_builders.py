@@ -29,12 +29,12 @@ class EventQueryCriteria:
         >>> # Use in SQL: SELECT * FROM events WHERE {where}
     """
 
-    # Date filters
+    # Date filters (based on primary event time)
     start_date: datetime | None = None
-    """Filter events with event_date >= start_date"""
+    """Filter events with primary time >= start_date (COALESCE(actual_start, actual_end, planned_start, planned_end))"""
 
     end_date: datetime | None = None
-    """Filter events with event_date <= end_date"""
+    """Filter events with primary time <= end_date (COALESCE(actual_start, actual_end, planned_start, planned_end))"""
 
     extracted_after: datetime | None = None
     """Filter events extracted after this timestamp"""
@@ -60,13 +60,13 @@ class EventQueryCriteria:
     message_ids: list[str] | None = None
     """Filter by specific message IDs (OR logic)"""
 
-    # Text search
-    title_contains: str | None = None
-    """Search for text in event title (case-insensitive)"""
+    # Text search (removed - title no longer stored)
+    # title_contains: str | None = None
+    # """Search for text in event title (case-insensitive)"""
 
-    # Version filters
-    min_version: int | None = None
-    """Minimum version number (for merged events)"""
+    # Version filters (removed - version no longer tracked)
+    # min_version: int | None = None
+    # """Minimum version number (for merged events)"""
 
     # Limits
     limit: int | None = None
@@ -76,8 +76,8 @@ class EventQueryCriteria:
     """Offset for pagination"""
 
     # Ordering
-    order_by: str = "event_date"
-    """Column to order by (default: event_date)"""
+    order_by: str = "extracted_at"
+    """Column to order by (default: extracted_at for chronological processing)"""
 
     order_desc: bool = True
     """Order descending (default: True for newest first)"""
@@ -92,20 +92,25 @@ class EventQueryCriteria:
             >>> criteria = EventQueryCriteria(start_date=datetime(...))
             >>> where, params = criteria.to_where_clause()
             >>> where
-            'event_date >= ?'
+            'COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) >= ?'
             >>> params
             ['2025-10-01T00:00:00+00:00']
         """
         conditions: list[str] = []
         params: list[Any] = []
 
-        # Date range filters
+        # Date range filters (using primary event time)
+        # Primary time: COALESCE(actual_start, actual_end, planned_start, planned_end)
         if self.start_date:
-            conditions.append("event_date >= ?")
+            conditions.append(
+                "COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) >= ?"
+            )
             params.append(self.start_date.isoformat())
 
         if self.end_date:
-            conditions.append("event_date <= ?")
+            conditions.append(
+                "COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) <= ?"
+            )
             params.append(self.end_date.isoformat())
 
         # Extraction time filters
@@ -147,15 +152,16 @@ class EventQueryCriteria:
             conditions.append(f"message_id IN ({placeholders})")
             params.extend(self.message_ids)
 
-        # Title search
-        if self.title_contains:
-            conditions.append("LOWER(title) LIKE ?")
-            params.append(f"%{self.title_contains.lower()}%")
+        # Title search - REMOVED (title column no longer exists)
+        # Use object_name_raw or summary for text search instead
+        # if self.title_contains:
+        #     conditions.append("LOWER(title) LIKE ?")
+        #     params.append(f"%{self.title_contains.lower()}%")
 
-        # Version filter
-        if self.min_version is not None:
-            conditions.append("version >= ?")
-            params.append(self.min_version)
+        # Version filter - REMOVED (version column no longer exists)
+        # if self.min_version is not None:
+        #     conditions.append("version >= ?")
+        #     params.append(self.min_version)
 
         # Build WHERE clause
         where = " AND ".join(conditions) if conditions else "1=1"
@@ -362,8 +368,8 @@ def product_events_criteria(
     """Create criteria for product events in date range.
 
     Args:
-        start_date: Start of date range
-        end_date: End of date range
+        start_date: Start of date range (filters on primary event time)
+        end_date: End of date range (filters on primary event time)
 
     Returns:
         EventQueryCriteria for product category events
@@ -373,6 +379,6 @@ def product_events_criteria(
         end_date=end_date,
         categories=[EventCategory.PRODUCT],
         min_confidence=0.7,
-        order_by="event_date",
+        order_by="actual_start",  # Order by primary time field
         order_desc=False,  # Chronological order
     )

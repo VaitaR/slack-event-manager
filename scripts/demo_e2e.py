@@ -379,9 +379,12 @@ def run_e2e_demo(
     print("📥 Ingesting messages from Slack...")
 
     # Get channels to process
-    from src.config.channels import get_all_channel_ids
-
-    channels_to_process = [channel_id] if channel_id else get_all_channel_ids()
+    settings = get_settings()
+    channels_to_process = (
+        [channel_id]
+        if channel_id
+        else [ch.channel_id for ch in settings.slack_channels]
+    )
     print(f"📋 Processing channels: {', '.join(channels_to_process)}")
 
     # Run ingestion use case

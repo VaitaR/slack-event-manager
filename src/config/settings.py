@@ -11,7 +11,6 @@ import yaml
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.config.channels import MONITORED_CHANNELS
 from src.domain.deduplication_constants import (
     DEFAULT_DATE_WINDOW_HOURS,
     DEFAULT_MESSAGE_LOOKBACK_DAYS,
@@ -132,6 +131,21 @@ class Settings(BaseSettings):
         if "logging" in config:
             data.setdefault("log_level", config["logging"].get("level", "INFO"))
 
+        # Load monitored channels from config.yaml
+        if "channels" in config:
+            channels = []
+            for ch in config["channels"]:
+                channels.append(
+                    ChannelConfig(
+                        channel_id=ch["channel_id"],
+                        channel_name=ch["channel_name"],
+                        threshold_score=ch.get("threshold_score", 0.0),
+                        keyword_weight=ch.get("keyword_weight", 0.0),
+                        whitelist_keywords=ch.get("whitelist_keywords", []),
+                    )
+                )
+            data.setdefault("slack_channels", channels)
+
         if "digest" in config:
             data.setdefault("digest_max_events", config["digest"].get("max_events", 10))
             data.setdefault(
@@ -216,10 +230,10 @@ class Settings(BaseSettings):
 
         super().__init__(**data)
 
-    # Slack channels (from code, not config file)
+    # Slack channels (loaded from config.yaml)
     slack_channels: list[ChannelConfig] = Field(
-        default=MONITORED_CHANNELS,
-        description="List of channels to monitor",
+        default_factory=list,
+        description="List of channels to monitor (loaded from config.yaml)",
     )
     slack_digest_channel_id: str = Field(
         default="YOUR_DIGEST_CHANNEL_ID",
