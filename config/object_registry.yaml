@@ -1,0 +1,84 @@
+# Object Registry
+#
+# Maps raw object names to canonical object IDs.
+# Each object_id has a list of synonyms (case-insensitive matching).
+
+objects:
+  # Wallet & Trading
+  wallet.stocks:
+    - Stocks & ETFs
+    - Stock trading
+    - Equity wallet
+    - Securities trading
+
+  wallet.crypto:
+    - Crypto wallet
+    - Cryptocurrency
+    - Digital assets
+    - Bitcoin wallet
+
+  # Data Platform
+  data.clickhouse:
+    - ClickHouse
+    - CH cluster
+    - Data warehouse
+    - Analytics DB
+
+  data.kafka:
+    - Kafka
+    - Message queue
+    - Event streaming
+
+  data.airflow:
+    - Airflow
+    - DAG orchestration
+    - Workflow engine
+
+  # Backend Services
+  backend.api:
+    - API Gateway
+    - REST API
+    - Backend API
+    - API service
+
+  backend.auth:
+    - Authentication
+    - Auth service
+    - Login service
+    - Identity service
+
+  # Frontend
+  frontend.web:
+    - Web app
+    - Web frontend
+    - Browser app
+    - Web interface
+
+  frontend.mobile:
+    - Mobile app
+    - iOS app
+    - Android app
+    - Mobile client
+
+  # Infrastructure
+  infra.kubernetes:
+    - Kubernetes
+    - K8s
+    - Container orchestration
+    - K8s cluster
+
+  infra.aws:
+    - AWS
+    - Amazon Web Services
+    - Cloud infrastructure
+
+  # Compliance & Risk
+  compliance.kyc:
+    - KYC
+    - Know Your Customer
+    - Identity verification
+
+  compliance.aml:
+    - AML
+    - Anti-Money Laundering
+    - Transaction monitoring

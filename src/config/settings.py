@@ -155,6 +155,65 @@ class Settings(BaseSettings):
                 ),
             )
 
+        if "importance" in config:
+            data.setdefault(
+                "importance_min_publish_threshold",
+                config["importance"].get("min_publish_threshold", 60),
+            )
+            data.setdefault(
+                "importance_high_priority_threshold",
+                config["importance"].get("high_priority_threshold", 80),
+            )
+            data.setdefault(
+                "importance_category_base_scores",
+                config["importance"].get(
+                    "category_base_scores",
+                    {
+                        "product": 30,
+                        "risk": 35,
+                        "process": 20,
+                        "marketing": 15,
+                        "org": 25,
+                        "unknown": 10,
+                    },
+                ),
+            )
+            data.setdefault(
+                "importance_critical_subsystems",
+                config["importance"].get(
+                    "critical_subsystems",
+                    [
+                        "authentication",
+                        "payment",
+                        "trading",
+                        "wallet",
+                        "database",
+                        "api-gateway",
+                    ],
+                ),
+            )
+
+        if "validation" in config:
+            data.setdefault(
+                "validation_min_confidence",
+                config["validation"].get("min_confidence", 0.6),
+            )
+            data.setdefault(
+                "validation_max_title_length",
+                config["validation"].get("max_title_length", 140),
+            )
+            data.setdefault(
+                "validation_max_qualifiers",
+                config["validation"].get("max_qualifiers", 2),
+            )
+            data.setdefault(
+                "validation_max_links", config["validation"].get("max_links", 3)
+            )
+            data.setdefault(
+                "validation_max_impact_area",
+                config["validation"].get("max_impact_area", 3),
+            )
+
         super().__init__(**data)
 
     # Slack channels (from code, not config file)
@@ -229,6 +288,51 @@ class Settings(BaseSettings):
             "unknown": 6,
         },
         description="Category priority mapping for digest sorting",
+    )
+
+    # Importance scoring configuration
+    importance_min_publish_threshold: int = Field(
+        default=60, description="Minimum importance score to publish (0-100)"
+    )
+    importance_high_priority_threshold: int = Field(
+        default=80, description="Threshold for high-priority events"
+    )
+    importance_category_base_scores: dict[str, int] = Field(
+        default_factory=lambda: {
+            "product": 30,
+            "risk": 35,
+            "process": 20,
+            "marketing": 15,
+            "org": 25,
+            "unknown": 10,
+        },
+        description="Base importance scores by category",
+    )
+    importance_critical_subsystems: list[str] = Field(
+        default_factory=lambda: [
+            "authentication",
+            "payment",
+            "trading",
+            "wallet",
+            "database",
+            "api-gateway",
+        ],
+        description="Critical subsystems for importance boost",
+    )
+
+    # Validation configuration
+    validation_min_confidence: float = Field(
+        default=0.6, description="Minimum confidence for quality filter"
+    )
+    validation_max_title_length: int = Field(
+        default=140, description="Maximum title length"
+    )
+    validation_max_qualifiers: int = Field(
+        default=2, description="Maximum number of qualifiers"
+    )
+    validation_max_links: int = Field(default=3, description="Maximum number of links")
+    validation_max_impact_area: int = Field(
+        default=3, description="Maximum number of impact areas"
     )
 
     # Observability

@@ -461,8 +461,12 @@ def show_events_table(db_path: str):
         conn = get_readonly_connection(db_path)
         events_df = pd.read_sql_query(
             """
-            SELECT event_id, message_id, source_msg_event_idx, title, category,
-                   event_date, confidence, dedup_key, version
+            SELECT event_id, message_id,
+                   action || ' ' || object_name_raw as title,
+                   category, status,
+                   COALESCE(actual_start, actual_end, planned_start, planned_end) as event_date,
+                   confidence, importance,
+                   cluster_key, dedup_key
             FROM events
             ORDER BY event_date DESC
         """,
@@ -483,21 +487,24 @@ def show_events_table(db_path: str):
             column_config={
                 "event_id": st.column_config.TextColumn("Event ID", width="medium"),
                 "title": st.column_config.TextColumn("Title", width="large"),
-                "category": st.column_config.TextColumn("Category", width="medium"),
+                "category": st.column_config.TextColumn("Category", width="small"),
+                "status": st.column_config.TextColumn("Status", width="small"),
                 "event_date": st.column_config.DatetimeColumn(
-                    "Date", format="YYYY-MM-DD"
+                    "Date", format="YYYY-MM-DD HH:mm"
                 ),
                 "confidence": st.column_config.NumberColumn(
                     "Confidence", format="%.2f"
                 ),
+                "importance": st.column_config.NumberColumn(
+                    "Importance", width="small"
+                ),
                 "message_id": st.column_config.TextColumn(
                     "Source Message", width="medium"
                 ),
-                "source_msg_event_idx": st.column_config.NumberColumn(
-                    "Event Index", width="small"
+                "cluster_key": st.column_config.TextColumn(
+                    "Cluster Key", width="small"
                 ),
-                "dedup_key": st.column_config.TextColumn("Dedup Key", width="medium"),
-                "version": st.column_config.TextColumn("Version", width="small"),
+                "dedup_key": st.column_config.TextColumn("Dedup Key", width="small"),
             },
         )
 
@@ -517,9 +524,12 @@ def show_gantt_chart(db_path: str):
         conn = get_readonly_connection(db_path)
         events_df = pd.read_sql_query(
             """
-            SELECT title, category, event_date
+            SELECT
+                action || ' ' || object_name_raw as title,
+                category,
+                COALESCE(actual_start, actual_end, planned_start, planned_end) as event_date
             FROM events
-            WHERE event_date IS NOT NULL
+            WHERE COALESCE(actual_start, actual_end, planned_start, planned_end) IS NOT NULL
             ORDER BY event_date
         """,
             conn,

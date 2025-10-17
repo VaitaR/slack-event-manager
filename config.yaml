@@ -43,6 +43,33 @@ digest:
     org: 5
     unknown: 6
 
+# Importance Scoring Configuration
+importance:
+  min_publish_threshold: 60  # Minimum importance to publish (0-100)
+  high_priority_threshold: 80  # Threshold for high-priority events
+  category_base_scores:
+    product: 30
+    risk: 35
+    process: 20
+    marketing: 15
+    org: 25
+    unknown: 10
+  critical_subsystems:
+    - authentication
+    - payment
+    - trading
+    - wallet
+    - database
+    - api-gateway
+
+# Validation Configuration
+validation:
+  min_confidence: 0.6  # Minimum confidence for quality filter
+  max_title_length: 140
+  max_qualifiers: 2
+  max_links: 3
+  max_impact_area: 3
+
 # Observability
 logging:
   level: INFO
