@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Channels Configuration Schema",
+  "description": "Schema for Slack channels configuration",
+  "type": "object",
+  "properties": {
+    "channels": {
+      "type": "array",
+      "description": "List of monitored Slack channels",
+      "items": {
+        "type": "object",
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "pattern": "^C[A-Z0-9]+$",
+            "description": "Slack channel ID (starts with C)"
+          },
+          "channel_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable channel name"
+          },
+          "threshold_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Minimum candidate score (0-1)"
+          },
+          "keyword_weight": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Weight for keyword matching"
+          },
+          "whitelist_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "description": "Keywords to boost message score"
+          }
+        },
+        "required": ["channel_id", "channel_name"],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": ["channels"],
+  "additionalProperties": false
+}

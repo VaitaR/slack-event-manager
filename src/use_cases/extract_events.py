@@ -38,9 +38,28 @@ def _get_object_registry() -> ObjectRegistry:
     """Get or create ObjectRegistry instance."""
     global _object_registry
     if _object_registry is None:
-        registry_path = (
-            Path(__file__).parent.parent.parent / "config" / "object_registry.yaml"
-        )
+        from src.config.settings import get_settings
+
+        settings = get_settings()
+        registry_path = Path(settings.object_registry_path)
+
+        if not registry_path.exists():
+            # Graceful fallback if file doesn't exist
+            import logging
+
+            logging.warning(
+                f"Object registry not found at {registry_path}. "
+                "Object canonicalization disabled."
+            )
+            # Try fallback to example file
+            fallback_path = Path("config/defaults/object_registry.example.yaml")
+            if fallback_path.exists():
+                registry_path = fallback_path
+                logging.info(f"Using fallback registry: {fallback_path}")
+            else:
+                # Create minimal empty registry
+                logging.warning("No object registry available")
+
         _object_registry = ObjectRegistry(registry_path)
     return _object_registry
 

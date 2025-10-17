@@ -69,7 +69,7 @@ def create_test_event(
 @pytest.fixture
 def mock_settings() -> Settings:
     """Create mock settings."""
-    with patch("src.config.settings.load_config_yaml") as mock_config:
+    with patch("src.config.settings.load_all_configs") as mock_config:
         mock_config.return_value = {
             "llm": {"model": "gpt-5-nano", "temperature": 1.0},
             "database": {"path": "data/test.db"},

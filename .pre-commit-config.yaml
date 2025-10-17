@@ -42,6 +42,7 @@ repos:
           - types-PyYAML
           - types-python-dateutil
           - types-requests
+          - types-jsonschema
           - pydantic>=2.6.0
           - pydantic-settings>=2.2.0
           - pytest>=8.0.0

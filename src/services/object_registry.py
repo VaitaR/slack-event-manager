@@ -67,7 +67,9 @@ class ObjectRegistry:
             Canonical object_id if found, None otherwise
 
         Example:
-            >>> registry = ObjectRegistry("config/object_registry.yaml")
+            >>> from src.config.settings import get_settings
+            >>> settings = get_settings()
+            >>> registry = ObjectRegistry(settings.object_registry_path)
             >>> registry.canonicalize_object("Stocks & ETFs")
             'wallet.stocks'
             >>> registry.canonicalize_object("CH cluster")

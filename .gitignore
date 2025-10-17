@@ -47,6 +47,16 @@ venv.bak/
 # Configuration
 config.yaml
 
+# Config directory - ignore all YAML except defaults/ and schemas/
+config/*.yaml
+config/*.yml
+!config/defaults/
+!config/schemas/
+
+# Explicitly allow example files
+!*.example.yaml
+!*.example.yml
+
 # Testing
 .pytest_cache/
 .coverage

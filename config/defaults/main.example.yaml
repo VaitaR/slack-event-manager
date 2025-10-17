@@ -1,6 +1,9 @@
-# Slack Event Manager Configuration Example
-# Copy this file to config.yaml and customize with your settings
-# Secrets (tokens, API keys) are stored in .env file
+# Slack Event Manager - Main Configuration Example
+# Copy this to config/main.yaml and customize with your settings
+#
+# IMPORTANT: This file contains ONLY main settings (llm, database, processing, etc.)
+# Channels configuration is in config/defaults/channels.example.yaml
+# Object registry is in config/defaults/object_registry.example.yaml
 
 # LLM Configuration
 llm:
@@ -69,49 +72,6 @@ validation:
   max_qualifiers: 2
   max_links: 3
   max_impact_area: 3
-
-# Monitored Slack Channels
-# Add your channels here with their specific configurations
-channels:
-  - channel_id: C1234567890
-    channel_name: releases
-    threshold_score: 0.0
-    keyword_weight: 0.0
-    whitelist_keywords:
-      - release
-      - deploy
-      - launch
-      - update
-      - new
-      - announcement
-      - scheduled
-      - security
-      - metrics
-      - maintenance
-      - incident
-      - daily
-      - weekly
-      - monthly
-      - report
-      - summary
-      - alert
-
-  - channel_id: C0987654321
-    channel_name: product-updates
-    threshold_score: 0.0
-    keyword_weight: 0.0
-    whitelist_keywords:
-      - release
-      - deploy
-      - launch
-      - update
-      - new
-      - announcement
-
-  - channel_id: C1111111111
-    channel_name: team-engineering
-    threshold_score: 0.0
-    keyword_weight: 0.0
 
 # Observability
 logging:

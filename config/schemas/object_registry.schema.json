@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Object Registry Schema",
+  "description": "Schema for object registry configuration (maps raw names to canonical IDs)",
+  "type": "object",
+  "properties": {
+    "objects": {
+      "type": "object",
+      "description": "Mapping of canonical object IDs to synonym lists",
+      "patternProperties": {
+        "^[a-z0-9_]+\\.[a-z0-9_]+$": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "List of synonyms for this object"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["objects"],
+  "additionalProperties": false
+}
