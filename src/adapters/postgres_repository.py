@@ -216,10 +216,22 @@ class PostgresRepository:
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                         ON CONFLICT (message_id) DO UPDATE SET
+                            user_real_name = EXCLUDED.user_real_name,
+                            user_display_name = EXCLUDED.user_display_name,
+                            user_email = EXCLUDED.user_email,
+                            user_profile_image = EXCLUDED.user_profile_image,
                             text_raw = EXCLUDED.text_raw,
+                            blocks_text = EXCLUDED.blocks_text,
                             text_norm = EXCLUDED.text_norm,
                             reply_count = EXCLUDED.reply_count,
                             reactions = EXCLUDED.reactions,
+                            links_raw = EXCLUDED.links_raw,
+                            links_norm = EXCLUDED.links_norm,
+                            anchors = EXCLUDED.anchors,
+                            attachments_count = EXCLUDED.attachments_count,
+                            files_count = EXCLUDED.files_count,
+                            total_reactions = EXCLUDED.total_reactions,
+                            permalink = EXCLUDED.permalink,
                             edited_ts = EXCLUDED.edited_ts,
                             edited_user = EXCLUDED.edited_user
                         """,

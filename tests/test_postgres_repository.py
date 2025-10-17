@@ -31,6 +31,106 @@ def test_postgres_save_and_get_messages(postgres_test_db, sample_slack_message):
     assert messages[0].text == sample_slack_message.text
 
 
+def test_postgres_message_upsert_updates_all_mutable_fields(
+    postgres_test_db, sample_slack_message
+):
+    """Test that message upsert updates all mutable fields (reactions, attachments, etc).
+
+    This ensures PostgreSQL behaves like SQLite (INSERT OR REPLACE) by updating
+    all fields that can change after initial message creation (reactions, attachments,
+    files, links, anchors, permalink, edits, user info).
+    """
+    repo = postgres_test_db
+
+    # Save initial message
+    count = repo.save_messages([sample_slack_message])
+    assert count == 1
+
+    # Verify initial state
+    messages = repo.get_new_messages_for_candidates()
+    assert len(messages) == 1
+    initial_msg = messages[0]
+    assert initial_msg.reply_count == sample_slack_message.reply_count
+    assert initial_msg.attachments_count == sample_slack_message.attachments_count
+    assert initial_msg.files_count == sample_slack_message.files_count
+    assert initial_msg.total_reactions == sample_slack_message.total_reactions
+
+    # Create updated message with changed mutable fields
+    # (simulating Slack API returning updated data on next fetch)
+    from src.domain.models import SlackMessage
+
+    updated_msg = SlackMessage(
+        message_id=sample_slack_message.message_id,  # Same ID
+        channel=sample_slack_message.channel,
+        user=sample_slack_message.user,
+        user_real_name="Updated User Name",  # Changed
+        user_display_name="updated_user",  # Changed
+        user_email="updated@example.com",  # Changed
+        user_profile_image="https://example.com/new_avatar.jpg",  # Changed
+        ts=sample_slack_message.ts,
+        ts_dt=sample_slack_message.ts_dt,
+        is_bot=sample_slack_message.is_bot,
+        subtype=sample_slack_message.subtype,
+        text="Updated text content",  # Changed
+        blocks_text="Updated blocks content",  # Changed
+        text_norm="updated text content",  # Changed
+        links_raw=["https://new-link.com"],  # Changed
+        links_norm=["https://new-link.com"],  # Changed
+        anchors=["NEW-123", "NEW-456"],  # Changed
+        attachments_count=5,  # Changed (was 2)
+        files_count=3,  # Changed (was 1)
+        reactions={"rocket": 10, "tada": 5},  # Changed
+        total_reactions=15,  # Changed (was 3)
+        reply_count=20,  # Changed (was 5)
+        permalink="https://example.slack.com/archives/C123/p1234567890_new",  # Changed
+        edited_ts="1234567891.123456",  # Changed
+        edited_user="U999999",  # Changed
+        ingested_at=sample_slack_message.ingested_at,
+    )
+
+    # Save updated message (upsert)
+    count = repo.save_messages([updated_msg])
+    assert count == 1
+
+    # Verify ALL mutable fields were updated
+    messages = repo.get_new_messages_for_candidates()
+    assert len(messages) == 1
+    updated_retrieved = messages[0]
+
+    # Check user fields
+    assert updated_retrieved.user_real_name == "Updated User Name"
+    assert updated_retrieved.user_display_name == "updated_user"
+    assert updated_retrieved.user_email == "updated@example.com"
+    assert updated_retrieved.user_profile_image == "https://example.com/new_avatar.jpg"
+
+    # Check text fields
+    assert updated_retrieved.text == "Updated text content"
+    assert updated_retrieved.blocks_text == "Updated blocks content"
+    assert updated_retrieved.text_norm == "updated text content"
+
+    # Check links and anchors
+    assert updated_retrieved.links_raw == ["https://new-link.com"]
+    assert updated_retrieved.links_norm == ["https://new-link.com"]
+    assert updated_retrieved.anchors == ["NEW-123", "NEW-456"]
+
+    # Check counts (critical for scoring!)
+    assert updated_retrieved.attachments_count == 5
+    assert updated_retrieved.files_count == 3
+    assert updated_retrieved.total_reactions == 15
+    assert updated_retrieved.reply_count == 20
+
+    # Check reactions dict
+    assert updated_retrieved.reactions == {"rocket": 10, "tada": 5}
+
+    # Check edit metadata
+    assert (
+        updated_retrieved.permalink
+        == "https://example.slack.com/archives/C123/p1234567890_new"
+    )
+    assert updated_retrieved.edited_ts == "1234567891.123456"
+    assert updated_retrieved.edited_user == "U999999"
+
+
 def test_postgres_watermark_operations(postgres_test_db):
     """Test watermark get/set operations in PostgreSQL."""
     repo = postgres_test_db
