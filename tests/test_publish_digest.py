@@ -48,6 +48,7 @@ def create_test_event(
         event_id=uuid4(),
         message_id=f"msg_{uuid4().hex[:8]}",
         source_channels=["test-channel"],
+        extracted_at=datetime.utcnow(),
         action=ActionType.LAUNCH,
         object_name_raw=f"Test Feature {title_suffix}",
         category=category,
@@ -180,7 +181,21 @@ def test_sort_events_for_digest_by_date(sample_events: list[Event]) -> None:
 
     # Assert
     for i in range(len(sorted_events) - 1):
-        assert sorted_events[i].event_date <= sorted_events[i + 1].event_date
+        time_i = (
+            sorted_events[i].actual_start
+            or sorted_events[i].actual_end
+            or sorted_events[i].planned_start
+            or sorted_events[i].planned_end
+            or sorted_events[i].extracted_at
+        )
+        time_next = (
+            sorted_events[i + 1].actual_start
+            or sorted_events[i + 1].actual_end
+            or sorted_events[i + 1].planned_start
+            or sorted_events[i + 1].planned_end
+            or sorted_events[i + 1].extracted_at
+        )
+        assert time_i <= time_next
 
 
 def test_sort_events_for_digest_by_category(sample_events: list[Event]) -> None:
@@ -188,37 +203,22 @@ def test_sort_events_for_digest_by_category(sample_events: list[Event]) -> None:
     # Arrange
     base_date = datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC)
     same_date_events = [
-        Event(
-            event_id=uuid4(),
-            message_id="msg1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.MARKETING,
-            title="Marketing",
-            summary="Test",
+            title_suffix="Marketing",
             confidence=0.8,
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.PRODUCT,
-            title="Product",
-            summary="Test",
+            title_suffix="Product",
             confidence=0.8,
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg3",
-            source_msg_event_idx=0,
-            dedup_key="key3",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.RISK,
-            title="Risk",
-            summary="Test",
+            title_suffix="Risk",
             confidence=0.8,
         ),
     ]
@@ -233,40 +233,32 @@ def test_sort_events_for_digest_by_category(sample_events: list[Event]) -> None:
 
 
 def test_sort_events_for_digest_by_confidence(sample_events: list[Event]) -> None:
-    """Test sorting events by confidence when date and category are same."""
+    """Test sorting events by importance when date and category are same."""
     # Arrange
     base_date = datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC)
     same_category_events = [
-        Event(
-            event_id=uuid4(),
-            message_id="msg1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.PRODUCT,
-            title="Low confidence",
-            summary="Test",
+            title_suffix="Low",
             confidence=0.6,
+            importance=60,
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.PRODUCT,
-            title="High confidence",
-            summary="Test",
+            title_suffix="High",
             confidence=0.9,
+            importance=90,
         ),
     ]
 
     # Act
     sorted_events = sort_events_for_digest(same_category_events)
 
-    # Assert - higher confidence first
-    assert sorted_events[0].confidence == 0.9
-    assert sorted_events[1].confidence == 0.6
+    # Assert - higher importance first
+    assert sorted_events[0].importance == 90
+    assert sorted_events[1].importance == 60
 
 
 def test_build_event_block() -> None:

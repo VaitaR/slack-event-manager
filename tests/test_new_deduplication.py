@@ -4,6 +4,8 @@ Critical tests for initiative-level and instance-level key generation.
 """
 
 from datetime import datetime
+from typing import Any
+from uuid import uuid4
 
 import pytz
 
@@ -19,11 +21,13 @@ from src.domain.models import (
 from src.services.deduplicator import generate_cluster_key, generate_dedup_key
 
 
-def create_test_event(**kwargs) -> Event:
+def create_test_event(**kwargs: Any) -> Event:
     """Create test event with defaults."""
-    defaults = {
+    defaults: dict[str, Any] = {
+        "event_id": uuid4(),
         "message_id": "test123",
         "source_channels": ["test"],
+        "extracted_at": datetime.utcnow(),
         "action": ActionType.LAUNCH,
         "object_name_raw": "Test Feature",
         "category": EventCategory.PRODUCT,
