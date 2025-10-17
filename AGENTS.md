@@ -567,6 +567,83 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 
 ## Recent Changes
 
+### 2025-10-17: Multi-Source Architecture Implementation 🔄
+
+**Phase 1: Domain Layer (Complete)** ✅
+- ✅ Added `MessageSource` enum (SLACK, TELEGRAM)
+- ✅ Added `TelegramMessage` model for future Telegram support
+- ✅ Added `source_id` field to SlackMessage, EventCandidate, Event (default: SLACK)
+- ✅ Created `MessageClientProtocol` for generic message sources
+- ✅ Updated `RepositoryProtocol` with source-specific state tracking methods
+- ✅ Test suite: 28 tests, all passing
+
+**Phase 2: Repository Layer (Complete)** ✅
+- ✅ Added `raw_telegram_messages` table with Telegram-specific fields
+- ✅ Added `source_id` column to `event_candidates` and `events` tables
+- ✅ Created source-specific ingestion state tables (`ingestion_state_slack`, `ingestion_state_telegram`)
+- ✅ Implemented `save_telegram_messages()` and `get_telegram_messages()` methods
+- ✅ Implemented source filtering (`get_candidates_by_source()`, `get_events_by_source()`)
+- ✅ Updated state tracking methods to support `source_id` parameter
+- ✅ Backward compatibility: Legacy calls route to Slack-specific tables
+- ✅ Test suite: 19 new repository tests, all passing
+
+**Architecture:**
+- Strict source isolation (separate raw tables, state tables, configs)
+- Unified pipeline (same processing logic for all sources)
+- Protocol-based adapters for extensibility
+- TDD methodology (tests first, then implementation)
+
+**Test Results:**
+- Total: 204 tests (185 existing + 19 new)
+- Status: ✅ All passing
+- Coverage: 59% overall, 97% on new code
+- Zero breaking changes
+
+**Documentation:**
+- 📄 `docs/MULTI_SOURCE_IMPLEMENTATION_SUMMARY.md` - Complete implementation summary
+- 📄 `docs/MULTI_SOURCE_PROGRESS.md` - Detailed progress tracking
+- 📄 `docs/MULTI_SOURCE_NEXT_STEPS.md` - Step-by-step continuation guide
+
+**Phase 3: Adapters Layer (Complete)** ✅
+- ✅ Created `TelegramClient` stub that returns empty message lists
+- ✅ Implemented `message_client_factory.py` for source-based client instantiation
+- ✅ Factory pattern: `get_message_client(source_id, bot_token)`
+- ✅ Protocol compliance verified for all clients
+- ✅ Test suite: 20 new tests, all passing (total: 224 tests)
+
+**Phase 4: Configuration Layer (Complete)** ✅
+- ✅ Added `MessageSourceConfig` Pydantic model
+- ✅ Implemented `message_sources` field in Settings with auto-migration
+- ✅ Auto-migration from legacy `channels` to `message_sources` format
+- ✅ Helper methods: `get_source_config()`, `get_enabled_sources()`
+- ✅ Per-source LLM settings (temperature, timeout, prompt file)
+- ✅ Created `config/prompts/slack.txt` and `telegram.txt`
+- ✅ Test suite: 16 new tests, all passing (total: 240 tests)
+- ✅ 100% backward compatibility with existing deployments
+
+**Phase 5: Use Case Layer (Complete)** ✅
+- ✅ Updated `LLMClient` with prompt loading (`prompt_template`, `prompt_file` parameters)
+- ✅ Added `load_prompt_from_file()` helper function  
+- ✅ Updated `deduplicate_events_use_case` with optional `source_id` parameter
+- ✅ Deduplication supports strict source isolation (prevents cross-source merging)
+- ✅ Created `scripts/run_multi_source_pipeline.py` orchestrator
+- ✅ Orchestrator loops through enabled sources, creates source-specific clients
+- ✅ 10 new prompt loading tests, all passing (total: 85 multi-source tests)
+- ✅ 100% backward compatibility maintained
+
+**Phase 6: CLI & Scripts (Complete)** ✅
+- ✅ Added `--source` CLI flag to multi-source pipeline (filter to specific source)
+- ✅ Created `scripts/migrate_multi_source.py` migration script
+- ✅ Migration script creates new tables and migrates ingestion state
+- ✅ Supports dry-run mode and batch migration of all databases
+- ✅ Idempotent (safe to run multiple times)
+
+**Status:** Phases 1-6 complete (~90% of total implementation) 🎉
+
+**Remaining:**
+- Documentation updates (README.md, MULTI_SOURCE.md)
+- Optional: Additional integration tests for orchestrator
+
 ### 2025-10-17: Streamlit UI Improvements ✅
 
 **Enhanced Data Visualization and Filtering:**

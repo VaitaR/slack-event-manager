@@ -23,8 +23,10 @@ from src.domain.models import (
     EventCandidate,
     EventCategory,
     LLMCallMetadata,
+    MessageSource,
     ScoringFeatures,
     SlackMessage,
+    TelegramMessage,
 )
 
 
@@ -60,7 +62,7 @@ class SQLiteRepository:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Raw messages table
+        # Raw Slack messages table
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS raw_slack_messages (
@@ -94,6 +96,29 @@ class SQLiteRepository:
         """
         )
 
+        # Raw Telegram messages table
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS raw_telegram_messages (
+                message_id TEXT PRIMARY KEY,
+                channel TEXT NOT NULL,
+                message_date TEXT NOT NULL,
+                sender_id TEXT,
+                sender_name TEXT,
+                text TEXT,
+                text_norm TEXT,
+                forward_from_channel TEXT,
+                forward_from_message_id TEXT,
+                media_type TEXT,
+                links_raw TEXT,
+                links_norm TEXT,
+                anchors TEXT,
+                views INTEGER DEFAULT 0,
+                ingested_at TEXT
+            )
+        """
+        )
+
         # Candidates table
         cursor.execute(
             """
@@ -106,7 +131,8 @@ class SQLiteRepository:
                 anchors TEXT,
                 score REAL,
                 status TEXT CHECK(status IN ('new', 'llm_ok', 'llm_fail')),
-                features_json TEXT
+                features_json TEXT,
+                source_id TEXT DEFAULT 'slack'
             )
         """
         )
@@ -158,7 +184,10 @@ class SQLiteRepository:
 
                 -- Clustering
                 cluster_key TEXT NOT NULL,
-                dedup_key TEXT UNIQUE NOT NULL
+                dedup_key TEXT UNIQUE NOT NULL,
+
+                -- Source Tracking
+                source_id TEXT DEFAULT 'slack'
             )
         """
         )
@@ -260,10 +289,29 @@ class SQLiteRepository:
         """
         )
 
-        # Ingestion state table (tracks last processed timestamp per channel)
+        # Ingestion state table (legacy - tracks last processed timestamp per channel)
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS ingestion_state (
+                channel_id TEXT PRIMARY KEY,
+                last_ts REAL NOT NULL
+            )
+        """
+        )
+
+        # Source-specific ingestion state tables
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ingestion_state_slack (
+                channel_id TEXT PRIMARY KEY,
+                last_ts REAL NOT NULL
+            )
+        """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ingestion_state_telegram (
                 channel_id TEXT PRIMARY KEY,
                 last_ts REAL NOT NULL
             )
@@ -342,6 +390,122 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to save messages: {e}")
 
+    def save_telegram_messages(self, messages: list[TelegramMessage]) -> int:
+        """Save Telegram messages to storage (idempotent upsert).
+
+        Args:
+            messages: List of Telegram messages
+
+        Returns:
+            Number of messages saved
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        if not messages:
+            return 0
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            for msg in messages:
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO raw_telegram_messages (
+                        message_id, channel, message_date, sender_id, sender_name,
+                        text, text_norm, forward_from_channel, forward_from_message_id,
+                        media_type, links_raw, links_norm, anchors, views, ingested_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        msg.message_id,
+                        msg.channel,
+                        msg.message_date.isoformat(),
+                        msg.sender_id,
+                        msg.sender_name,
+                        msg.text,
+                        msg.text_norm,
+                        msg.forward_from_channel,
+                        msg.forward_from_message_id,
+                        msg.media_type,
+                        json.dumps(msg.links_raw),
+                        json.dumps(msg.links_norm),
+                        json.dumps(msg.anchors),
+                        msg.views,
+                        msg.ingested_at.isoformat(),
+                    ),
+                )
+
+            conn.commit()
+            count = len(messages)
+            conn.close()
+            return count
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to save Telegram messages: {e}")
+
+    def get_telegram_messages(
+        self, channel: str, limit: int = 100
+    ) -> list[TelegramMessage]:
+        """Get Telegram messages from storage.
+
+        Args:
+            channel: Channel username or ID
+            limit: Maximum messages to return
+
+        Returns:
+            List of Telegram messages ordered by date DESC
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT * FROM raw_telegram_messages
+                WHERE channel = ?
+                ORDER BY message_date DESC
+                LIMIT ?
+                """,
+                (channel, limit),
+            )
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [self._row_to_telegram_message(row) for row in rows]
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to get Telegram messages: {e}")
+
+    def _row_to_telegram_message(self, row: sqlite3.Row) -> TelegramMessage:
+        """Convert database row to TelegramMessage.
+
+        Args:
+            row: Database row
+
+        Returns:
+            TelegramMessage instance
+        """
+        return TelegramMessage(
+            message_id=row["message_id"],
+            channel=row["channel"],
+            message_date=datetime.fromisoformat(row["message_date"]),
+            sender_id=row["sender_id"],
+            sender_name=row["sender_name"],
+            text=row["text"] or "",
+            text_norm=row["text_norm"] or "",
+            forward_from_channel=row["forward_from_channel"],
+            forward_from_message_id=row["forward_from_message_id"],
+            media_type=row["media_type"],
+            links_raw=json.loads(row["links_raw"]) if row["links_raw"] else [],
+            links_norm=json.loads(row["links_norm"]) if row["links_norm"] else [],
+            anchors=json.loads(row["anchors"]) if row["anchors"] else [],
+            views=row["views"],
+            ingested_at=datetime.fromisoformat(row["ingested_at"]),
+        )
+
     def get_watermark(self, channel: str) -> str | None:
         """Get committed watermark timestamp for channel.
 
@@ -419,6 +583,67 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get new messages: {e}")
 
+    def get_new_messages_for_candidates_by_source(
+        self, source_id: MessageSource
+    ) -> list[SlackMessage | TelegramMessage]:
+        """Get messages not yet in candidates table for a specific source.
+
+        This method is source-agnostic and returns messages that implement
+        the MessageRecord protocol (both SlackMessage and TelegramMessage do).
+
+        Args:
+            source_id: Message source (SLACK, TELEGRAM, etc.)
+
+        Returns:
+            List of messages (SlackMessage or TelegramMessage)
+
+        Raises:
+            RepositoryError: On storage errors or unsupported source
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            if source_id == MessageSource.SLACK:
+                # Query Slack messages
+                cursor.execute(
+                    """
+                    SELECT m.* FROM raw_slack_messages m
+                    LEFT JOIN event_candidates c ON m.message_id = c.message_id
+                    WHERE c.message_id IS NULL
+                    ORDER BY m.ts_dt DESC
+                """
+                )
+                rows = cursor.fetchall()
+                conn.close()
+                return [self._row_to_message(row) for row in rows]
+
+            elif source_id == MessageSource.TELEGRAM:
+                # Query Telegram messages
+                cursor.execute(
+                    """
+                    SELECT m.* FROM raw_telegram_messages m
+                    LEFT JOIN event_candidates c ON m.message_id = c.message_id
+                    WHERE c.message_id IS NULL
+                    ORDER BY m.message_date DESC
+                """
+                )
+                rows = cursor.fetchall()
+                conn.close()
+                return [self._row_to_telegram_message(row) for row in rows]
+
+            else:
+                conn.close()
+                raise RepositoryError(
+                    f"Unsupported message source: {source_id}. "
+                    f"Supported sources: {[s.value for s in MessageSource]}"
+                )
+
+        except sqlite3.Error as e:
+            raise RepositoryError(
+                f"Failed to get new messages for source {source_id}: {e}"
+            )
+
     def save_candidates(self, candidates: list[EventCandidate]) -> int:
         """Save event candidates (idempotent).
 
@@ -440,8 +665,8 @@ class SQLiteRepository:
                     """
                     INSERT OR REPLACE INTO event_candidates (
                         message_id, channel, ts_dt, text_norm, links_norm,
-                        anchors, score, status, features_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        anchors, score, status, features_json, source_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         candidate.message_id,
@@ -453,6 +678,7 @@ class SQLiteRepository:
                         candidate.score,
                         candidate.status.value,
                         candidate.features.model_dump_json(),
+                        candidate.source_id.value,
                     ),
                 )
 
@@ -652,8 +878,8 @@ class SQLiteRepository:
                             planned_start, planned_end, actual_start, actual_end,
                             time_source, time_confidence,
                             summary, why_it_matters, links, anchors, impact_area, impact_type,
-                            confidence, importance, cluster_key, dedup_key
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            confidence, importance, cluster_key, dedup_key, source_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             str(event.event_id),
@@ -693,6 +919,7 @@ class SQLiteRepository:
                             event.importance,
                             event.cluster_key,
                             event.dedup_key,
+                            event.source_id.value,
                         ),
                     )
 
@@ -1079,6 +1306,15 @@ class SQLiteRepository:
 
     def _row_to_candidate(self, row: sqlite3.Row) -> EventCandidate:
         """Convert database row to EventCandidate."""
+        # Get source_id with backward compatibility
+        try:
+            source_id_str = row["source_id"]
+        except (KeyError, IndexError):
+            source_id_str = "slack"
+        source_id = (
+            MessageSource(source_id_str) if source_id_str else MessageSource.SLACK
+        )
+
         return EventCandidate(
             message_id=row["message_id"],
             channel=row["channel"],
@@ -1089,6 +1325,7 @@ class SQLiteRepository:
             score=float(row["score"]),
             status=CandidateStatus(row["status"]),
             features=ScoringFeatures.model_validate_json(row["features_json"]),
+            source_id=source_id,
         )
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
@@ -1100,6 +1337,15 @@ class SQLiteRepository:
             EventStatus,
             Severity,
             TimeSource,
+        )
+
+        # Get source_id with backward compatibility
+        try:
+            source_id_str = row["source_id"]
+        except (KeyError, IndexError):
+            source_id_str = "slack"
+        source_id = (
+            MessageSource(source_id_str) if source_id_str else MessageSource.SLACK
         )
 
         return Event(
@@ -1160,13 +1406,18 @@ class SQLiteRepository:
             cluster_key=row["cluster_key"],
             dedup_key=row["dedup_key"],
             relations=[],  # Relations loaded separately if needed
+            # Source tracking
+            source_id=source_id,
         )
 
-    def get_last_processed_ts(self, channel_id: str) -> float | None:
-        """Get last processed timestamp for a channel.
+    def get_last_processed_ts(
+        self, channel: str, source_id: MessageSource | None = None
+    ) -> float | None:
+        """Get last processed timestamp for a channel (source-specific or legacy).
 
         Args:
-            channel_id: Slack channel ID
+            channel: Channel ID
+            source_id: Message source (None = legacy table for backward compatibility)
 
         Returns:
             Last processed timestamp (epoch seconds) or None if first run
@@ -1178,12 +1429,21 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
+            # Route to source-specific table or legacy table
+            if source_id == MessageSource.SLACK:
+                table_name = "ingestion_state_slack"
+            elif source_id == MessageSource.TELEGRAM:
+                table_name = "ingestion_state_telegram"
+            else:
+                # Legacy: default to Slack state for backward compatibility
+                table_name = "ingestion_state_slack"
+
             cursor.execute(
-                """
-                SELECT last_ts FROM ingestion_state
+                f"""
+                SELECT last_ts FROM {table_name}
                 WHERE channel_id = ?
                 """,
-                (channel_id,),
+                (channel,),
             )
 
             row = cursor.fetchone()
@@ -1194,12 +1454,57 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get last processed ts: {e}")
 
-    def update_last_processed_ts(self, channel_id: str, last_ts: float) -> None:
-        """Update last processed timestamp for a channel.
+    def update_last_processed_ts(
+        self, channel: str, ts: float, source_id: MessageSource | None = None
+    ) -> None:
+        """Update last processed timestamp for a channel (source-specific or legacy).
 
         Args:
-            channel_id: Slack channel ID
-            last_ts: Last processed timestamp (epoch seconds)
+            channel: Channel ID
+            ts: Last processed timestamp (epoch seconds)
+            source_id: Message source (None = legacy table for backward compatibility)
+
+        Raises:
+            RepositoryError: On database errors
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Route to source-specific table or legacy table
+            if source_id == MessageSource.SLACK:
+                table_name = "ingestion_state_slack"
+            elif source_id == MessageSource.TELEGRAM:
+                table_name = "ingestion_state_telegram"
+            else:
+                # Legacy: default to Slack state for backward compatibility
+                table_name = "ingestion_state_slack"
+
+            cursor.execute(
+                f"""
+                INSERT OR REPLACE INTO {table_name} (channel_id, last_ts)
+                VALUES (?, ?)
+                """,
+                (channel, ts),
+            )
+
+            conn.commit()
+            conn.close()
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to update last processed ts: {e}")
+
+    def get_candidates_by_source(
+        self, source_id: MessageSource, limit: int = 100
+    ) -> list[EventCandidate]:
+        """Get candidates filtered by source_id.
+
+        Args:
+            source_id: Message source to filter by
+            limit: Maximum candidates to return
+
+        Returns:
+            List of candidates from specified source
 
         Raises:
             RepositoryError: On database errors
@@ -1210,17 +1515,58 @@ class SQLiteRepository:
 
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO ingestion_state (channel_id, last_ts)
-                VALUES (?, ?)
+                SELECT * FROM event_candidates
+                WHERE source_id = ?
+                ORDER BY score DESC
+                LIMIT ?
                 """,
-                (channel_id, last_ts),
+                (source_id.value, limit),
             )
 
-            conn.commit()
+            rows = cursor.fetchall()
             conn.close()
 
+            return [self._row_to_candidate(row) for row in rows]
+
         except sqlite3.Error as e:
-            raise RepositoryError(f"Failed to update last processed ts: {e}")
+            raise RepositoryError(f"Failed to get candidates by source: {e}")
+
+    def get_events_by_source(
+        self, source_id: MessageSource, limit: int = 100
+    ) -> list[Event]:
+        """Get events filtered by source_id.
+
+        Args:
+            source_id: Message source to filter by
+            limit: Maximum events to return
+
+        Returns:
+            List of events from specified source
+
+        Raises:
+            RepositoryError: On database errors
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT * FROM events
+                WHERE source_id = ?
+                ORDER BY extracted_at DESC
+                LIMIT ?
+                """,
+                (source_id.value, limit),
+            )
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [self._row_to_event(row) for row in rows]
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to get events by source: {e}")
 
     def get_related_events(self, event_id: UUID) -> list[Event]:
         """Get events related to the given event.

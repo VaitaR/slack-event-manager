@@ -1,6 +1,6 @@
 """E2E tests for digest publishing with real Slack integration.
 
-Tests digest posting to real Slack channel C06B5NJLY4B.
+Tests digest posting to real Slack channel C09LS9V0RRV.
 """
 
 import os
@@ -26,7 +26,7 @@ from src.domain.models import (
 from src.use_cases.publish_digest import publish_digest_use_case
 
 # Test channel ID
-TEST_CHANNEL = "C06B5NJLY4B"
+TEST_CHANNEL = "C09LS9V0RRV"
 
 
 def create_e2e_event(
@@ -243,7 +243,7 @@ def test_digest_real_posting(
 ) -> None:
     """Test actual digest posting to Slack channel with REAL DATA.
 
-    WARNING: This test posts real messages to Slack channel C06B5NJLY4B.
+    WARNING: This test posts real messages to Slack channel C09LS9V0RRV.
     Set SKIP_SLACK_E2E=true to skip this test.
 
     Uses real production events from database instead of mock data.

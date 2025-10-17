@@ -13,6 +13,26 @@ from src.domain.models import EventCategory, LLMEvent
 from src.use_cases.extract_events import convert_llm_event_to_domain
 
 
+@pytest.fixture(autouse=True)
+def reset_global_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset global caches before each test to ensure isolation.
+
+    This prevents issues where tests run in different working directories
+    and the global cache holds stale paths.
+    """
+    from pathlib import Path
+
+    import src.use_cases.extract_events as extract_module
+
+    # Reset global caches
+    extract_module._object_registry = None
+    extract_module._importance_scorer = None
+
+    # Ensure we're in the correct working directory for relative paths
+    project_root = Path(__file__).parent.parent
+    monkeypatch.chdir(project_root)
+
+
 @pytest.fixture
 def mock_llm_event() -> LLMEvent:
     """Create mock LLM extraction result."""

@@ -11,8 +11,66 @@ from src.domain.models import (
     EventCandidate,
     LLMCallMetadata,
     LLMResponse,
+    MessageSource,
     SlackMessage,
 )
+
+
+class MessageRecord(Protocol):
+    """Protocol for source-agnostic message representation for scoring.
+
+    This protocol defines the minimal interface that any message source
+    (Slack, Telegram, etc.) must provide for candidate scoring.
+    """
+
+    message_id: str
+    channel: str
+    ts_dt: datetime
+    text_norm: str
+    links_norm: list[str]
+    anchors: list[str]
+    source_id: MessageSource
+
+
+class MessageClientProtocol(Protocol):
+    """Generic protocol for message source clients (Slack, Telegram, etc.)."""
+
+    def fetch_messages(
+        self,
+        channel_id: str,
+        oldest_ts: str | None = None,
+        latest_ts: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Fetch messages from source channel.
+
+        Args:
+            channel_id: Channel ID or username
+            oldest_ts: Oldest timestamp/message_id to fetch (inclusive)
+            latest_ts: Latest timestamp/message_id to fetch (inclusive)
+            limit: Maximum messages to fetch
+
+        Returns:
+            List of raw message dictionaries
+
+        Raises:
+            Exception: On API communication errors
+        """
+        ...
+
+    def get_user_info(self, user_id: str) -> dict[str, Any]:
+        """Get user/sender information by ID (with optional caching).
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            User info dictionary
+
+        Raises:
+            Exception: On API communication errors
+        """
+        ...
 
 
 class SlackClientProtocol(Protocol):
@@ -124,6 +182,25 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def get_new_messages_for_candidates_by_source(
+        self, source_id: MessageSource
+    ) -> list[MessageRecord]:
+        """Get messages not yet in candidates table for a specific source.
+
+        This method is source-agnostic and returns messages that implement
+        the MessageRecord protocol, allowing scoring logic to work with any source.
+
+        Args:
+            source_id: Message source (SLACK, TELEGRAM, etc.)
+
+        Returns:
+            List of messages implementing MessageRecord protocol
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
     def save_candidates(self, candidates: list[EventCandidate]) -> int:
         """Save event candidates (idempotent).
 
@@ -229,6 +306,38 @@ class RepositoryProtocol(Protocol):
 
         Returns:
             Cached JSON response or None
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def get_last_processed_ts(
+        self, channel: str, source_id: MessageSource | None = None
+    ) -> float | None:
+        """Get last processed timestamp for channel (source-specific).
+
+        Args:
+            channel: Channel ID
+            source_id: Optional source identifier for multi-source tracking
+
+        Returns:
+            Last processed timestamp or None
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def update_last_processed_ts(
+        self, channel: str, ts: float, source_id: MessageSource | None = None
+    ) -> None:
+        """Update last processed timestamp for channel (source-specific).
+
+        Args:
+            channel: Channel ID
+            ts: New timestamp
+            source_id: Optional source identifier for multi-source tracking
 
         Raises:
             RepositoryError: On storage errors
