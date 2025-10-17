@@ -70,6 +70,77 @@ validation:
   max_links: 3
   max_impact_area: 3
 
+# Monitored Slack Channels
+channels:
+  - channel_id: C06B5NJLY4B
+    channel_name: product-alerts-test
+    threshold_score: 0.0
+    keyword_weight: 0.0
+    whitelist_keywords:
+      - release
+      - deploy
+      - launch
+      - update
+      - new
+      - announcement
+      - scheduled
+      - security
+      - metrics
+      - maintenance
+      - incident
+      - daily
+      - weekly
+      - monthly
+      - report
+      - summary
+      - alert
+
+  - channel_id: C04V0TK7UG6
+    channel_name: releases
+    threshold_score: 0.0
+    keyword_weight: 0.0
+    whitelist_keywords:
+      - release
+      - deploy
+      - launch
+      - update
+      - new
+      - announcement
+      - scheduled
+      - security
+      - metrics
+      - maintenance
+      - incident
+      - daily
+      - weekly
+      - monthly
+      - report
+      - summary
+      - alert
+
+  - channel_id: C0770K7FV43
+    channel_name: t-onboarding-activation
+    threshold_score: 0.0
+    keyword_weight: 0.0
+    whitelist_keywords:
+      - release
+      - deploy
+      - launch
+      - update
+      - new
+      - announcement
+      - scheduled
+      - security
+      - metrics
+      - maintenance
+      - incident
+      - daily
+      - weekly
+      - monthly
+      - report
+      - summary
+      - alert
+
 # Observability
 logging:
   level: INFO
