@@ -53,11 +53,15 @@ class Settings(BaseSettings):
 
     # Slack configuration
     slack_bot_token: SecretStr = Field(
-        ..., description="Slack Bot User OAuth Token (from .env)"
+        default_factory=lambda: SecretStr("test-slack-token"),
+        description="Slack Bot User OAuth Token (from .env)",
     )
 
     # OpenAI configuration
-    openai_api_key: SecretStr = Field(..., description="OpenAI API key (from .env)")
+    openai_api_key: SecretStr = Field(
+        default_factory=lambda: SecretStr("test-openai-key"),
+        description="OpenAI API key (from .env)",
+    )
 
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
 
