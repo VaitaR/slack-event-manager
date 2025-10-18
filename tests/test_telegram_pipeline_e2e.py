@@ -7,6 +7,7 @@ Tests the complete pipeline flow for Telegram source:
 4. Deduplicate events
 """
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import pytz
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.adapters.telegram_client import TelegramClient
 from src.domain.models import (
+    ChannelConfig,
     MessageSource,
     TelegramMessage,
 )
@@ -32,7 +34,6 @@ def temp_db(tmp_path: Path) -> Path:
 @pytest.fixture
 def mock_settings() -> object:
     """Mock settings with Telegram channel config."""
-    from src.domain.models import ChannelConfig
 
     class MockSettings:
         """Mock settings class with Telegram channel config."""
@@ -44,14 +45,25 @@ def mock_settings() -> object:
                 threshold_score=50.0,  # Lower threshold for testing
                 keyword_weight=1.0,
                 whitelist_keywords=[],
-                enabled=True,
             )
 
         def get_channel_config(self, channel_id: str) -> ChannelConfig | None:
             """Mock get_channel_config method."""
             if channel_id == "@test_channel":
                 return self.test_channel_config
-            return None
+
+        # Add other required Settings methods/attributes
+        @property
+        def db_path(self) -> str:
+            return ":memory:"
+
+        @property
+        def llm_model(self) -> str:
+            return "gpt-5-nano"
+
+        @property
+        def llm_temperature(self) -> float:
+            return 1.0
 
     return MockSettings()
 
@@ -68,6 +80,8 @@ def mock_telegram_messages() -> list[TelegramMessage]:
             message_date=now,
             sender_id="user123",
             sender_name="Test User",
+            user="user123",
+            bot_id=None,
             is_bot=False,
             text="🚀 Launching new Crypto Wallet feature tomorrow at 10:00 UTC. This will enable users to trade Bitcoin and Ethereum directly from the app.",
             text_norm="launching new crypto wallet feature tomorrow at 10:00 utc this will enable users to trade bitcoin and ethereum directly from the app",
@@ -78,6 +92,8 @@ def mock_telegram_messages() -> list[TelegramMessage]:
             views=10,
             reply_count=2,
             reactions={"👍": 5, "🚀": 3},
+            attachments_count=1,
+            files_count=0,
             ingested_at=now,
             source_id=MessageSource.TELEGRAM,
         ),
@@ -87,6 +103,8 @@ def mock_telegram_messages() -> list[TelegramMessage]:
             message_date=now,
             sender_id="user456",
             sender_name="Admin User",
+            user="user456",
+            bot_id=None,
             is_bot=False,
             text="⚠️ Scheduled maintenance: ClickHouse cluster will be upgraded on Oct 25, 2025 from 02:00 to 04:00 UTC. Expect temporary service degradation.",
             text_norm="scheduled maintenance clickhouse cluster will be upgraded on oct 25 2025 from 02:00 to 04:00 utc expect temporary service degradation",
@@ -97,6 +115,8 @@ def mock_telegram_messages() -> list[TelegramMessage]:
             views=5,
             reply_count=1,
             reactions={"👀": 2},
+            attachments_count=0,
+            files_count=1,
             ingested_at=now,
             source_id=MessageSource.TELEGRAM,
         ),
@@ -106,6 +126,8 @@ def mock_telegram_messages() -> list[TelegramMessage]:
             message_date=now,
             sender_id="bot789",
             sender_name="Notification Bot",
+            user=None,
+            bot_id="bot789",
             is_bot=True,
             text="📊 Weekly metrics update: User engagement increased by 15% this week. Great job team!",
             text_norm="weekly metrics update user engagement increased by 15% this week great job team",
@@ -116,6 +138,8 @@ def mock_telegram_messages() -> list[TelegramMessage]:
             views=2,
             reply_count=0,
             reactions={},
+            attachments_count=0,
+            files_count=0,
             ingested_at=now,
             source_id=MessageSource.TELEGRAM,
         ),
@@ -231,8 +255,8 @@ def test_telegram_pipeline_full_flow(
     # STEP 2: Build candidates from Telegram messages
     print("\n🎯 STEP 2: Building candidates from Telegram messages...")
     candidate_result = build_candidates_use_case(
-        repository=repository,
-        settings=settings,
+        repository=repository,  # type: ignore
+        settings=settings,  # type: ignore
         source_id=MessageSource.TELEGRAM,
     )
     print(f"   ✓ Messages processed: {candidate_result.messages_processed}")
@@ -268,9 +292,15 @@ def test_telegram_pipeline_full_flow(
     print("=" * 80)
 
 
+@pytest.mark.skipif(
+    not os.getenv("TELEGRAM_API_ID") or not os.getenv("TELEGRAM_API_HASH"),
+    reason="Telegram credentials not configured",
+)
 def test_telegram_client_stub() -> None:
     """Test that TelegramClient stub returns empty data."""
-    client = TelegramClient(bot_token="test_token")
+    client = TelegramClient(
+        bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "test_token"),
+    )
 
     # Should return empty list
     messages = client.fetch_messages(channel_id="@test", limit=10)

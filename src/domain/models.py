@@ -179,10 +179,6 @@ class ChannelConfig(BaseModel):
     link_weight: float = Field(default=2.0, description="Weight per link")
     file_weight: float = Field(default=3.0, description="Weight for attachments")
     bot_penalty: float = Field(default=-15.0, description="Penalty for bot messages")
-    trusted_bots: list[str] = Field(
-        default_factory=list,
-        description="Trusted bot user IDs that bypass bot penalty",
-    )
 
 
 class SlackMessage(BaseModel):
@@ -234,6 +230,8 @@ class TelegramMessage(BaseModel):
     message_date: datetime = Field(..., description="Message date as UTC datetime")
     sender_id: str | None = Field(default=None, description="Sender user ID")
     sender_name: str | None = Field(default=None, description="Sender display name")
+    user: str | None = Field(default=None, description="User ID")
+    bot_id: str | None = Field(default=None, description="Bot identifier")
     is_bot: bool = Field(default=False, description="Whether sender is a bot")
     text: str = Field(default="", description="Raw message text")
     text_norm: str = Field(default="", description="Normalized text")
@@ -255,6 +253,8 @@ class TelegramMessage(BaseModel):
     views: int = Field(default=0, description="View count")
     reply_count: int = Field(default=0, description="Reply/comment count")
     reactions: dict[str, int] = Field(default_factory=dict, description="Reactions")
+    attachments_count: int = Field(default=0, description="Number of attachments")
+    files_count: int = Field(default=0, description="Number of files")
     ingested_at: datetime = Field(
         default_factory=datetime.utcnow, description="Ingestion timestamp"
     )
