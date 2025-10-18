@@ -30,12 +30,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.adapters.llm_client import LLMClient
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.domain.models import MessageSource
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
+from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
 from src.use_cases.publish_digest import publish_digest_use_case
 
 # Global flag for graceful shutdown
@@ -69,7 +70,7 @@ def setup_logging(log_dir: Path) -> None:
 def run_source_pipeline(
     source_id: MessageSource,
     repository: SQLiteRepository,
-    settings: object,
+    settings: Settings,
     args: argparse.Namespace,
     backfill_from_date: datetime | None = None,
 ) -> dict[str, int]:
@@ -159,13 +160,23 @@ def run_source_pipeline(
     print(f"STEP 1: Ingesting messages from {source_id.value}")
     print("=" * 60)
     try:
-        ingest_result = ingest_messages_use_case(
-            slack_client=message_client,  # TODO: Refactor to accept generic client
-            repository=repository,
-            settings=settings,
-            lookback_hours=args.lookback_hours,
-            backfill_from_date=backfill_from_date,
-        )
+        # Use source-specific ingestion use case
+        if source_id == MessageSource.TELEGRAM:
+            ingest_result = ingest_telegram_messages_use_case(
+                telegram_client=message_client,
+                repository=repository,
+                settings=settings,
+                backfill_from_date=backfill_from_date,
+            )
+        else:  # SLACK
+            ingest_result = ingest_messages_use_case(
+                slack_client=message_client,
+                repository=repository,
+                settings=settings,
+                lookback_hours=args.lookback_hours,
+                backfill_from_date=backfill_from_date,
+            )
+
         stats["messages_fetched"] = ingest_result.messages_fetched
         stats["messages_saved"] = ingest_result.messages_saved
         print(f"✓ Fetched: {ingest_result.messages_fetched} messages")
@@ -255,7 +266,7 @@ def run_source_pipeline(
 
 def run_single_iteration(
     repository: SQLiteRepository,
-    settings: object,
+    settings: Settings,
     args: argparse.Namespace,
     backfill_from_date: datetime | None = None,
 ) -> None:

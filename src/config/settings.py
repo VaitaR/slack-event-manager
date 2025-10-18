@@ -191,6 +191,14 @@ class Settings(BaseSettings):
         default=None, description="PostgreSQL password (from .env, optional)"
     )
 
+    # Telegram configuration (user client)
+    telegram_api_id: int | None = Field(
+        default=None, description="Telegram API ID (from .env)"
+    )
+    telegram_api_hash: SecretStr | None = Field(
+        default=None, description="Telegram API hash (from .env)"
+    )
+
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
 
     def __init__(self, **data: Any):
@@ -400,6 +408,20 @@ class Settings(BaseSettings):
                 config["validation"].get("max_impact_area", 3),
             )
 
+        # Load Telegram channels from config
+        if "telegram_channels" in config:
+            telegram_channels = []
+            for ch in config["telegram_channels"]:
+                telegram_channels.append(
+                    {
+                        "channel_id": ch.get("channel_id", ""),
+                        "channel_name": ch.get("channel_name", ""),
+                        "from_date": ch.get("from_date"),
+                        "enabled": ch.get("enabled", True),
+                    }
+                )
+            data.setdefault("telegram_channels", telegram_channels)
+
         super().__init__(**data)
 
     # Slack channels (loaded from config.yaml)
@@ -547,6 +569,16 @@ class Settings(BaseSettings):
     message_sources: list[MessageSourceConfig] = Field(
         default_factory=list,
         description="List of message sources (Slack, Telegram, etc.) to monitor",
+    )
+
+    # Telegram configuration
+    telegram_channels: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of Telegram channels to monitor (loaded from config.yaml)",
+    )
+    telegram_session_path: str = Field(
+        default="data/telegram_session",
+        description="Path to Telethon session file (without .session extension)",
     )
 
     @field_validator("slack_channels", mode="before")
