@@ -3,21 +3,21 @@
 Scores messages and selects candidates for LLM extraction.
 """
 
-from src.adapters.sqlite_repository import SQLiteRepository
+from typing import cast
+
 from src.config.settings import Settings
 from src.domain.models import (
     CandidateResult,
     CandidateStatus,
     EventCandidate,
     MessageSource,
-    SlackMessage,
-    TelegramMessage,
 )
+from src.domain.protocols import MessageRecord, RepositoryProtocol
 from src.services import scoring_engine
 
 
 def build_candidates_use_case(
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     source_id: MessageSource | None = None,
 ) -> CandidateResult:
@@ -30,7 +30,7 @@ def build_candidates_use_case(
     5. Insert into event_candidates
 
     Args:
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         source_id: Optional message source filter (SLACK, TELEGRAM, etc.)
                   If None, processes Slack messages (backward compatibility)
@@ -49,10 +49,12 @@ def build_candidates_use_case(
         8
     """
     # Get messages not yet scored
-    new_messages: list[SlackMessage | TelegramMessage]
+    new_messages: list[MessageRecord]
     if source_id is None:
         # Backward compatibility: default to Slack
-        new_messages = repository.get_new_messages_for_candidates()  # type: ignore[assignment]
+        new_messages = cast(
+            list[MessageRecord], repository.get_new_messages_for_candidates()
+        )
     else:
         # Use source-agnostic method
         new_messages = repository.get_new_messages_for_candidates_by_source(source_id)
@@ -76,7 +78,7 @@ def build_candidates_use_case(
             # Channel not in whitelist, skip
             continue
 
-        # Score message - works for both SlackMessage and TelegramMessage
+        # Score message - works for any MessageRecord implementation
         score, features = scoring_engine.score_message(message, channel_config)  # type: ignore[arg-type]
         scores.append(score)
 

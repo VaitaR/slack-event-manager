@@ -9,9 +9,9 @@ from typing import Any
 import pytz
 
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import DigestResult, Event, EventCategory
+from src.domain.protocols import RepositoryProtocol
 from src.services.title_renderer import TitleRenderer
 
 # Initialize title renderer
@@ -267,7 +267,7 @@ def chunk_blocks(
 
 def publish_digest_use_case(
     slack_client: SlackClient,
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     lookback_hours: int | None = None,
     target_channel: str | None = None,
@@ -286,7 +286,7 @@ def publish_digest_use_case(
 
     Args:
         slack_client: Slack client
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         lookback_hours: Hours to look back (defaults to settings.digest_lookback_hours)
         target_channel: Override digest channel
