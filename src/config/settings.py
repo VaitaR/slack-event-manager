@@ -21,7 +21,7 @@ from src.domain.deduplication_constants import (
     DEFAULT_MESSAGE_LOOKBACK_DAYS,
     DEFAULT_TITLE_SIMILARITY,
 )
-from src.domain.models import ChannelConfig
+from src.domain.models import ChannelConfig, MessageSource, MessageSourceConfig
 from src.domain.scoring_constants import DEFAULT_THRESHOLD_SCORE
 
 logger = logging.getLogger(__name__)
@@ -293,6 +293,39 @@ class Settings(BaseSettings):
                 ),
             )
 
+        # Multi-source configuration with auto-migration
+        if "message_sources" in config:
+            # New format: explicit message_sources
+            message_sources = []
+            for source_config in config["message_sources"]:
+                message_sources.append(MessageSourceConfig(**source_config))
+            data.setdefault("message_sources", message_sources)
+        elif "channels" in config and len(config["channels"]) > 0:
+            # Legacy format: auto-migrate from slack_channels
+            logger.info(
+                "Auto-migrating legacy 'channels' config to 'message_sources' format"
+            )
+            channel_ids = [ch["channel_id"] for ch in config["channels"]]
+            slack_source = MessageSourceConfig(
+                source_id=MessageSource.SLACK,
+                enabled=True,
+                bot_token_env="SLACK_BOT_TOKEN",
+                raw_table="raw_slack_messages",
+                state_table="ingestion_state_slack",
+                prompt_file="config/prompts/slack.txt",
+                llm_settings={
+                    "temperature": config.get("llm", {}).get("temperature", 1.0),
+                    "timeout_seconds": config.get("llm", {}).get(
+                        "timeout_seconds", 120
+                    ),
+                },
+                channels=channel_ids,
+            )
+            data.setdefault("message_sources", [slack_source])
+        else:
+            # No sources configured - empty list
+            data.setdefault("message_sources", [])
+
         if "importance" in config:
             data.setdefault(
                 "importance_min_publish_threshold",
@@ -486,6 +519,12 @@ class Settings(BaseSettings):
         description="Path to channels configuration YAML",
     )
 
+    # Multi-source configuration
+    message_sources: list[MessageSourceConfig] = Field(
+        default_factory=list,
+        description="List of message sources (Slack, Telegram, etc.) to monitor",
+    )
+
     @field_validator("slack_channels", mode="before")
     @classmethod
     def validate_slack_channels(cls, v: Any) -> list[ChannelConfig]:
@@ -509,6 +548,32 @@ class Settings(BaseSettings):
         from src.config.channels import get_channel_config as get_config
 
         return get_config(channel_id)
+
+    def get_source_config(self, source_id: MessageSource) -> MessageSourceConfig | None:
+        """Get configuration for specific message source.
+
+        Args:
+            source_id: Message source identifier (SLACK, TELEGRAM, etc.)
+
+        Returns:
+            Message source config or None if not found
+        """
+        for source_config in self.message_sources:
+            if source_config.source_id == source_id:
+                return source_config
+        return None
+
+    def get_enabled_sources(self) -> list[MessageSourceConfig]:
+        """Get list of enabled message sources.
+
+        Returns:
+            List of enabled message source configurations
+        """
+        return [
+            source_config
+            for source_config in self.message_sources
+            if source_config.enabled
+        ]
 
 
 # Global settings instance

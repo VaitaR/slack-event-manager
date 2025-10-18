@@ -11,7 +11,7 @@ import pytz
 from src.adapters.query_builders import EventQueryCriteria
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
-from src.domain.models import DeduplicationResult
+from src.domain.models import DeduplicationResult, MessageSource
 from src.services import deduplicator
 
 
@@ -19,10 +19,11 @@ def deduplicate_events_use_case(
     repository: SQLiteRepository,
     settings: Settings,
     lookback_days: int = 7,
+    source_id: MessageSource | None = None,
 ) -> DeduplicationResult:
     """Deduplicate events within lookback window.
 
-    1. Fetch all events from lookback window
+    1. Fetch all events from lookback window (optionally filtered by source)
     2. For each event:
        a. Check: same message_id with other events? → no merge (Rule 1)
        b. Find merge candidates: anchor/link overlap + date Δ
@@ -36,22 +37,30 @@ def deduplicate_events_use_case(
         repository: Data repository
         settings: Application settings
         lookback_days: Days to look back for deduplication
+        source_id: Optional source filter for strict isolation (prevents cross-source merging)
 
     Returns:
         DeduplicationResult with counts
 
     Example:
+        >>> # Deduplicate all events
         >>> result = deduplicate_events_use_case(repo, settings)
         >>> result.merged_events
         3
+
+        >>> # Deduplicate only Slack events (strict isolation)
+        >>> result = deduplicate_events_use_case(repo, settings, source_id=MessageSource.SLACK)
     """
     # Get events from lookback window using Criteria pattern
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
     extracted_after = now - timedelta(days=lookback_days)
 
-    # Use EventQueryCriteria instead of raw date window
+    # Use EventQueryCriteria with optional source filtering
     criteria = EventQueryCriteria(
         extracted_after=extracted_after,
+        source_id=source_id.value
+        if source_id
+        else None,  # Filter by source if provided
         order_by="extracted_at",
         order_desc=False,  # Chronological order
     )
@@ -66,6 +75,10 @@ def deduplicate_events_use_case(
     # Log initial state
     print("\n🔍 Deduplication Analysis:")
     print(f"   Initial events: {initial_count}")
+    if source_id:
+        print(f"   Source filter: {source_id.value} (strict isolation)")
+    else:
+        print("   Source filter: None (all sources)")
     print(f"   Date window: {settings.dedup_date_window_hours} hours")
     print(f"   Title similarity threshold: {settings.dedup_title_similarity}")
     print("")

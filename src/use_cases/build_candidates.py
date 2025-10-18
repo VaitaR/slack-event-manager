@@ -5,13 +5,21 @@ Scores messages and selects candidates for LLM extraction.
 
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
-from src.domain.models import CandidateResult, CandidateStatus, EventCandidate
+from src.domain.models import (
+    CandidateResult,
+    CandidateStatus,
+    EventCandidate,
+    MessageSource,
+    SlackMessage,
+    TelegramMessage,
+)
 from src.services import scoring_engine
 
 
 def build_candidates_use_case(
     repository: SQLiteRepository,
     settings: Settings,
+    source_id: MessageSource | None = None,
 ) -> CandidateResult:
     """Build event candidates from new messages.
 
@@ -24,6 +32,8 @@ def build_candidates_use_case(
     Args:
         repository: Data repository
         settings: Application settings
+        source_id: Optional message source filter (SLACK, TELEGRAM, etc.)
+                  If None, processes Slack messages (backward compatibility)
 
     Returns:
         CandidateResult with counts
@@ -32,9 +42,20 @@ def build_candidates_use_case(
         >>> result = build_candidates_use_case(repo, settings)
         >>> result.candidates_created
         15
+
+        >>> # Process Telegram messages
+        >>> result = build_candidates_use_case(repo, settings, MessageSource.TELEGRAM)
+        >>> result.candidates_created
+        8
     """
     # Get messages not yet scored
-    new_messages = repository.get_new_messages_for_candidates()
+    new_messages: list[SlackMessage | TelegramMessage]
+    if source_id is None:
+        # Backward compatibility: default to Slack
+        new_messages = repository.get_new_messages_for_candidates()  # type: ignore[assignment]
+    else:
+        # Use source-agnostic method
+        new_messages = repository.get_new_messages_for_candidates_by_source(source_id)
 
     if not new_messages:
         return CandidateResult(
@@ -55,8 +76,8 @@ def build_candidates_use_case(
             # Channel not in whitelist, skip
             continue
 
-        # Score message
-        score, features = scoring_engine.score_message(message, channel_config)
+        # Score message - works for both SlackMessage and TelegramMessage
+        score, features = scoring_engine.score_message(message, channel_config)  # type: ignore[arg-type]
         scores.append(score)
 
         # Check if meets threshold (using Specification pattern for filtering)
@@ -72,6 +93,7 @@ def build_candidates_use_case(
                 score=score,
                 status=CandidateStatus.NEW,
                 features=features,
+                source_id=message.source_id,  # Preserve source from message
             )
             candidates_to_save.append(candidate)
 
