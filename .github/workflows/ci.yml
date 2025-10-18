@@ -18,17 +18,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: requirements.txt
+          enable-cache: true
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
 
       - name: Install linting tools only
         run: |
-          python -m pip install --upgrade pip
-          pip install ruff==0.12.8
+          uv pip install --system ruff==0.12.8
 
       - name: Ruff (format check)
         run: |
@@ -45,25 +45,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: requirements.txt
+          enable-cache: true
 
-      - name: Cache Python packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+      - name: Set up Python 3.11
+        run: uv python install 3.11
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          uv pip install --system -r requirements.txt
 
       - name: Mypy (strict)
         run: |
@@ -77,25 +69,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: requirements.txt
+          enable-cache: true
 
-      - name: Cache Python packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+      - name: Set up Python 3.11
+        run: uv python install 3.11
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          uv pip install --system -r requirements.txt
 
       - name: Run tests with coverage
         env:
