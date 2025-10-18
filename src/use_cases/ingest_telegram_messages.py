@@ -242,7 +242,7 @@ def ingest_telegram_messages_use_case(
             if last_message_id is not None:
                 # Incremental: fetch from last processed message
                 print(
-                    f"📈 Channel {channel_id}: Incremental from message_id {int(last_message_id)}"
+                    f"📈 Channel {channel_id}: Incremental from message_id {last_message_id}"
                 )
                 # For Telegram, we'll fetch all and filter by message_id
                 # Telethon doesn't support min_id in iter_messages easily
@@ -304,7 +304,7 @@ def ingest_telegram_messages_use_case(
                 filtered_messages = [
                     msg
                     for msg in filtered_messages
-                    if int(msg.get("message_id", 0)) > int(last_message_id)
+                    if int(msg.get("message_id", "0")) > int(last_message_id)
                 ]
 
             if not filtered_messages:
@@ -326,7 +326,7 @@ def ingest_telegram_messages_use_case(
             if processed_messages:
                 # Actually, use the real Telegram message ID from raw messages
                 telegram_ids = [
-                    int(raw_msg.get("message_id", 0)) for raw_msg in filtered_messages
+                    int(raw_msg.get("message_id", "0")) for raw_msg in filtered_messages
                 ]
                 max_telegram_id = max(telegram_ids) if telegram_ids else 0
 

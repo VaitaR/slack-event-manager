@@ -321,8 +321,8 @@ class SQLiteRepository:
         )
 
         conn.commit()
+        conn.close()
         print("✅ Schema creation completed")
-        # Don't close connection here - it will be closed by the repository when needed
 
     def save_messages(self, messages: list[SlackMessage]) -> int:
         """Save messages to storage (idempotent upsert).
