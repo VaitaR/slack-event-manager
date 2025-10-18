@@ -30,19 +30,7 @@ repos:
   #         - httpx>=0.27.0
   #         - slack-sdk>=3.27.0
 
-  # Pytest - Run tests
-  - repo: local
-    hooks:
-      - id: pytest-quick
-        name: Run tests (quick)
-        entry: python -m pytest
-        language: system
-        types: [python]
-        args: [-q, --no-cov]
-        env:
-          SLACK_BOT_TOKEN: dummy
-          OPENAI_API_KEY: dummy
-        pass_filenames: false
+  # Tests are run in CI/CD via GitHub Actions, not pre-commit
 
   # Security - Check for secrets and vulnerabilities
   # - repo: https://github.com/Yelp/detect-secrets

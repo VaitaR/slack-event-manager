@@ -1,6 +1,6 @@
 # Telegram Integration Guide
 
-**Last Updated:** 2025-10-18  
+**Last Updated:** 2025-10-18
 **Status:** ✅ Phase 7 Complete - Telegram Text Extraction
 
 ## Overview
@@ -29,8 +29,8 @@ This document describes the Telegram integration for the Slack Event Manager. Th
 ### Components
 
 ```
-Telegram Channel → TelegramClient (Telethon wrapper) → 
-Message Processing → raw_telegram_messages table → 
+Telegram Channel → TelegramClient (Telethon wrapper) →
+Message Processing → raw_telegram_messages table →
 Candidate Building → LLM Extraction → Events
 ```
 
@@ -130,7 +130,7 @@ telegram_channels:
     channel_name: "Crypto News"
     from_date: "2025-10-17T00:00:00Z"  # Start date for backfill
     enabled: true
-  
+
   - channel_id: "@tech_updates"
     channel_name: "Tech Updates"
     from_date: "2025-10-16T00:00:00Z"
@@ -516,4 +516,3 @@ For issues or questions:
 2. ⏭️ Optional: Add media extraction (V2)
 3. ⏭️ Optional: Add reaction tracking (V2)
 4. ⏭️ Optional: Add private channel support (V2)
-
