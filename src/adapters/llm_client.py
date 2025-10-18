@@ -5,12 +5,15 @@ Implements LLMClientProtocol with OpenAI integration.
 
 import hashlib
 import json
+import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Final
 
 import pytz
+import yaml
 from openai import APIError, OpenAI
 from openai import RateLimitError as OpenAIRateLimitError
 
@@ -36,152 +39,94 @@ PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
 
 
-def load_prompt_from_file(file_path: str) -> str:
-    """Load prompt template from a file.
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PromptFileData:
+    """Loaded prompt payload with metadata."""
+
+    content: str
+    version: str | None
+    checksum: str
+    size_bytes: int
+    path: Path
+
+
+@dataclass
+class _PromptCacheEntry:
+    """Cache entry storing metadata for a prompt file."""
+
+    mtime: float
+    data: PromptFileData
+
+
+_PROMPT_CACHE: dict[Path, _PromptCacheEntry] = {}
+
+DEFAULT_PROMPT_PATH: Final[Path] = Path("config/prompts/slack.yaml")
+
+
+def load_prompt_from_file(file_path: str) -> PromptFileData:
+    """Load prompt template from a file with caching and metadata.
 
     Args:
         file_path: Path to the prompt file
 
     Returns:
-        Prompt content as a string
+        Prompt payload metadata
 
     Raises:
         FileNotFoundError: If the file doesn't exist
+        ValueError: If YAML prompt file has invalid structure
     """
-    prompt_file = Path(file_path)
-    if not prompt_file.exists():
-        raise FileNotFoundError(f"Prompt file not found: {file_path}")
-    return prompt_file.read_text()
+
+    raw_path = Path(file_path).expanduser()
+    path = raw_path if raw_path.is_absolute() else (Path.cwd() / raw_path).resolve()
+
+    if not path.exists():
+        repo_root = Path(__file__).resolve().parents[2]
+        alt_path = (repo_root / raw_path).resolve()
+        if alt_path.exists():
+            path = alt_path
+        else:
+            raise FileNotFoundError(f"Prompt file not found: {file_path}")
+
+    stat_result = path.stat()
+    cache_entry = _PROMPT_CACHE.get(path)
+    if cache_entry and cache_entry.mtime == stat_result.st_mtime:
+        return cache_entry.data
+
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        raw_text = path.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(raw_text)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Prompt YAML must be a mapping: {path}")
+
+        version = parsed.get("version")
+        if not isinstance(version, str):
+            raise ValueError(f"Prompt YAML missing 'version' string: {path}")
+
+        system_prompt = parsed.get("system")
+        if not isinstance(system_prompt, str):
+            raise ValueError(f"Prompt YAML missing 'system' string: {path}")
+    else:
+        system_prompt = path.read_text(encoding="utf-8")
+        version = None
+
+    checksum = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+    size_bytes = len(system_prompt.encode("utf-8"))
+    prompt_data = PromptFileData(
+        content=system_prompt,
+        version=version,
+        checksum=checksum,
+        size_bytes=size_bytes,
+        path=path,
+    )
+
+    _PROMPT_CACHE[path] = _PromptCacheEntry(mtime=stat_result.st_mtime, data=prompt_data)
+    return prompt_data
 
 
-SYSTEM_PROMPT: Final[str] = """You are an event extraction assistant for Slack messages.
-
-LANGUAGE REQUIREMENT:
-- INPUT: May be in Russian or English
-- OUTPUT: ALL fields (action, qualifiers, stroke, object_name_raw, summary, etc.) MUST BE IN ENGLISH
-
-Your task: Extract 0 to 5 independent events from a Slack message with structured title slots.
-
-Core Rules:
-1. Each distinct date/timeframe = separate event
-2. Each distinct project/task/anchor = separate event
-3. Time intervals (e.g., "Oct 10-12") = single event with end times
-4. Recurring events: pick nearest/first occurrence
-5. If >5 events exist, pick top 5 by specificity (clear dates/anchors), note rest in overflow_note
-
-Categories:
-- product: releases, features, deployments, launches
-- process: internal processes, workflows, policies
-- marketing: campaigns, promotions, announcements
-- risk: incidents, issues, compliance, security
-- org: organizational changes, hiring, team updates
-- unknown: unclear or doesn't fit
-
-Title Slot Extraction (CRITICAL):
-Extract these slots that will be used to generate canonical title:
-
-- action: Choose from controlled vocabulary (ENGLISH ONLY):
-  ["Launch","Deploy","Migration","Move","Rollback","Policy","Campaign","Webinar","Incident","RCA","A/B Test","Other"]
-
-- object_name_raw: The thing being acted upon (e.g., "Stocks & ETFs", "ClickHouse cluster", "KYC process")
-  Keep concise, no URLs or dates. ENGLISH ONLY.
-
-- qualifiers: Max 2 short descriptors from text (ENGLISH ONLY, e.g., ["alpha", "EU only"], ["background", "Data team"])
-  Descriptive tags, not full sentences
-
-- stroke: Single brief semantic note from whitelist concepts (ENGLISH ONLY):
-  ["degradation possible", "access limited", "completed", "rollback done", "in progress", etc.]
-  Or null if none applies
-
-- anchor: Brief identifier (ABC-123, PR#421, v2.3.0, Q4-2025)
-  NOT full URLs, just the identifier part
-
-Lifecycle Fields:
-- status: ["planned","confirmed","started","completed","postponed","canceled","rolled_back","updated"]
-  Based on tense and context
-
-- change_type: ["launch","deploy","migration","rollback","ab_test","policy","campaign","incident","rca","other"]
-
-- environment: ["prod","staging","dev","multi","unknown"]
-
-- severity: For risk category only: ["sev1","sev2","sev3","info","unknown"] or null
-
-Time Fields:
-Extract all mentioned times. Use null if not mentioned.
-
-- planned_start, planned_end: For future/scheduled events
-- actual_start, actual_end: For completed/ongoing events
-- time_source: "explicit" (date in text), "relative" ("tomorrow", "next week"), "ts_fallback" (message timestamp)
-- time_confidence: 0.0-1.0 based on how explicit the time is
-
-Content Fields:
-- summary: 1-3 sentences (max 320 chars). What changed and why it matters.
-- why_it_matters: 1 line (max 160 chars) or null. Impact/reason for reader.
-- links: Array of URLs (max 3)
-- anchors: Array of identifiers found (Jira keys, PR numbers, version tags)
-- impact_area: Systems/components affected (max 3): ["authentication", "payments", "mobile-app"]
-- impact_type: Types of impact: ["perf_degradation", "downtime", "ux_change", "policy_change", "data_migration"]
-
-Quality:
-- confidence: 0.0-1.0. How confident you are in extraction accuracy.
-
-Output STRICT JSON matching this schema:
-{
-  "is_event": true/false,
-  "overflow_note": "string or null",
-  "events": [
-    {
-      "action": "Launch|Deploy|Migration|...",
-      "object_name_raw": "string",
-      "qualifiers": ["str1", "str2"],
-      "stroke": "string or null",
-      "anchor": "string or null",
-      "category": "product|process|marketing|risk|org|unknown",
-      "status": "planned|started|completed|...",
-      "change_type": "launch|deploy|migration|...",
-      "environment": "prod|staging|dev|multi|unknown",
-      "severity": "sev1|sev2|sev3|info|unknown|null",
-      "planned_start": "ISO8601 or null",
-      "planned_end": "ISO8601 or null",
-      "actual_start": "ISO8601 or null",
-      "actual_end": "ISO8601 or null",
-      "time_source": "explicit|relative|ts_fallback",
-      "time_confidence": 0.0-1.0,
-      "summary": "max 320 chars",
-      "why_it_matters": "max 160 chars or null",
-      "links": ["url1", "url2"],
-      "anchors": ["ABC-123"],
-      "impact_area": ["area1"],
-      "impact_type": ["type1"],
-      "confidence": 0.0-1.0
-    }
-  ]
-}
-
-If message has no events (e.g., question, discussion), set is_event=false and events=[].
-
-Examples:
-Message: "🚀 Launching Stocks & ETFs trading in alpha for Wallet team next Monday. Known issue: possible performance degradation during peak hours. Track: INV-1024"
-Event:
-{
-  "action": "Launch",
-  "object_name_raw": "Stocks & ETFs trading",
-  "qualifiers": ["alpha", "Wallet team"],
-  "stroke": "degradation possible",
-  "anchor": "INV-1024",
-  "status": "planned",
-  "change_type": "launch",
-  "environment": "prod",
-  "planned_start": "2025-10-20T00:00:00Z",
-  "time_source": "relative",
-  "time_confidence": 0.7,
-  "summary": "Launching Stocks & ETFs trading feature in alpha mode for Wallet team. Possible performance degradation during peak hours.",
-  "why_it_matters": "New trading capability for alpha users with potential performance impact",
-  "impact_area": ["wallet", "trading"],
-  "impact_type": ["perf_degradation"],
-  "confidence": 0.9
-}
-"""
 
 
 class LLMClient:
@@ -223,13 +168,41 @@ class LLMClient:
                 )
             self.temperature = temperature
 
-        # Load prompt (priority: file > template > default)
+        self._prompt_metadata: PromptFileData | None = None
+        self._system_prompt_path: Path | None = None
+        self.prompt_version: str | None = None
+
         if prompt_file:
-            self.system_prompt = load_prompt_from_file(prompt_file)
+            prompt_data = load_prompt_from_file(prompt_file)
+            self.system_prompt = prompt_data.content
+            self._prompt_metadata = prompt_data
+            self._system_prompt_path = prompt_data.path
+            self.prompt_version = prompt_data.version
+            self._system_prompt_size_bytes = prompt_data.size_bytes
         elif prompt_template:
             self.system_prompt = prompt_template
+            self._system_prompt_size_bytes = len(self.system_prompt.encode("utf-8"))
         else:
-            self.system_prompt = SYSTEM_PROMPT
+            prompt_data = load_prompt_from_file(str(DEFAULT_PROMPT_PATH))
+            self.system_prompt = prompt_data.content
+            self._prompt_metadata = prompt_data
+            self._system_prompt_path = prompt_data.path
+            self.prompt_version = prompt_data.version
+            self._system_prompt_size_bytes = prompt_data.size_bytes
+
+        self._system_prompt_hash = hashlib.sha256(
+            self.system_prompt.encode("utf-8")
+        ).hexdigest()
+
+        logger.info(
+            "LLM system prompt ready",
+            extra={
+                "prompt_hash": self._system_prompt_hash,
+                "prompt_version": self.prompt_version,
+                "prompt_path": str(self._system_prompt_path) if self._system_prompt_path else "<inline>",
+                "prompt_size_bytes": self._system_prompt_size_bytes,
+            },
+        )
 
         self._last_call_metadata: LLMCallMetadata | None = None
 
@@ -259,9 +232,6 @@ class LLMClient:
 
         # Build prompt
         prompt = self._build_prompt(text, links, message_ts_dt, channel_name)
-
-        # Calculate prompt hash for caching
-        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
         # Log request details
         import sys
@@ -346,7 +316,7 @@ class LLMClient:
             # Store metadata
             self._last_call_metadata = LLMCallMetadata(
                 message_id="",  # Will be set by caller
-                prompt_hash=prompt_hash,
+                prompt_hash=self._system_prompt_hash,
                 model=self.model,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,

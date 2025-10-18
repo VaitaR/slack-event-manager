@@ -33,7 +33,7 @@ class TestMessageSourceConfigIntegration:
                     "bot_token_env": "SLACK_BOT_TOKEN",
                     "raw_table": "raw_slack_messages",
                     "state_table": "ingestion_state_slack",
-                    "prompt_file": "config/prompts/slack.txt",
+                    "prompt_file": "config/prompts/slack.yaml",
                     "llm_settings": {"temperature": 1.0, "timeout_seconds": 30},
                     "channels": ["C123", "C456"],
                 }
@@ -226,14 +226,14 @@ class TestLLMSettingsPerSource:
                     "enabled": True,
                     "raw_table": "raw_slack_messages",
                     "state_table": "ingestion_state_slack",
-                    "prompt_file": "config/prompts/slack.txt",
+                    "prompt_file": "config/prompts/slack.yaml",
                 },
                 {
                     "source_id": "telegram",
                     "enabled": True,
                     "raw_table": "raw_telegram_messages",
                     "state_table": "ingestion_state_telegram",
-                    "prompt_file": "config/prompts/telegram.txt",
+                    "prompt_file": "config/prompts/telegram.yaml",
                 },
             ]
         }
@@ -251,8 +251,8 @@ class TestLLMSettingsPerSource:
 
             assert slack_config is not None
             assert telegram_config is not None
-            assert "slack.txt" in slack_config.prompt_file
-            assert "telegram.txt" in telegram_config.prompt_file
+            assert "slack.yaml" in slack_config.prompt_file
+            assert "telegram.yaml" in telegram_config.prompt_file
 
 
 class TestBackwardCompatibilityIntegration:
