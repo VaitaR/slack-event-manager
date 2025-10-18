@@ -9,10 +9,12 @@ from typing import Any, Protocol
 from src.domain.models import (
     Event,
     EventCandidate,
+    EventCategory,
     LLMCallMetadata,
     LLMResponse,
     MessageSource,
     SlackMessage,
+    TelegramMessage,
 )
 
 
@@ -215,6 +217,11 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def get_candidates_by_source(self, source_id: MessageSource) -> list[EventCandidate]:
+        """Get candidates for a specific message source."""
+
+        ...
+
     def get_candidates_for_extraction(
         self, batch_size: int = 50, min_score: float | None = None
     ) -> list[EventCandidate]:
@@ -258,6 +265,11 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def get_events_by_source(self, source_id: MessageSource) -> list[Event]:
+        """Get events filtered by message source."""
+
+        ...
+
     def get_events_in_window(self, start_dt: datetime, end_dt: datetime) -> list[Event]:
         """Get events within date window.
 
@@ -271,6 +283,18 @@ class RepositoryProtocol(Protocol):
         Raises:
             RepositoryError: On storage errors
         """
+        ...
+
+    def get_events_in_window_filtered(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        min_confidence: float | None = None,
+        max_events: int | None = None,
+        categories: list[EventCategory] | None = None,
+    ) -> list[Event]:
+        """Get events filtered by confidence, limit, and categories."""
+
         ...
 
     def save_llm_call(self, metadata: LLMCallMetadata) -> None:
@@ -310,6 +334,18 @@ class RepositoryProtocol(Protocol):
         Raises:
             RepositoryError: On storage errors
         """
+        ...
+
+    def save_telegram_messages(self, messages: list[TelegramMessage]) -> int:
+        """Save Telegram messages for candidate generation."""
+
+        ...
+
+    def get_telegram_messages(
+        self, channel: str | None = None, limit: int = 100
+    ) -> list[TelegramMessage]:
+        """Get Telegram messages for debugging or validation."""
+
         ...
 
     def get_last_processed_ts(

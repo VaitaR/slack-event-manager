@@ -91,6 +91,9 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
+markers = [
+    "postgres: Tests that require a PostgreSQL backend",
+]
 
 [tool.coverage.run]
 source = ["src"]

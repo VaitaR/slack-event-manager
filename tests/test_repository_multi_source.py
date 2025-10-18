@@ -12,6 +12,8 @@ from uuid import uuid4
 
 import pytest
 
+from src.adapters.repository_factory import create_repository
+from src.config.settings import Settings
 from src.domain.models import (
     ActionType,
     CandidateStatus,
@@ -26,6 +28,16 @@ from src.domain.models import (
     TelegramMessage,
     TimeSource,
 )
+from src.domain.protocols import RepositoryProtocol
+
+
+def make_repository(db_path: Path) -> RepositoryProtocol:
+    """Create a repository for the provided database path."""
+
+    settings = Settings().model_copy(
+        update={"database_type": "sqlite", "db_path": str(db_path)}
+    )
+    return create_repository(settings)
 
 
 def create_test_candidate(
@@ -104,9 +116,8 @@ class TestTelegramRawMessagesTable:
 
     def test_raw_telegram_messages_table_created(self, temp_db: Path) -> None:
         """Test that raw_telegram_messages table is created."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        _ = SQLiteRepository(db_path=str(temp_db))
+        
+        _ = make_repository(temp_db)
 
         # Check table exists
         conn = sqlite3.connect(str(temp_db))
@@ -121,9 +132,8 @@ class TestTelegramRawMessagesTable:
 
     def test_raw_telegram_messages_has_correct_schema(self, temp_db: Path) -> None:
         """Test that raw_telegram_messages has expected columns."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        _ = SQLiteRepository(db_path=str(temp_db))
+        
+        _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
         cursor = conn.cursor()
@@ -159,9 +169,8 @@ class TestSaveTelegramMessages:
 
     def test_save_telegram_messages_basic(self, temp_db: Path) -> None:
         """Test saving basic Telegram messages."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         messages = [
             TelegramMessage(
@@ -188,9 +197,8 @@ class TestSaveTelegramMessages:
 
     def test_save_telegram_messages_with_optional_fields(self, temp_db: Path) -> None:
         """Test saving Telegram messages with all optional fields."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         messages = [
             TelegramMessage(
@@ -226,9 +234,8 @@ class TestSaveTelegramMessages:
 
     def test_save_telegram_messages_multiple(self, temp_db: Path) -> None:
         """Test saving multiple Telegram messages."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         messages = [
             TelegramMessage(
@@ -258,9 +265,8 @@ class TestGetTelegramMessages:
 
     def test_get_telegram_messages_basic(self, temp_db: Path) -> None:
         """Test retrieving Telegram messages."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Save messages
         messages = [
@@ -283,9 +289,8 @@ class TestGetTelegramMessages:
 
     def test_get_telegram_messages_respects_limit(self, temp_db: Path) -> None:
         """Test limit parameter for Telegram messages."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Save 10 messages
         messages = [
@@ -306,9 +311,8 @@ class TestGetTelegramMessages:
 
     def test_get_telegram_messages_filters_by_channel(self, temp_db: Path) -> None:
         """Test channel filtering for Telegram messages."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Save messages to different channels
         messages_a = [
@@ -343,9 +347,8 @@ class TestSourceSpecificIngestionState:
 
     def test_ingestion_state_slack_table_created(self, temp_db: Path) -> None:
         """Test that ingestion_state_slack table is created."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        _ = SQLiteRepository(db_path=str(temp_db))
+        
+        _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
         cursor = conn.cursor()
@@ -359,9 +362,8 @@ class TestSourceSpecificIngestionState:
 
     def test_ingestion_state_telegram_table_created(self, temp_db: Path) -> None:
         """Test that ingestion_state_telegram table is created."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        _ = SQLiteRepository(db_path=str(temp_db))
+        
+        _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
         cursor = conn.cursor()
@@ -375,9 +377,8 @@ class TestSourceSpecificIngestionState:
 
     def test_get_last_processed_ts_slack(self, temp_db: Path) -> None:
         """Test get_last_processed_ts for Slack source."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Set timestamp
         repo.update_last_processed_ts(
@@ -391,9 +392,8 @@ class TestSourceSpecificIngestionState:
 
     def test_get_last_processed_ts_telegram(self, temp_db: Path) -> None:
         """Test get_last_processed_ts for Telegram source."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Set timestamp
         repo.update_last_processed_ts(
@@ -409,9 +409,8 @@ class TestSourceSpecificIngestionState:
 
     def test_state_isolation_between_sources(self, temp_db: Path) -> None:
         """Test that Slack and Telegram state are isolated."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Set different timestamps for same channel in different sources
         repo.update_last_processed_ts(
@@ -436,9 +435,8 @@ class TestSourceSpecificIngestionState:
         self, temp_db: Path
     ) -> None:
         """Test that get_last_processed_ts returns None for unknown channels."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         ts = repo.get_last_processed_ts(
             channel="nonexistent", source_id=MessageSource.SLACK
@@ -450,9 +448,8 @@ class TestSourceSpecificIngestionState:
         self, temp_db: Path
     ) -> None:
         """Test that calling get_last_processed_ts without source_id defaults to Slack."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Set Slack timestamp
         repo.update_last_processed_ts(
@@ -470,9 +467,8 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_save_candidates_preserves_telegram_source(self, temp_db: Path) -> None:
         """Test saving candidates from Telegram messages."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         candidates = [
             create_test_candidate(
@@ -498,9 +494,8 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_save_events_preserves_telegram_source(self, temp_db: Path) -> None:
         """Test saving events from Telegram candidates."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         events = [
             create_test_event(
@@ -527,9 +522,8 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_get_candidates_filters_by_source(self, temp_db: Path) -> None:
         """Test retrieving candidates filtered by source_id."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Save mixed source candidates
         candidates = [
@@ -563,9 +557,8 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_get_events_filters_by_source(self, temp_db: Path) -> None:
         """Test retrieving events filtered by source_id."""
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        repo = SQLiteRepository(db_path=str(temp_db))
+        
+        repo = make_repository(temp_db)
 
         # Save mixed source events
         events = [
