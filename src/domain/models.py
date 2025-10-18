@@ -228,6 +228,9 @@ class TelegramMessage(BaseModel):
     user: str | None = Field(
         default=None, description="User ID (for scoring compatibility)"
     )
+    bot_id: str | None = Field(
+        default=None, description="Bot ID (for scoring compatibility)"
+    )
     is_bot: bool = Field(default=False, description="Whether sender is a bot")
     text: str = Field(default="", description="Raw message text")
     text_norm: str = Field(default="", description="Normalized text")
