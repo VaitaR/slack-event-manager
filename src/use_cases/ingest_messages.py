@@ -10,9 +10,9 @@ from typing import Any
 import pytz
 
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import IngestResult, SlackMessage
+from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
 
 
@@ -159,7 +159,7 @@ def process_slack_message(
 
 def ingest_messages_use_case(
     slack_client: SlackClient,
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     lookback_hours: int | None = None,
     backfill_from_date: datetime | None = None,
@@ -181,7 +181,7 @@ def ingest_messages_use_case(
 
     Args:
         slack_client: Slack client
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         lookback_hours: Override default lookback (deprecated, use backfill_from_date)
         backfill_from_date: Optional date to start backfill from (first run only)
