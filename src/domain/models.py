@@ -175,6 +175,10 @@ class ChannelConfig(BaseModel):
     link_weight: float = Field(default=2.0, description="Weight per link")
     file_weight: float = Field(default=3.0, description="Weight for attachments")
     bot_penalty: float = Field(default=-15.0, description="Penalty for bot messages")
+    trusted_bots: list[str] = Field(
+        default_factory=list,
+        description="Trusted bot user IDs that bypass bot penalty",
+    )
 
 
 class SlackMessage(BaseModel):
@@ -185,6 +189,7 @@ class SlackMessage(BaseModel):
     ts: str = Field(..., description="Slack timestamp")
     ts_dt: datetime = Field(..., description="Timestamp as UTC datetime")
     user: str | None = Field(default=None, description="User ID")
+    bot_id: str | None = Field(default=None, description="Slack bot identifier")
     user_real_name: str | None = Field(default=None, description="User real name")
     user_display_name: str | None = Field(default=None, description="User display name")
     user_email: str | None = Field(default=None, description="User email")
@@ -281,6 +286,12 @@ class ScoringFeatures(BaseModel):
     has_files: bool = False
     is_bot: bool = False
     channel_name: str = ""
+    author_id: str | None = None
+    bot_id: str | None = None
+    explanations: list[str] = Field(
+        default_factory=list,
+        description="Human-readable scoring explanation entries",
+    )
 
 
 class EventCandidate(BaseModel):
