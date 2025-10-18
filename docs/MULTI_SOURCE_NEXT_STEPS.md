@@ -1,6 +1,6 @@
 # Multi-Source Architecture - Next Steps
 
-**Last Updated:** 2025-10-17  
+**Last Updated:** 2025-10-17
 **Current Status:** Phase 1 Complete (Foundation Layer)
 
 ## Summary of Completed Work
@@ -8,9 +8,9 @@
 We've successfully implemented the **foundation layer** for multi-source architecture:
 
 ✅ **Domain Models** - MessageSource enum, TelegramMessage, source_id tracking
-✅ **Protocols** - MessageClientProtocol, updated RepositoryProtocol  
-✅ **Tests** - 28 new tests, 185/185 total tests passing  
-✅ **Backward Compatibility** - 100% verified, no breaking changes  
+✅ **Protocols** - MessageClientProtocol, updated RepositoryProtocol
+✅ **Tests** - 28 new tests, 185/185 total tests passing
+✅ **Backward Compatibility** - 100% verified, no breaking changes
 ✅ **Documentation** - Implementation summary and progress tracking
 
 ## Immediate Next Steps
@@ -26,13 +26,13 @@ def test_raw_telegram_messages_table_created():
     """Test Telegram raw table is created."""
     repo = SQLiteRepository(":memory:")
     # Verify table exists
-    
+
 def test_table_routing_by_source_id():
     """Test _get_raw_table_name() routes correctly."""
     repo = SQLiteRepository(":memory:")
     assert repo._get_raw_table_name(MessageSource.SLACK) == "raw_slack_messages"
     assert repo._get_raw_table_name(MessageSource.TELEGRAM) == "raw_telegram_messages"
-    
+
 def test_source_specific_state_tables():
     """Test source-specific state tables."""
     repo = SQLiteRepository(":memory:")
@@ -114,7 +114,7 @@ def get_last_processed_ts(
     """Get last processed timestamp (source-specific)."""
     if source_id is None:
         source_id = MessageSource.SLACK  # Default for backward compat
-    
+
     table_name = self._get_state_table_name(source_id)
     # Query from appropriate table
 ```
@@ -243,7 +243,7 @@ Update `src/config/settings.py` to add:
 ```python
 class MessageSourceConfig(BaseModel):
     """Configuration for a message source."""
-    
+
     source_id: MessageSource
     enabled: bool
     raw_table: str
@@ -255,17 +255,17 @@ class MessageSourceConfig(BaseModel):
 
 class Settings(BaseSettings):
     # ... existing fields ...
-    
+
     # Multi-source configuration
     message_sources: list[MessageSourceConfig] = Field(
         default_factory=list,
         description="Message source configurations"
     )
-    
+
     def __init__(self, **data: Any):
         """Initialize with auto-migration from legacy config."""
         config = load_all_configs()
-        
+
         # Auto-migrate from legacy slack_channels if no message_sources
         if "message_sources" not in config and "channels" in config:
             # Create default Slack source from existing channels
@@ -284,7 +284,7 @@ class Settings(BaseSettings):
             data.setdefault("message_sources", [slack_source])
         elif "message_sources" in config:
             data.setdefault("message_sources", config["message_sources"])
-        
+
         super().__init__(**data)
 ```
 
@@ -307,7 +307,7 @@ message_sources:
     channels:
       - C1234567890
       - C0987654321
-  
+
   # Telegram source (stub, disabled by default)
   - source_id: telegram
     enabled: false
@@ -359,10 +359,10 @@ def migrate_database(db_path: str) -> None:
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
+
     # 1. Create new tables
     # ... (code from Step 2)
-    
+
     # 2. Migrate data from ingestion_state to ingestion_state_slack
     cursor.execute("""
         INSERT OR IGNORE INTO ingestion_state_slack (
@@ -371,10 +371,10 @@ def migrate_database(db_path: str) -> None:
         SELECT channel_id, last_processed_ts, ? as updated_at
         FROM ingestion_state
     """, (datetime.utcnow().isoformat(),))
-    
+
     conn.commit()
     conn.close()
-    
+
     print(f"✅ Migration complete: {db_path}")
 
 
@@ -445,4 +445,3 @@ Before continuing, clarify:
 ---
 
 **Ready to continue? Start with Step 1: Repository Layer Tests**
-

@@ -116,7 +116,7 @@ class TestTelegramRawMessagesTable:
 
     def test_raw_telegram_messages_table_created(self, temp_db: Path) -> None:
         """Test that raw_telegram_messages table is created."""
-        
+
         _ = make_repository(temp_db)
 
         # Check table exists
@@ -132,7 +132,7 @@ class TestTelegramRawMessagesTable:
 
     def test_raw_telegram_messages_has_correct_schema(self, temp_db: Path) -> None:
         """Test that raw_telegram_messages has expected columns."""
-        
+
         _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
@@ -169,7 +169,7 @@ class TestSaveTelegramMessages:
 
     def test_save_telegram_messages_basic(self, temp_db: Path) -> None:
         """Test saving basic Telegram messages."""
-        
+
         repo = make_repository(temp_db)
 
         messages = [
@@ -197,7 +197,7 @@ class TestSaveTelegramMessages:
 
     def test_save_telegram_messages_with_optional_fields(self, temp_db: Path) -> None:
         """Test saving Telegram messages with all optional fields."""
-        
+
         repo = make_repository(temp_db)
 
         messages = [
@@ -234,7 +234,7 @@ class TestSaveTelegramMessages:
 
     def test_save_telegram_messages_multiple(self, temp_db: Path) -> None:
         """Test saving multiple Telegram messages."""
-        
+
         repo = make_repository(temp_db)
 
         messages = [
@@ -265,7 +265,7 @@ class TestGetTelegramMessages:
 
     def test_get_telegram_messages_basic(self, temp_db: Path) -> None:
         """Test retrieving Telegram messages."""
-        
+
         repo = make_repository(temp_db)
 
         # Save messages
@@ -289,7 +289,7 @@ class TestGetTelegramMessages:
 
     def test_get_telegram_messages_respects_limit(self, temp_db: Path) -> None:
         """Test limit parameter for Telegram messages."""
-        
+
         repo = make_repository(temp_db)
 
         # Save 10 messages
@@ -311,7 +311,7 @@ class TestGetTelegramMessages:
 
     def test_get_telegram_messages_filters_by_channel(self, temp_db: Path) -> None:
         """Test channel filtering for Telegram messages."""
-        
+
         repo = make_repository(temp_db)
 
         # Save messages to different channels
@@ -347,7 +347,7 @@ class TestSourceSpecificIngestionState:
 
     def test_ingestion_state_slack_table_created(self, temp_db: Path) -> None:
         """Test that ingestion_state_slack table is created."""
-        
+
         _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
@@ -362,7 +362,7 @@ class TestSourceSpecificIngestionState:
 
     def test_ingestion_state_telegram_table_created(self, temp_db: Path) -> None:
         """Test that ingestion_state_telegram table is created."""
-        
+
         _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
@@ -377,7 +377,7 @@ class TestSourceSpecificIngestionState:
 
     def test_get_last_processed_ts_slack(self, temp_db: Path) -> None:
         """Test get_last_processed_ts for Slack source."""
-        
+
         repo = make_repository(temp_db)
 
         # Set timestamp
@@ -392,7 +392,7 @@ class TestSourceSpecificIngestionState:
 
     def test_get_last_processed_ts_telegram(self, temp_db: Path) -> None:
         """Test get_last_processed_ts for Telegram source."""
-        
+
         repo = make_repository(temp_db)
 
         # Set timestamp
@@ -409,7 +409,7 @@ class TestSourceSpecificIngestionState:
 
     def test_state_isolation_between_sources(self, temp_db: Path) -> None:
         """Test that Slack and Telegram state are isolated."""
-        
+
         repo = make_repository(temp_db)
 
         # Set different timestamps for same channel in different sources
@@ -435,7 +435,7 @@ class TestSourceSpecificIngestionState:
         self, temp_db: Path
     ) -> None:
         """Test that get_last_processed_ts returns None for unknown channels."""
-        
+
         repo = make_repository(temp_db)
 
         ts = repo.get_last_processed_ts(
@@ -448,7 +448,7 @@ class TestSourceSpecificIngestionState:
         self, temp_db: Path
     ) -> None:
         """Test that calling get_last_processed_ts without source_id defaults to Slack."""
-        
+
         repo = make_repository(temp_db)
 
         # Set Slack timestamp
@@ -467,7 +467,7 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_save_candidates_preserves_telegram_source(self, temp_db: Path) -> None:
         """Test saving candidates from Telegram messages."""
-        
+
         repo = make_repository(temp_db)
 
         candidates = [
@@ -494,7 +494,7 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_save_events_preserves_telegram_source(self, temp_db: Path) -> None:
         """Test saving events from Telegram candidates."""
-        
+
         repo = make_repository(temp_db)
 
         events = [
@@ -522,7 +522,7 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_get_candidates_filters_by_source(self, temp_db: Path) -> None:
         """Test retrieving candidates filtered by source_id."""
-        
+
         repo = make_repository(temp_db)
 
         # Save mixed source candidates
@@ -549,7 +549,7 @@ class TestCandidatesAndEventsSourceTracking:
 
         # Get only Telegram candidates
         telegram_candidates = repo.get_candidates_by_source(
-            source_id=MessageSource.TELEGRAM, limit=10
+            source_id=MessageSource.TELEGRAM
         )
 
         assert len(telegram_candidates) == 2
@@ -557,7 +557,7 @@ class TestCandidatesAndEventsSourceTracking:
 
     def test_get_events_filters_by_source(self, temp_db: Path) -> None:
         """Test retrieving events filtered by source_id."""
-        
+
         repo = make_repository(temp_db)
 
         # Save mixed source events
@@ -587,9 +587,7 @@ class TestCandidatesAndEventsSourceTracking:
         repo.save_events(events)
 
         # Get only Telegram events
-        telegram_events = repo.get_events_by_source(
-            source_id=MessageSource.TELEGRAM, limit=10
-        )
+        telegram_events = repo.get_events_by_source(source_id=MessageSource.TELEGRAM)
 
         assert len(telegram_events) == 2
         assert all(e.source_id == MessageSource.TELEGRAM for e in telegram_events)

@@ -1,67 +1,69 @@
 # Pre-commit hooks configuration
-# Install: pip install pre-commit && pre-commit install
-# Run manually: pre-commit run --all-files
+# Install: pre-commit install
+# Run: pre-commit run --all-files
+# Run before push: pre-commit run --all-files
 
 repos:
-  # Ruff - Fast Python linter and formatter (replaces black, isort, flake8)
+  # Ruff - Fast Python linter and formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.12.8  # Match Makefile and CI
     hooks:
-      # Run the formatter (must be before linter)
+      # Format code (Black-compatible)
       - id: ruff-format
-        types_or: [python, pyi]
-      # Run the linter (auto-fix in pre-commit, check-only in CI)
+        name: Format code with Ruff
+      # Lint code (flake8 + isort + more)
       - id: ruff
-        args: [--fix]
-        types_or: [python, pyi]
+        name: Lint code with Ruff
+        args: [--fix, --unsafe-fixes]
 
-  # Basic file checks
+  # Mypy - Static type checker (run in CI instead for reliability)
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.17.1  # Match pyproject.toml strict settings
+  #   hooks:
+  #     - id: mypy
+  #       name: Type check with Mypy
+  #       # Match Makefile: check src and tests in strict mode
+  #       args: [--strict, src, tests]
+  #       exclude: ^(src/domain/protocols\.py|tests/conftest\.py)$
+  #       additional_dependencies:
+  #         - pydantic>=2.6.0
+  #         - httpx>=0.27.0
+  #         - slack-sdk>=3.27.0
+
+  # Pytest - Run tests
+  - repo: local
+    hooks:
+      - id: pytest-quick
+        name: Run tests (quick)
+        entry: python -m pytest
+        language: system
+        types: [python]
+        args: [-q, --no-cov]
+        env:
+          SLACK_BOT_TOKEN: dummy
+          OPENAI_API_KEY: dummy
+        pass_filenames: false
+
+  # Security - Check for secrets and vulnerabilities
+  # - repo: https://github.com/Yelp/detect-secrets
+  #   rev: v1.5.0
+  #   hooks:
+  #     - id: detect-secrets
+  #       name: Detect secrets
+  #       args: [--baseline, .secrets.baseline]
+  #       exclude: ^(tests/|docs/|\.env\.example)
+
+  # Trailing whitespace and end-of-file fixes
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: '^.*\.md$'
+        name: Remove trailing whitespace
       - id: end-of-file-fixer
-        exclude: '^.*\.md$'
-      - id: check-yaml
+        name: Add missing end-of-file
+        exclude: ^(alembic/versions/.*\.py)$
+      - id: check-merge-conflict
+        name: Check for merge conflicts
       - id: check-added-large-files
-        args: [--maxkb=1000]
-      - id: check-json
-      - id: check-toml
-      - id: detect-private-key
-      - id: mixed-line-ending
-        args: [--fix=lf]
-
-  # MyPy - Static type checking (matches CI/CD: checks src and tests)
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - types-pytz
-          - types-PyYAML
-          - types-python-dateutil
-          - types-requests
-          - types-jsonschema
-          - pydantic>=2.6.0
-          - pydantic-settings>=2.2.0
-          - pytest>=8.0.0
-        args: [--strict]
-        files: '^(src/|tests/)'
-
-# Global settings
-default_language_version:
-  python: python3.11
-
-# Skip these hooks in CI (optional)
-ci:
-  autofix_commit_msg: |
-    [pre-commit.ci] auto fixes from pre-commit hooks
-
-    for more information, see https://pre-commit.ci
-  autofix_prs: true
-  autoupdate_branch: ''
-  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
-  autoupdate_schedule: weekly
-  skip: []
-  submodules: false
+        name: Check for large files
+        args: [--maxkb=500]

@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Parallel execution for faster feedback
   lint:
     name: Lint and Format Check
     runs-on: ubuntu-latest
@@ -28,7 +29,7 @@ jobs:
         with:
           enable-cache: false
 
-      - name: Install linting tools only
+      - name: Install linting tools only (faster than full dependencies)
         run: |
           uv pip install --python $(which python) ruff==0.12.8
 
@@ -57,11 +58,11 @@ jobs:
         with:
           enable-cache: false
 
-      - name: Install dependencies
+      - name: Install dependencies (matches Makefile exactly)
         run: |
           uv pip install --python $(which python) -r requirements.txt
 
-      - name: Mypy (strict)
+      - name: Mypy (strict) - matches Makefile exactly
         run: |
           python -m mypy src --config-file pyproject.toml
 
@@ -86,12 +87,12 @@ jobs:
         run: |
           uv pip install --python $(which python) -r requirements.txt
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage (matches Makefile exactly)
         env:
-          SLACK_BOT_TOKEN: dummy-token
-          OPENAI_API_KEY: dummy-key
+          SLACK_BOT_TOKEN: dummy
+          OPENAI_API_KEY: dummy
         run: |
-          python -m pytest
+          python -m pytest --cov=src --cov-report=term-missing --cov-report=html
 
       - name: Upload coverage HTML report
         if: always()
@@ -99,3 +100,11 @@ jobs:
         with:
           name: coverage-html
           path: htmlcov
+
+      - name: Upload coverage report to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella

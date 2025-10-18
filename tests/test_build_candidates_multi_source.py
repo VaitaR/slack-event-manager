@@ -1,10 +1,6 @@
 """Tests for multi-source candidate building."""
 
 from datetime import datetime
-from pathlib import Path
-
-import pytest
-from datetime import datetime
 
 import pytest
 import pytz
