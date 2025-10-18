@@ -22,7 +22,6 @@ from src.domain.models import (
 from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 
-
 DATABASE_BACKENDS = [
     "sqlite",
     pytest.param("postgres", marks=pytest.mark.postgres),
@@ -254,7 +253,7 @@ def test_telegram_pipeline_full_flow(
     # STEP 2: Build candidates from Telegram messages
     print("\n🎯 STEP 2: Building candidates from Telegram messages...")
     candidate_result = build_candidates_use_case(
-        repository=repository,  # type: ignore
+        repository=repository,
         settings=settings,  # type: ignore
         source_id=MessageSource.TELEGRAM,
     )

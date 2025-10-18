@@ -5,7 +5,9 @@ from src.config.settings import Settings
 from src.domain.protocols import RepositoryProtocol
 
 
-def test_get_last_processed_ts_returns_none_for_new_channel(repo: RepositoryProtocol) -> None:
+def test_get_last_processed_ts_returns_none_for_new_channel(
+    repo: RepositoryProtocol,
+) -> None:
     """Test that get_last_processed_ts returns None for new channel."""
     result = repo.get_last_processed_ts("C123456")
 
@@ -36,7 +38,9 @@ def test_update_last_processed_ts_upserts(repo: RepositoryProtocol) -> None:
     repo.update_last_processed_ts(channel_id, new_ts)
     second_result = repo.get_last_processed_ts(channel_id)
 
+    assert first_result is not None
     assert abs(first_result - old_ts) < 0.000001
+    assert second_result is not None
     assert abs(second_result - new_ts) < 0.000001
 
 
@@ -53,7 +57,9 @@ def test_multiple_channels_independent_state(repo: RepositoryProtocol) -> None:
     result1 = repo.get_last_processed_ts(channel1)
     result2 = repo.get_last_processed_ts(channel2)
 
+    assert result1 is not None
     assert abs(result1 - ts1) < 0.000001
+    assert result2 is not None
     assert abs(result2 - ts2) < 0.000001
 
 

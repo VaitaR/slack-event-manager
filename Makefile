@@ -33,13 +33,13 @@ lint-fix: ## Run ruff linter with auto-fix
 	ruff check . --fix --unsafe-fixes
 	@echo "$(GREEN)✓ Lint fixes applied$(NC)"
 
-typecheck: ## Run mypy type checker
+typecheck: ## Run mypy type checker (matches CI exactly)
 	@echo "$(BLUE)Running mypy type checker...$(NC)"
-	@mypy --strict src tests && echo "$(GREEN)✓ Type check passed$(NC)" || (echo "$(RED)✗ Type check failed$(NC)" && exit 1)
+	@mypy src --config-file pyproject.toml && echo "$(GREEN)✓ Type check passed$(NC)" || (echo "$(RED)✗ Type check failed$(NC)" && exit 1)
 
-test: ## Run tests with pytest
+test: ## Run tests with pytest (matches CI exactly)
 	@echo "$(BLUE)Running tests...$(NC)"
-	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy pytest -v && echo "$(GREEN)✓ Tests passed$(NC)" || (echo "$(RED)✗ Tests failed$(NC)" && exit 1)
+	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy python -m pytest && echo "$(GREEN)✓ Tests passed$(NC)" || (echo "$(RED)✗ Tests failed$(NC)" && exit 1)
 
 test-quick: ## Run tests without coverage
 	@echo "$(BLUE)Running quick tests...$(NC)"
@@ -63,8 +63,35 @@ test-postgres: ## Run PostgreSQL tests (requires PostgreSQL running and TEST_POS
 	fi
 	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy pytest tests/test_postgres_repository.py -v && echo "$(GREEN)✓ PostgreSQL tests passed$(NC)" || (echo "$(RED)✗ PostgreSQL tests failed$(NC)" && exit 1)
 
-ci: format-check lint typecheck test ## Run all CI checks (format, lint, typecheck, test)
-	@echo "$(GREEN)✓ All CI checks passed!$(NC)"
+
+clean: ## Clean up generated files
+	@echo "$(BLUE)Cleaning up...$(NC)"
+	rm -rf .pytest_cache
+	rm -rf .mypy_cache
+	rm -rf .ruff_cache
+	rm -rf htmlcov
+	rm -rf .coverage
+	rm -rf **/__pycache__
+	rm -rf **/*.pyc
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete
+	@echo "$(GREEN)✓ Cleanup complete$(NC)"
+
+pre-commit: ## Run pre-commit hooks (fastest feedback)
+	@echo "$(BLUE)Running pre-commit hooks...$(NC)"
+	@pre-commit run --all-files --show-diff-on-failure && echo "$(GREEN)✓ Pre-commit checks passed!$(NC)" || (echo "$(RED)✗ Pre-commit failed$(NC)" && exit 1)
+
+pre-commit-install: ## Install pre-commit hooks
+	@echo "$(BLUE)Installing pre-commit hooks...$(NC)"
+	@pre-commit install && echo "$(GREEN)✓ Pre-commit hooks installed$(NC)"
+
+pre-push: ## Run pre-push checks (matches CI exactly)
+	@echo "$(BLUE)Running pre-push checks...$(NC)"
+	@make ci && echo "$(GREEN)✓ Pre-push checks passed! Safe to push.$(NC)"
+
+ci: ## Run all CI checks (format, lint, typecheck, test) - matches GitHub Actions
+	@echo "$(BLUE)Running CI pipeline...$(NC)"
+	@make format-check && make lint && make typecheck && make test && echo "$(GREEN)✓ All CI checks passed!$(NC)"
 
 ci-local: ## Run CI checks locally (same as GitHub Actions)
 	@echo "$(BLUE)===========================================$(NC)"
@@ -87,21 +114,12 @@ ci-local: ## Run CI checks locally (same as GitHub Actions)
 	@echo "$(GREEN)   ✓ CI Pipeline Passed!$(NC)"
 	@echo "$(GREEN)===========================================$(NC)"
 
-clean: ## Clean up generated files
-	@echo "$(BLUE)Cleaning up...$(NC)"
-	rm -rf .pytest_cache
-	rm -rf .mypy_cache
-	rm -rf .ruff_cache
-	rm -rf htmlcov
-	rm -rf .coverage
-	rm -rf **/__pycache__
-	rm -rf **/*.pyc
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	@echo "$(GREEN)✓ Cleanup complete$(NC)"
-
-pre-commit: format-check lint typecheck ## Run pre-commit checks (fast)
-	@echo "$(GREEN)✓ Pre-commit checks passed!$(NC)"
-
-pre-push: ci-local ## Run pre-push checks (full CI)
-	@echo "$(GREEN)✓ Pre-push checks passed! Safe to push.$(NC)"
+dev-setup: ## Complete development environment setup
+	@echo "$(BLUE)Setting up development environment...$(NC)"
+	@make install
+	@make pre-commit-install
+	@echo "$(GREEN)✓ Development environment ready!$(NC)"
+	@echo "$(YELLOW)Quick commands:$(NC)"
+	@echo "  make pre-commit    # Fast feedback"
+	@echo "  make ci-local      # Full CI check"
+	@echo "  make pre-push      # Before pushing"

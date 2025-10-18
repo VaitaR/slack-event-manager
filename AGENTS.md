@@ -1,6 +1,6 @@
 # AGENTS.md
 
-**Last Updated:** 2025-10-17  
+**Last Updated:** 2025-10-17
 **Status:** ✅ Production Ready - PostgreSQL Support + Code Quality Enhanced
 
 ## Project Overview
@@ -17,7 +17,7 @@ This is a **Slack Event Manager** that processes messages from Slack channels to
 
 **Data Flow:**
 ```
-Slack Channel → Message Fetching → Text Normalization → Scoring → 
+Slack Channel → Message Fetching → Text Normalization → Scoring →
 Candidate Building → LLM Extraction → Deduplication → Storage → Digest Publishing
 ```
 
@@ -60,8 +60,8 @@ pip install -r requirements.txt
 # - config/object_registry.yaml: Add your internal systems
 # - config/channels.yaml: Add your Slack channels
 
-# 4. Set up pre-commit hooks (automatic code quality checks)
-pre-commit install
+# 4. Set up development environment (includes pre-commit hooks)
+make dev-setup
 
 # 5. Verify configuration
 python -c "from src.config.settings import get_settings; s = get_settings(); print(f'✅ Settings loaded: {s.llm_model}, temp={s.llm_temperature}')"
@@ -78,11 +78,11 @@ python -c "from src.config.settings import get_settings; s = get_settings(); pri
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install in development mode
-pip install -e .
+# Complete development setup (includes pre-commit hooks)
+make dev-setup
 
 # Quick sanity check (5 seconds, no API calls)
-python scripts/quick_test.py
+make format-check && make lint && make typecheck
 
 # Test with real data (20 messages)
 python scripts/test_with_real_data.py
@@ -93,18 +93,15 @@ python scripts/run_pipeline.py
 # Test with mock data
 python scripts/demo_e2e.py
 
-# Run tests
-python -m pytest tests/ -v
+# Run tests (fastest)
+make test-quick
 
-# Run with coverage
-python -m pytest tests/ --cov=src --cov-report=html
+# Run tests with coverage
+make test-cov
+
+# Full CI check (matches GitHub Actions)
+make ci-local
 ```
-
-### New Test Scripts (2025-10-09)
-- `scripts/quick_test.py` - Fast sanity check without message fetching
-- `scripts/test_with_real_data.py` - Full pipeline test with 20 real messages + DB inspection
-- `scripts/test_pipeline_minimal.py` - Minimal test with 5 messages
-- `scripts/diagnose_components.py` - Component-by-component testing with timeouts
 
 ## Code Style Guidelines
 
@@ -158,20 +155,35 @@ src/
 
 ### Running Tests
 ```bash
-# Run all tests
-python -m pytest tests/ -v
+# Run tests (fastest - no coverage)
+make test-quick
+
+# Run tests with coverage report
+make test-cov
 
 # Run specific test file
 python -m pytest tests/test_text_normalizer.py -v
 
-# Run with coverage
-python -m pytest tests/ --cov=src --cov-report=html
-
 # Run tests matching pattern
 python -m pytest tests/ -k "test_extract" -v
 
+# Full CI test run (matches GitHub Actions)
+make ci
+
 # Run demo with mock data
 python scripts/demo_e2e.py
+```
+
+### Development Workflow
+```bash
+# Fast feedback during development
+make pre-commit    # Format, lint, typecheck
+
+# Before pushing
+make pre-push      # Full CI check
+
+# Complete development setup
+make dev-setup     # Install deps + pre-commit hooks
 ```
 
 ### Writing Tests
@@ -208,8 +220,8 @@ def test_function_name():
 # Enable debug logging
 export LOG_LEVEL=DEBUG
 
-# Quick component check
-python scripts/quick_test.py
+# Quick component check (format, lint, typecheck)
+make pre-commit
 
 # Diagnose specific components with timeouts
 python scripts/diagnose_components.py
@@ -222,6 +234,9 @@ sqlite3 data/test_real_pipeline.db "SELECT title, category, event_date FROM even
 
 # Check LLM costs
 sqlite3 data/test_real_pipeline.db "SELECT SUM(cost_usd) as total_cost, COUNT(*) as calls FROM llm_calls;"
+
+# Full CI check locally
+make ci-local
 ```
 
 ## Deployment Instructions
@@ -485,7 +500,7 @@ python -c "import openai; print(openai.api_key is not None)"
 ### Health Checks
 ```bash
 # Quick sanity check (recommended)
-python scripts/quick_test.py
+make pre-commit
 
 # Full component check
 python scripts/diagnose_components.py
@@ -498,6 +513,9 @@ ls -lh data/*.db
 
 # View test database results
 sqlite3 data/test_real_pipeline.db "SELECT * FROM events;"
+
+# Complete CI check
+make ci-local
 ```
 
 ## Digest Publishing
@@ -702,7 +720,7 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 
 **Phase 5: Use Case Layer (Complete)** ✅
 - ✅ Updated `LLMClient` with prompt loading (`prompt_template`, `prompt_file` parameters)
-- ✅ Added `load_prompt_from_file()` helper function  
+- ✅ Added `load_prompt_from_file()` helper function
 - ✅ Updated `deduplicate_events_use_case` with optional `source_id` parameter
 - ✅ Deduplication supports strict source isolation (prevents cross-source merging)
 - ✅ Created `scripts/run_multi_source_pipeline.py` orchestrator

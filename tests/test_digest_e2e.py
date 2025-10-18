@@ -11,8 +11,8 @@ from uuid import uuid4
 import pytest
 import pytz
 
-from src.adapters.slack_client import SlackClient
 from src.adapters.repository_factory import create_repository
+from src.adapters.slack_client import SlackClient
 from src.config.settings import Settings, get_settings
 from src.domain.models import (
     ActionType,
@@ -136,7 +136,6 @@ def digest_repository(repo: RepositoryProtocol) -> RepositoryProtocol:
 @pytest.fixture
 def real_repository() -> RepositoryProtocol:
     """Get repository with real production data."""
-    from pathlib import Path
 
     settings = get_settings()
     db_path = settings.db_path
@@ -170,6 +169,7 @@ def real_repository() -> RepositoryProtocol:
         )
 
     return repo
+
 
 @pytest.mark.parametrize("repo", DATABASE_BACKENDS, indirect=True)
 def test_digest_dry_run(

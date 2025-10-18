@@ -1,7 +1,7 @@
 # Multi-Source Architecture - Implementation Summary
 
-**Date:** 2025-10-17  
-**Status:** Foundation Complete - Phase 1 of 6 Implemented  
+**Date:** 2025-10-17
+**Status:** Foundation Complete - Phase 1 of 6 Implemented
 **Test Coverage:** 28 new tests, all passing
 
 ## Executive Summary
@@ -51,7 +51,7 @@ class TelegramMessage(BaseModel):
 ```python
 class MessageClientProtocol(Protocol):
     """Generic protocol for message source clients."""
-    
+
     def fetch_messages(
         self,
         channel_id: str,
@@ -59,7 +59,7 @@ class MessageClientProtocol(Protocol):
         latest_ts: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]: ...
-    
+
     def get_user_info(self, user_id: str) -> dict[str, Any]: ...
 ```
 
@@ -67,11 +67,11 @@ class MessageClientProtocol(Protocol):
 ```python
 class RepositoryProtocol(Protocol):
     # ... existing methods ...
-    
+
     def get_last_processed_ts(
         self, channel: str, source_id: MessageSource | None = None
     ) -> float | None: ...
-    
+
     def update_last_processed_ts(
         self, channel: str, ts: float, source_id: MessageSource | None = None
     ) -> None: ...
@@ -232,7 +232,7 @@ message_sources:
     channels:
       - C123
       - C456
-  
+
   - source_id: telegram
     enabled: false
     raw_table: raw_telegram_messages
@@ -304,6 +304,5 @@ The remaining work follows a clear path with well-defined phases, each building 
 
 ---
 
-For detailed progress tracking, see: [MULTI_SOURCE_PROGRESS.md](./MULTI_SOURCE_PROGRESS.md)  
+For detailed progress tracking, see: [MULTI_SOURCE_PROGRESS.md](./MULTI_SOURCE_PROGRESS.md)
 For original implementation plan, see: [/multi-source-architecture.plan.md](/multi-source-architecture.plan.md)
-

@@ -366,7 +366,9 @@ def run_single_iteration(
                 MessageSource.SLACK, settings.slack_bot_token.get_secret_value()
             )
             if not isinstance(slack_client, SlackClient):
-                raise TypeError("Slack message client factory did not return SlackClient")
+                raise TypeError(
+                    "Slack message client factory did not return SlackClient"
+                )
             digest_result = publish_digest_use_case(
                 slack_client=slack_client,
                 repository=repository,

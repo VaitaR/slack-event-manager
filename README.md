@@ -212,21 +212,38 @@ Options:
 
 ## Testing
 
-```bash
-# Run all tests
-pytest tests/ -v
+Unified testing workflow using Make:
 
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
+```bash
+# Run tests (fastest - no coverage)
+make test-quick
+
+# Run tests with coverage report
+make test-cov
 
 # Run specific test file
-pytest tests/test_date_resolver.py -v
+python -m pytest tests/test_date_resolver.py -v
 
-# Run with verbose output
-pytest tests/ -vv -s
+# Run tests matching pattern
+python -m pytest tests/ -k "test_extract" -v
+
+# Full CI test run (matches GitHub Actions)
+make ci
 ```
 
 Test coverage target: >90% for core services.
+
+**Development Testing Workflow:**
+```bash
+# During development (fast feedback)
+make pre-commit    # Format, lint, typecheck
+
+# Before committing
+make test-quick    # Run tests
+
+# Before pushing
+make ci           # Full CI check
+```
 
 ## Demo & Testing
 
@@ -251,6 +268,18 @@ The demo shows:
 - 🤖 LLM event extraction
 - 🔗 Event deduplication
 - 📋 Beautiful terminal digest display
+
+**Development Testing:**
+```bash
+# Quick validation during development
+make pre-commit    # Format, lint, typecheck
+
+# Test with real data
+python scripts/test_with_real_data.py
+
+# Full pipeline test
+python scripts/run_pipeline.py
+```
 
 ## Pipeline Stages
 
@@ -367,15 +396,26 @@ Supports both SQLite (development) and PostgreSQL (production) through repositor
 
 ### Code Quality
 
+Unified development workflow using Make:
+
 ```bash
-# Format code (using ruff for speed)
-ruff format src/ tests/ scripts/
+# Complete development setup (includes pre-commit hooks)
+make dev-setup
 
-# Lint
-ruff check src/ tests/ scripts/
+# Fast feedback during development
+make pre-commit    # Format, lint, typecheck (~15s)
 
-# Type check
-mypy src/ --config-file pyproject.toml
+# Full CI check (matches GitHub Actions)
+make ci           # Format, lint, typecheck, test (~45s)
+
+# Before pushing (strictest check)
+make pre-push     # Full CI pipeline
+
+# Individual checks
+make format       # Format code with ruff
+make lint         # Lint with ruff
+make typecheck    # Type check with mypy
+make test-quick   # Run tests (fast)
 ```
 
 **CI/CD:**
@@ -383,6 +423,7 @@ mypy src/ --config-file pyproject.toml
 - 🔄 Parallel jobs: lint (8s), typecheck (23s), tests (19s)
 - 🎯 Total CI time: ~30s (was 2-3min)
 - ✅ Pre-commit hooks for automatic formatting
+- 🔗 Complete synchronization between local and CI workflows
 
 ### Project Standards
 
@@ -403,6 +444,53 @@ mypy src/ --config-file pyproject.toml
 - ✅ Criteria/Specification pattern
 - ✅ PLR2004 compliance
 - ✅ Compiled regex patterns
+
+## Development Workflow
+
+### Unified Development System
+
+The project uses a **unified development workflow** with complete synchronization between:
+
+- **Local development**: Make commands
+- **Pre-commit hooks**: Automatic formatting and linting
+- **CI/CD pipeline**: GitHub Actions with identical commands
+- **Code quality tools**: Ruff, Mypy, Pytest
+
+### Quick Reference
+
+| Command | Purpose | Time | Use Case |
+|---------|---------|------|----------|
+| `make pre-commit` | Fast feedback | ~15s | After each change |
+| `make test-quick` | Test validation | ~20s | Before commit |
+| `make ci` | Full CI check | ~45s | Before push |
+| `make ci-local` | Detailed CI | ~45s | Debugging |
+
+### Development Setup
+
+```bash
+# Complete setup (recommended)
+make dev-setup     # Install deps + pre-commit hooks
+
+# Manual setup
+pip install -r requirements.txt
+make pre-commit-install
+```
+
+### Git Workflow
+
+```bash
+# Make changes
+git add .
+
+# Fast pre-commit check (automatic)
+git commit -m "feat: ..."
+
+# Before pushing (manual)
+make pre-push
+
+# Push to trigger CI
+git push
+```
 
 ## Troubleshooting
 
@@ -435,9 +523,43 @@ sqlite3 data/slack_events.db ".tables"
 
 # View recent events
 sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY event_date DESC LIMIT 10"
+
+# Quick health check
+make pre-commit
+```
+
+### Development Issues
+
+```bash
+# If development tools aren't working
+make dev-setup
+
+# If pre-commit hooks fail
+make pre-commit-install
+
+# If tests fail locally but pass in CI
+make ci-local  # Detailed debugging
 ```
 
 ## Recent Updates
+
+### 2025-10-18: Unified Development Workflow ✅
+
+**Complete Make-centric Development System:**
+- ✅ **Unified Makefile**: Single point of control for all development tasks
+- ✅ **Pre-commit Integration**: Automatic formatting and linting on commit
+- ✅ **CI/CD Synchronization**: Identical commands between local and GitHub Actions
+- ✅ **Parallel Execution**: Fast CI with lint (8s) + typecheck (23s) + tests (19s)
+- ✅ **Development Setup**: `make dev-setup` for complete environment setup
+- ✅ **Workflow Documentation**: Complete guide in `DEVELOPMENT_WORKFLOW.md`
+
+**Key Commands:**
+```bash
+make dev-setup     # Complete development setup
+make pre-commit    # Fast feedback (~15s)
+make ci           # Full CI check (~45s)
+make pre-push     # Before pushing
+```
 
 ### 2025-10-17: PostgreSQL Support ✅
 
@@ -548,4 +670,3 @@ This project is internal tooling. All rights reserved.
 ## Support
 
 For issues or questions, contact the platform team.
-
