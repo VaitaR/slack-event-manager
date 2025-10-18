@@ -21,10 +21,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.llm_client import LLMClient
+from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.domain.models import EventCategory, LLMEvent, LLMResponse
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
@@ -320,13 +321,14 @@ def run_e2e_demo(
     # Initialize components
     print("🔧 Initializing components...")
 
+    settings: Settings = get_settings()
     slack_client = None
 
     if use_real_slack:
         print("📡 Using REAL Slack API (requires valid tokens)")
         try:
             slack_client = SlackClient(
-                bot_token=get_settings().slack_bot_token.get_secret_value()
+                bot_token=settings.slack_bot_token.get_secret_value()
             )
             print("✅ Real Slack client initialized successfully")
         except Exception as e:
@@ -343,10 +345,10 @@ def run_e2e_demo(
         from src.adapters.llm_client import LLMClient
 
         llm_client = LLMClient(
-            api_key=get_settings().openai_api_key.get_secret_value(),
-            model=get_settings().llm_model,
+            api_key=settings.openai_api_key.get_secret_value(),
+            model=settings.llm_model,
             temperature=1.0,  # Default temperature for gpt-5-nano
-            timeout=get_settings().llm_timeout_seconds,
+            timeout=settings.llm_timeout_seconds,
         )
         print("🤖 Using REAL LLM client for event extraction")
     else:
@@ -359,8 +361,12 @@ def run_e2e_demo(
     temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     temp_db.close()
 
+    repository: RepositoryProtocol | None = None
     try:
-        repo = SQLiteRepository(temp_db.name)
+        temp_settings: Settings = settings.model_copy(
+            update={"db_path": temp_db.name, "database_type": "sqlite"}
+        )
+        repository = create_repository(temp_settings)
         print("✅ Components initialized")
 
         # For real Slack demo, we'll fetch real messages instead of mock data
@@ -379,7 +385,6 @@ def run_e2e_demo(
     print("📥 Ingesting messages from Slack...")
 
     # Get channels to process
-    settings = get_settings()
     channels_to_process = (
         [channel_id]
         if channel_id
@@ -391,8 +396,8 @@ def run_e2e_demo(
     try:
         ingest_result = ingest_messages_use_case(
             slack_client=slack_client,
-            repository=repo,
-            settings=get_settings(),
+            repository=repository,
+            settings=settings,
             lookback_hours=(
                 hours_back if not use_real_slack else 24
             ),  # Use shorter window for demo
@@ -420,8 +425,8 @@ def run_e2e_demo(
     # Build candidates
     try:
         candidate_result = build_candidates_use_case(
-            repository=repo,
-            settings=get_settings(),
+            repository=repository,
+            settings=settings,
         )
 
         print(f"✅ Messages processed: {candidate_result.messages_processed}")
@@ -449,8 +454,8 @@ def run_e2e_demo(
     try:
         extraction_result = extract_events_use_case(
             llm_client=llm_client,
-            repository=repo,
-            settings=get_settings(),
+            repository=repository,
+            settings=settings,
             batch_size=50,
             check_budget=False,  # Disable budget check for demo
         )
@@ -488,7 +493,7 @@ def run_e2e_demo(
         start_time = datetime(2024, 10, 9, tzinfo=pytz.UTC)  # Start from Oct 9
         end_time = datetime(2024, 10, 16, tzinfo=pytz.UTC)  # End at Oct 16
 
-        events = repo.get_events_in_window(start_time, end_time)
+        events = repository.get_events_in_window(start_time, end_time)
 
         if events:
             print(f"✅ Found {len(events)} events in time window")
@@ -509,6 +514,10 @@ def run_e2e_demo(
 
     # Clean up temporary database file
     try:
+        if repository is not None:
+            close_method = getattr(repository, "close", None)
+            if callable(close_method):
+                close_method()
         os.unlink(temp_db.name)
     except:
         pass

@@ -7,10 +7,12 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config.settings import get_settings
+from src.adapters.repository_factory import create_repository
+from src.config.settings import Settings, get_settings
+from src.domain.protocols import RepositoryProtocol
 
 
-def test_apis():
+def test_apis() -> bool:
     """Test each API connection separately with short timeouts."""
 
     print("🧪 Testing Real API Connections")
@@ -18,7 +20,7 @@ def test_apis():
 
     # Load settings
     try:
-        settings = get_settings()
+        settings: Settings = get_settings()
         print("✅ Settings loaded successfully")
     except Exception as e:
         print(f"❌ Failed to load settings: {e}")
@@ -100,12 +102,16 @@ def test_apis():
     try:
         import tempfile
 
-        from src.adapters.sqlite_repository import SQLiteRepository
-
         temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         temp_db.close()
 
-        SQLiteRepository(temp_db.name)
+        temp_settings: Settings = settings.model_copy(
+            update={"db_path": temp_db.name, "database_type": "sqlite"}
+        )
+        repository: RepositoryProtocol = create_repository(temp_settings)
+        close_method = getattr(repository, "close", None)
+        if callable(close_method):
+            close_method()
         print("✅ Database initialized")
         print(f"   Path: {temp_db.name}")
 

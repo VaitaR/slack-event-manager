@@ -3,21 +3,21 @@
 Scores messages and selects candidates for LLM extraction.
 """
 
-from src.adapters.sqlite_repository import SQLiteRepository
+from typing import Sequence
+
 from src.config.settings import Settings
 from src.domain.models import (
     CandidateResult,
     CandidateStatus,
     EventCandidate,
     MessageSource,
-    SlackMessage,
-    TelegramMessage,
 )
+from src.domain.protocols import MessageRecord, RepositoryProtocol
 from src.services import scoring_engine
 
 
 def build_candidates_use_case(
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     source_id: MessageSource | None = None,
 ) -> CandidateResult:
@@ -49,10 +49,10 @@ def build_candidates_use_case(
         8
     """
     # Get messages not yet scored
-    new_messages: list[SlackMessage | TelegramMessage]
+    new_messages: Sequence[MessageRecord]
     if source_id is None:
         # Backward compatibility: default to Slack
-        new_messages = repository.get_new_messages_for_candidates()  # type: ignore[assignment]
+        new_messages = repository.get_new_messages_for_candidates()
     else:
         # Use source-agnostic method
         new_messages = repository.get_new_messages_for_candidates_by_source(source_id)

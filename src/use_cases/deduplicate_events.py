@@ -9,14 +9,14 @@ from datetime import datetime, timedelta
 import pytz
 
 from src.adapters.query_builders import EventQueryCriteria
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import DeduplicationResult, MessageSource
+from src.domain.protocols import RepositoryProtocol
 from src.services import deduplicator
 
 
 def deduplicate_events_use_case(
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     lookback_days: int = 7,
     source_id: MessageSource | None = None,

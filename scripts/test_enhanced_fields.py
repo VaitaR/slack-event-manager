@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datetime import datetime
 
-from src.adapters.sqlite_repository import SQLiteRepository
+from src.adapters.repository_factory import create_repository
+from src.config.settings import Settings, get_settings
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.ingest_messages import process_slack_message
 
 
@@ -143,7 +145,11 @@ def test_database_schema() -> None:
 
     # Create test database
     test_db_path = "data/test_enhanced_fields.db"
-    repo = SQLiteRepository(test_db_path)
+    settings: Settings = get_settings()
+    temp_settings: Settings = settings.model_copy(
+        update={"db_path": test_db_path, "database_type": "sqlite"}
+    )
+    repo: RepositoryProtocol = create_repository(temp_settings)
 
     # Create a test message with enhanced fields
     from src.domain.models import SlackMessage

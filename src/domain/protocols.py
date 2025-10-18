@@ -4,7 +4,7 @@ These abstract interfaces define contracts that adapters must implement.
 """
 
 from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from src.domain.models import (
     Event,
@@ -14,6 +14,9 @@ from src.domain.models import (
     MessageSource,
     SlackMessage,
 )
+
+if TYPE_CHECKING:
+    from src.adapters.query_builders import CandidateQueryCriteria, EventQueryCriteria
 
 
 class MessageRecord(Protocol):
@@ -216,7 +219,7 @@ class RepositoryProtocol(Protocol):
         ...
 
     def get_candidates_for_extraction(
-        self, batch_size: int = 50, min_score: float | None = None
+        self, batch_size: int | None = 50, min_score: float | None = None
     ) -> list[EventCandidate]:
         """Get candidates ready for LLM extraction.
 
@@ -273,6 +276,17 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def get_events_in_window_filtered(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        min_confidence: float,
+        max_events: int | None = None,
+        category_filter: list[str] | None = None,
+    ) -> list[Event]:
+        """Get events within window applying additional filters."""
+        ...
+
     def save_llm_call(self, metadata: LLMCallMetadata) -> None:
         """Save LLM call metadata.
 
@@ -296,6 +310,16 @@ class RepositoryProtocol(Protocol):
         Raises:
             RepositoryError: On storage errors
         """
+        ...
+
+    def query_events(self, criteria: "EventQueryCriteria") -> list[Event]:
+        """Query events using repository-specific criteria."""
+        ...
+
+    def query_candidates(
+        self, criteria: "CandidateQueryCriteria"
+    ) -> list[EventCandidate]:
+        """Query candidates using repository-specific criteria."""
         ...
 
     def get_cached_llm_response(self, prompt_hash: str) -> str | None:
