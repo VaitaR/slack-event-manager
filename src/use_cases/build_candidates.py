@@ -10,6 +10,8 @@ from src.domain.models import (
     CandidateStatus,
     EventCandidate,
     MessageSource,
+    SlackMessage,
+    TelegramMessage,
 )
 from src.services import scoring_engine
 
@@ -47,9 +49,10 @@ def build_candidates_use_case(
         8
     """
     # Get messages not yet scored
+    new_messages: list[SlackMessage | TelegramMessage]
     if source_id is None:
         # Backward compatibility: default to Slack
-        new_messages = repository.get_new_messages_for_candidates()
+        new_messages = repository.get_new_messages_for_candidates()  # type: ignore[assignment]
     else:
         # Use source-agnostic method
         new_messages = repository.get_new_messages_for_candidates_by_source(source_id)
@@ -73,8 +76,8 @@ def build_candidates_use_case(
             # Channel not in whitelist, skip
             continue
 
-        # Score message
-        score, features = scoring_engine.score_message(message, channel_config)
+        # Score message - works for both SlackMessage and TelegramMessage
+        score, features = scoring_engine.score_message(message, channel_config)  # type: ignore[arg-type]
         scores.append(score)
 
         # Check if meets threshold (using Specification pattern for filtering)
