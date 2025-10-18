@@ -15,12 +15,17 @@ New Structure:
 import hashlib
 from datetime import datetime
 
+from rapidfuzz import fuzz
+
 from src.domain.deduplication_constants import (
     DEFAULT_DATE_WINDOW_HOURS,
     DEFAULT_TITLE_SIMILARITY,
     SAME_MESSAGE_NO_MERGE,
 )
 from src.domain.models import Event
+from src.services.title_renderer import TitleRenderer
+
+_DEFAULT_TITLE_RENDERER = TitleRenderer()
 
 
 def generate_cluster_key(event: Event) -> str:
@@ -117,6 +122,7 @@ def should_merge_events(
     event2: Event,
     date_window_hours: int = DEFAULT_DATE_WINDOW_HOURS,
     title_similarity_threshold: float = DEFAULT_TITLE_SIMILARITY,
+    title_renderer: TitleRenderer | None = None,
 ) -> bool:
     """Determine if two events should be merged.
 
@@ -150,6 +156,10 @@ def should_merge_events(
     if SAME_MESSAGE_NO_MERGE and event1.message_id == event2.message_id:
         return False
 
+    # Only merge events from the same source
+    if event1.source_id != event2.source_id:
+        return False
+
     # Check anchor/link overlap
     combined_anchors1 = event1.anchors + event1.links
     combined_anchors2 = event2.anchors + event2.links
@@ -177,11 +187,12 @@ def should_merge_events(
         if date_delta > date_window_hours:
             return False
 
-    # Optional: Check cluster_key similarity (same initiative)
-    # For now, we rely on anchor/link overlap
-    # TODO: Add rendered title similarity check using TitleRenderer
+    renderer = title_renderer or _DEFAULT_TITLE_RENDERER
+    title1 = renderer.render_canonical_title(event1)
+    title2 = renderer.render_canonical_title(event2)
+    similarity = fuzz.ratio(title1, title2) / 100.0
 
-    return True
+    return similarity >= title_similarity_threshold
 
 
 def merge_events(event1: Event, event2: Event) -> Event:
@@ -278,6 +289,7 @@ def find_merge_candidates(
     existing_events: list[Event],
     date_window_hours: int = DEFAULT_DATE_WINDOW_HOURS,
     title_similarity_threshold: float = DEFAULT_TITLE_SIMILARITY,
+    title_renderer: TitleRenderer | None = None,
 ) -> list[Event]:
     """Find existing events that should merge with new event.
 
@@ -305,6 +317,7 @@ def find_merge_candidates(
             existing,
             date_window_hours=date_window_hours,
             title_similarity_threshold=title_similarity_threshold,
+            title_renderer=title_renderer,
         ):
             candidates.append(existing)
 
@@ -315,6 +328,7 @@ def deduplicate_event_list(
     events: list[Event],
     date_window_hours: int = DEFAULT_DATE_WINDOW_HOURS,
     title_similarity_threshold: float = DEFAULT_TITLE_SIMILARITY,
+    title_renderer: TitleRenderer | None = None,
 ) -> list[Event]:
     """Deduplicate a list of events in-memory.
 
@@ -362,6 +376,7 @@ def deduplicate_event_list(
             deduplicated,
             date_window_hours=date_window_hours,
             title_similarity_threshold=title_similarity_threshold,
+            title_renderer=title_renderer,
         )
 
         if merge_candidates:
