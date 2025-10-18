@@ -327,7 +327,7 @@ class Settings(BaseSettings):
                 bot_token_env="SLACK_BOT_TOKEN",
                 raw_table="raw_slack_messages",
                 state_table="ingestion_state_slack",
-                prompt_file="config/prompts/slack.txt",
+                prompt_file="config/prompts/slack.yaml",
                 llm_settings={
                     "temperature": config.get("llm", {}).get("temperature", 1.0),
                     "timeout_seconds": config.get("llm", {}).get(
