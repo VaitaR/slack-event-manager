@@ -9,9 +9,12 @@ import logging
 from typing import Any
 
 import pytz
-from telethon import TelegramClient as TelegramClientLib
-from telethon.errors import FloodWaitError
-from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
+from telethon import TelegramClient as TelegramClientLib  # type: ignore[import-untyped]
+from telethon.errors import FloodWaitError  # type: ignore[import-untyped]
+from telethon.tl.types import (  # type: ignore[import-untyped]
+    MessageEntityTextUrl,
+    MessageEntityUrl,
+)
 
 from src.domain.exceptions import RateLimitError
 

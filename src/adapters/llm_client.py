@@ -123,10 +123,10 @@ def load_prompt_from_file(file_path: str) -> PromptFileData:
         path=path,
     )
 
-    _PROMPT_CACHE[path] = _PromptCacheEntry(mtime=stat_result.st_mtime, data=prompt_data)
+    _PROMPT_CACHE[path] = _PromptCacheEntry(
+        mtime=stat_result.st_mtime, data=prompt_data
+    )
     return prompt_data
-
-
 
 
 class LLMClient:
@@ -199,7 +199,9 @@ class LLMClient:
             extra={
                 "prompt_hash": self._system_prompt_hash,
                 "prompt_version": self.prompt_version,
-                "prompt_path": str(self._system_prompt_path) if self._system_prompt_path else "<inline>",
+                "prompt_path": str(self._system_prompt_path)
+                if self._system_prompt_path
+                else "<inline>",
                 "prompt_size_bytes": self._system_prompt_size_bytes,
             },
         )

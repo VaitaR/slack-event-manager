@@ -31,7 +31,10 @@ class TestPromptLoading:
         assert isinstance(prompt, PromptFileData)
         assert prompt.version is not None
         assert "Slack" in prompt.content
-        assert prompt.checksum == hashlib.sha256(prompt.content.encode("utf-8")).hexdigest()
+        assert (
+            prompt.checksum
+            == hashlib.sha256(prompt.content.encode("utf-8")).hexdigest()
+        )
 
     def test_loads_telegram_yaml(self) -> None:
         """Telegram YAML prompt is parsed correctly."""
@@ -152,9 +155,10 @@ class TestLLMClientPromptSelection:
         bundled = load_prompt_from_file("config/prompts/slack.yaml")
         assert client.system_prompt == bundled.content
         assert client.prompt_version == bundled.version
-        assert client._system_prompt_hash == hashlib.sha256(
-            client.system_prompt.encode("utf-8")
-        ).hexdigest()
+        assert (
+            client._system_prompt_hash
+            == hashlib.sha256(client.system_prompt.encode("utf-8")).hexdigest()
+        )
 
     def test_prompt_file_overrides_template(self, tmp_path: Path) -> None:
         """prompt_file parameter takes precedence over template."""
@@ -214,7 +218,11 @@ class TestLLMClientPromptSelection:
         with patch("src.adapters.llm_client.OpenAI") as mock_openai:
             client_instance = MagicMock()
             response_mock = MagicMock()
-            response_mock.choices = [MagicMock(message=MagicMock(content='{ "is_event": false, "events": [] }'))]
+            response_mock.choices = [
+                MagicMock(
+                    message=MagicMock(content='{ "is_event": false, "events": [] }')
+                )
+            ]
             response_mock.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
             client_instance.chat.completions.create.return_value = response_mock
             mock_openai.return_value = client_instance
@@ -227,10 +235,15 @@ class TestLLMClientPromptSelection:
             )
 
             response = client.extract_events(
-                text="message", links=[], message_ts_dt=datetime.utcnow(), channel_name=""
+                text="message",
+                links=[],
+                message_ts_dt=datetime.utcnow(),
+                channel_name="",
             )
 
             assert response.is_event is False
             metadata = client.get_call_metadata()
-            expected_hash = hashlib.sha256(client.system_prompt.encode("utf-8")).hexdigest()
+            expected_hash = hashlib.sha256(
+                client.system_prompt.encode("utf-8")
+            ).hexdigest()
             assert metadata.prompt_hash == expected_hash

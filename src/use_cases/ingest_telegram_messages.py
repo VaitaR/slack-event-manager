@@ -6,11 +6,17 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 
 import hashlib
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytz
 
 from src.adapters.sqlite_repository import SQLiteRepository
+
+if TYPE_CHECKING:
+    from telethon.tl.types import (  # type: ignore[import-untyped]
+        MessageEntityTextUrl,
+        MessageEntityUrl,
+    )
 from src.adapters.telegram_client import TelegramClient
 from src.config.settings import Settings
 from src.domain.models import IngestResult, MessageSource, TelegramMessage
@@ -45,8 +51,6 @@ def extract_urls_from_entities(entities: list[Any], text: str) -> list[str]:
     Returns:
         List of extracted URLs
     """
-    from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
-
     urls: list[str] = []
 
     for entity in entities:
