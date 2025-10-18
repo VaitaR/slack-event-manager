@@ -157,7 +157,14 @@ class EventInDateRangeSpec(Specification[Event]):
 
     def is_satisfied_by(self, event: Event) -> bool:
         """Check if event date is within range."""
-        return self.start_date <= event.event_date <= self.end_date
+        primary_time = (
+            event.actual_start
+            or event.actual_end
+            or event.planned_start
+            or event.planned_end
+            or event.extracted_at
+        )
+        return self.start_date <= primary_time <= self.end_date
 
 
 class EventRecentSpec(Specification[Event]):
@@ -172,8 +179,8 @@ class EventRecentSpec(Specification[Event]):
         self.cutoff_date = datetime.utcnow() - timedelta(days=days_ago)
 
     def is_satisfied_by(self, event: Event) -> bool:
-        """Check if event was ingested recently."""
-        return event.ingested_at >= self.cutoff_date
+        """Check if event was extracted recently."""
+        return event.extracted_at >= self.cutoff_date
 
 
 class EventHasCategorySpec(Specification[Event]):

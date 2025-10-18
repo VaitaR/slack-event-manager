@@ -45,14 +45,13 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
-# Airflow (not using)
-airflow/
 
-# Scripts not needed in container
-scripts/demo_e2e.py
-scripts/diagnose_components.py
-scripts/test_*.py
-scripts/quick_test.py
+# Scripts not needed in container (commented out for Docker testing)
+# scripts/demo_e2e.py
+# scripts/diagnose_components.py
+# scripts/test_with_real_data.py
+# scripts/test_pipeline_minimal.py
+# Keep scripts/quick_test.py for Docker health checks
 
 # Misc
 .env.example

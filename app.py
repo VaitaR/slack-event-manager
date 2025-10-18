@@ -560,20 +560,21 @@ def show_events_table():
             st.info("No events found.")
             return
 
-        # Convert to DataFrame
+        # Convert to DataFrame with new event structure
         events_data = []
         for evt in events:
             events_data.append(
                 {
                     "event_id": evt.event_id,
                     "message_id": evt.message_id,
-                    "source_msg_event_idx": evt.source_msg_event_idx,
-                    "title": evt.title,
+                    "title": evt.title,  # Property that renders from slots
                     "category": evt.category.value,
-                    "event_date": evt.event_date,
+                    "status": evt.status.value,
+                    "event_date": evt.event_date,  # Property that returns first non-None time
                     "confidence": evt.confidence,
+                    "importance": evt.importance,
+                    "cluster_key": evt.cluster_key,
                     "dedup_key": evt.dedup_key or "",
-                    "version": evt.version,
                 }
             )
 
@@ -589,22 +590,26 @@ def show_events_table():
             column_config={
                 "event_id": st.column_config.TextColumn("Event ID", width="medium"),
                 "title": st.column_config.TextColumn("Title", width="large"),
-                "category": st.column_config.TextColumn("Category", width="medium"),
+                "category": st.column_config.TextColumn("Category", width="small"),
+                "status": st.column_config.TextColumn("Status", width="small"),
                 "event_date": st.column_config.DatetimeColumn(
-                    "Date", format="YYYY-MM-DD"
+                    "Date", format="YYYY-MM-DD HH:mm"
                 ),
                 "confidence": st.column_config.NumberColumn(
                     "Confidence", format="%.2f"
                 ),
+                "importance": st.column_config.NumberColumn(
+                    "Importance", width="small"
+                ),
                 "message_id": st.column_config.TextColumn(
                     "Source Message", width="medium"
                 ),
-                "source_msg_event_idx": st.column_config.NumberColumn(
-                    "Event Index", width="small"
+                "cluster_key": st.column_config.TextColumn(
+                    "Cluster Key", width="small"
                 ),
-                "dedup_key": st.column_config.TextColumn("Dedup Key", width="medium"),
-                "version": st.column_config.TextColumn("Version", width="small"),
+                "dedup_key": st.column_config.TextColumn("Dedup Key", width="small"),
             },
+            hide_index=True,
         )
 
         st.caption(f"Total events: {len(events_df)}")
@@ -637,9 +642,9 @@ def show_gantt_chart():
             if evt.event_date:
                 events_data.append(
                     {
-                        "title": evt.title,
+                        "title": evt.title,  # Property that renders from slots
                         "category": evt.category.value,
-                        "event_date": evt.event_date,
+                        "event_date": evt.event_date,  # Property that returns first non-None time
                     }
                 )
 

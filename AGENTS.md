@@ -1,7 +1,7 @@
 # AGENTS.md
 
 **Last Updated:** 2025-10-17  
-**Status:** ✅ Production Ready - PostgreSQL Support Added
+**Status:** ✅ Production Ready - PostgreSQL Support + Code Quality Enhanced
 
 ## Project Overview
 
@@ -42,14 +42,23 @@ Candidate Building → LLM Extraction → Deduplication → Storage → Digest P
 # 1. Install Python dependencies
 pip install -r requirements.txt
 
-# 2. Set up secrets (.env file with tokens only)
-cat > .env << 'EOF'
-SLACK_BOT_TOKEN=xoxb-your-token
-OPENAI_API_KEY=sk-your-key
-EOF
+# 2. Set up configuration files (automated)
+./scripts/setup_config.sh
+# This creates:
+# - config/main.yaml (from defaults/main.example.yaml)
+# - config/object_registry.yaml (from defaults/object_registry.example.yaml)
+# - config/channels.yaml (from defaults/channels.example.yaml)
+# - .env (template)
 
-# 3. Configure application (config.yaml with non-sensitive settings)
-# Edit config.yaml with your settings
+# OR manually:
+# cp config/defaults/*.example.yaml config/
+# Create .env with tokens
+
+# 3. Edit configuration files with your values
+# - .env: Add your API tokens (SLACK_BOT_TOKEN, OPENAI_API_KEY)
+# - config/main.yaml: Adjust main settings (optional, good defaults provided)
+# - config/object_registry.yaml: Add your internal systems
+# - config/channels.yaml: Add your Slack channels
 
 # 4. Set up pre-commit hooks (automatic code quality checks)
 pre-commit install
@@ -57,6 +66,11 @@ pre-commit install
 # 5. Verify configuration
 python -c "from src.config.settings import get_settings; s = get_settings(); print(f'✅ Settings loaded: {s.llm_model}, temp={s.llm_temperature}')"
 ```
+
+**Configuration System:**
+- All `config/*.yaml` files are automatically loaded and merged
+- Validated against JSON schemas in `config/schemas/`
+- See [CONFIG.md](CONFIG.md) for detailed configuration documentation
 
 ### Development Environment
 ```bash
@@ -259,13 +273,29 @@ python scripts/run_pipeline.py --interval-seconds 3600 --publish
 
 ### Configuration Structure
 
+**Configuration Files:**
+- **`.env`** - Secrets only (SLACK_BOT_TOKEN, OPENAI_API_KEY) - never committed
+- **`config/main.yaml`** - Main application settings (in `.gitignore`, created from example)
+- **`config/channels.yaml`** - Slack channels configuration (in `.gitignore`)
+- **`config/object_registry.yaml`** - Internal systems mapping (in `.gitignore`)
+- **`config/defaults/*.example.yaml`** - Templates with example values (committed to git)
+
 **`.env` (Secrets Only):**
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-token
 OPENAI_API_KEY=sk-your-key
 ```
 
-**`config.yaml` (Application Settings):**
+**Configuration Files:**
+All config files are in `config/` directory:
+```bash
+# Create from examples
+./scripts/setup_config.sh
+# Or manually
+cp config/defaults/*.example.yaml config/
+```
+
+**Example config structure:**
 ```yaml
 llm:
   model: gpt-5-nano
@@ -387,6 +417,7 @@ See **[MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md)** for complete guide.
 ## Performance Optimization
 
 ### Database Performance
+
 - **Batch inserts** for PostgreSQL operations
 - **Connection pooling** for efficient resource management
 - **Index optimization** based on query patterns (dedup_key, event_date)
@@ -440,7 +471,6 @@ python -c "import openai; print(openai.api_key is not None)"
 ```
 
 ### Log Locations
-- **Airflow logs**: `./logs/` directory
 - **Application logs**: Console output or configured log files
 - **Docker logs**: `docker-compose logs [service-name]`
 
@@ -635,6 +665,106 @@ POSTGRES_PASSWORD=your_password
 **Documentation:**
 - See `MIGRATION_TO_POSTGRES.md` for complete migration guide
 - See `DOCKER_DEPLOYMENT.md` for Docker setup
+
+### 2025-10-17: Streamlit UI Improvements ✅
+
+**Enhanced Data Visualization and Filtering:**
+- ✅ Added CSV and JSON export functionality for all tables (Messages, Candidates, Events)
+- ✅ Implemented native table filters for all data views
+- ✅ Added multiple timeline views (Gantt Chart, List View, Calendar View, Stats)
+- ✅ Improved Gantt chart with zoom controls, range selector, and better interactivity
+- ✅ Added comprehensive filtering options across all tables
+
+**Table Filters:**
+
+**Messages Table:**
+- 🔍 Text search (searches message content)
+- 👤 User multiselect filter
+- 📅 Date range selector
+- 👍 Minimum reactions slider
+- Export: CSV and JSON buttons
+
+**Candidates Table:**
+- 🔍 Text search (searches normalized text)
+- 📊 Status multiselect filter
+- ⭐ Score range slider
+- Export: CSV and JSON buttons
+
+**Events Table:**
+- 🔍 Title search
+- 📂 Category multiselect (product, risk, process, marketing, org, unknown)
+- 📊 Status multiselect
+- 🎯 Minimum confidence slider
+- ⭐ Minimum importance slider
+- 📅 Date range selector
+- Export: CSV and JSON buttons
+
+**Timeline Enhancements:**
+
+**Shared Timeline Filters:**
+- 📂 Category multiselect
+- 📊 Minimum confidence slider
+- 📅 Date range selector
+
+**Four Timeline Views:**
+1. **📊 Gantt Chart** - Improved with:
+   - Actual start/end dates support
+   - Interactive zoom and pan
+   - Range selector buttons (1w, 1m, 3m, All)
+   - Range slider for quick navigation
+   - Hover data showing confidence, importance, status
+   - Summary metrics below chart
+
+2. **📋 List View** - Events grouped by category:
+   - Expandable category sections
+   - Shows event title, date, and confidence
+   - Color-coded confidence indicators (🟢 🟡 🔴)
+   - Sorted by date (most recent first)
+
+3. **📅 Calendar View** - Events grouped by date:
+   - Daily event listings
+   - Expandable date sections
+   - Category emojis for visual distinction
+   - Full date formatting (e.g., "Monday, October 17, 2025")
+
+4. **📈 Stats View** - Statistical visualizations:
+   - Category distribution (pie chart)
+   - Events over time (bar chart by week)
+   - Confidence distribution (histogram)
+   - Top 10 events by importance (table)
+
+**UI Improvements:**
+- 📊 Row count indicators showing filtered vs total records
+- 🎛️ Collapsible filter sections to save screen space
+- 📥 Export buttons positioned in table headers
+- 📈 Dynamic summary statistics below each table
+- 🎨 Better visual hierarchy with emojis and spacing
+- ⚡ Improved performance with @st.cache_data decorators
+
+**Benefits:**
+- 🔍 Powerful filtering capabilities for data exploration
+- 📊 Multiple visualization options for different use cases
+- 💾 Easy data export for external analysis
+- 🎯 Better user experience with intuitive controls
+- 📈 Rich statistical insights from the Stats view
+- ⚡ Fast and responsive UI with caching
+
+### 2025-10-17: Configuration Security Enhancement ✅
+
+**Configuration File Structure:**
+- ✅ Added `config.example.yaml` as template for new developers
+- ✅ Real `config.yaml` already in `.gitignore` (no sensitive data in git)
+- ✅ Replaced real Slack channel IDs with examples (C1234567890, etc.)
+- ✅ Replaced specific channel names with generic examples
+- ✅ Updated AGENTS.md and README.md with setup instructions
+
+**Benefits:**
+- 🔐 No sensitive channel IDs or team-specific data in git
+- 👥 Easy onboarding for new developers (copy example, customize)
+- ✅ Clear separation: example (git) vs actual config (local only)
+- 📄 Documentation updated with `cp config.example.yaml config.yaml` step
+
+### 2025-10-14: Pre-commit Hooks Setup ✅
 
 ### 2025-10-10: Configuration Refactoring ✅
 

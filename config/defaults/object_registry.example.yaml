@@ -1,0 +1,81 @@
+# Object Registry Example
+#
+# Maps raw object names to canonical object IDs.
+# Each object_id has a list of synonyms (case-insensitive matching).
+#
+# IMPORTANT: Replace these examples with your actual internal systems!
+
+objects:
+  # Example: Wallet & Trading Systems
+  wallet.stocks:
+    - Stocks & ETFs
+    - Stock trading
+    - Equity wallet
+    - Securities trading
+
+  wallet.crypto:
+    - Crypto wallet
+    - Cryptocurrency
+    - Digital assets
+    - Bitcoin wallet
+
+  # Example: Data Platform
+  data.clickhouse:
+    - ClickHouse
+    - CH cluster
+    - Data warehouse
+    - Analytics DB
+
+  data.kafka:
+    - Kafka
+    - Message queue
+    - Event streaming
+
+  # Example: Backend Services
+  backend.api:
+    - API Gateway
+    - REST API
+    - Backend API
+    - API service
+
+  backend.auth:
+    - Authentication
+    - Auth service
+    - Login service
+    - Identity service
+
+  # Example: Frontend
+  frontend.web:
+    - Web app
+    - Web frontend
+    - Browser app
+    - Web interface
+
+  frontend.mobile:
+    - Mobile app
+    - iOS app
+    - Android app
+    - Mobile client
+
+  # Example: Infrastructure
+  infra.kubernetes:
+    - Kubernetes
+    - K8s
+    - Container orchestration
+    - K8s cluster
+
+  infra.aws:
+    - AWS
+    - Amazon Web Services
+    - Cloud infrastructure
+
+  # Example: Compliance & Risk
+  compliance.kyc:
+    - KYC
+    - Know Your Customer
+    - Identity verification
+
+  compliance.aml:
+    - AML
+    - Anti-Money Laundering
+    - Transaction monitoring

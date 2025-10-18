@@ -44,6 +44,19 @@ venv.bak/
 .env.*
 !.env.example
 
+# Configuration
+config.yaml
+
+# Config directory - ignore all YAML except defaults/ and schemas/
+config/*.yaml
+config/*.yml
+!config/defaults/
+!config/schemas/
+
+# Explicitly allow example files
+!*.example.yaml
+!*.example.yml
+
 # Testing
 .pytest_cache/
 .coverage
@@ -69,10 +82,6 @@ data/
 logs/
 *.log
 
-# Airflow (for future)
-airflow/logs/
-airflow.cfg
-airflow.db
 
 # OS
 Thumbs.db

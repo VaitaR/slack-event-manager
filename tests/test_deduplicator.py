@@ -4,8 +4,9 @@ from datetime import datetime
 
 import pytz
 
-from src.domain.models import Event, EventCategory
+from src.domain.models import Event
 from src.services import deduplicator
+from tests.conftest import create_test_event
 
 
 def test_generate_dedup_key(sample_event: Event) -> None:
@@ -48,32 +49,22 @@ def test_has_overlap_empty_lists() -> None:
 
 def test_should_merge_events_same_message_id() -> None:
     """Test Rule 1: Same message_id should NOT merge."""
-    event1 = Event(
+    event1 = create_test_event(
         message_id="same_msg",
-        source_msg_event_idx=0,
+        object_name="Event 1",
         dedup_key="key1",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Event 1",
-        summary="Summary",
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
         links=["https://example.com"],
         anchors=[],
-        confidence=0.9,
-        source_channels=["#test"],
     )
 
-    event2 = Event(
+    event2 = create_test_event(
         message_id="same_msg",  # Same message!
-        source_msg_event_idx=1,
+        object_name="Event 2",
         dedup_key="key2",
-        event_date=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Event 2",
-        summary="Summary",
+        actual_start=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
         links=["https://example.com"],
         anchors=[],
-        confidence=0.9,
-        source_channels=["#test"],
     )
 
     assert deduplicator.should_merge_events(event1, event2) is False
@@ -81,289 +72,254 @@ def test_should_merge_events_same_message_id() -> None:
 
 def test_should_merge_events_no_anchor_overlap() -> None:
     """Test no merge without anchor/link overlap."""
-    event1 = Event(
+    event1 = create_test_event(
         message_id="msg1",
-        source_msg_event_idx=0,
+        object_name="Release v1.0",
         dedup_key="key1",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
         links=["https://example1.com"],
         anchors=["PROJ-1"],
-        confidence=0.9,
-        source_channels=["#test"],
     )
 
-    event2 = Event(
+    event2 = create_test_event(
         message_id="msg2",
-        source_msg_event_idx=0,
+        object_name="Release v1.0",
         dedup_key="key2",
-        event_date=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
-        links=["https://example2.com"],  # Different link
-        anchors=["PROJ-2"],  # Different anchor
-        confidence=0.9,
-        source_channels=["#test"],
+        actual_start=datetime(2025, 10, 10, 10, 30, tzinfo=pytz.UTC),
+        links=["https://example2.com"],
+        anchors=["PROJ-2"],
     )
 
     assert deduplicator.should_merge_events(event1, event2) is False
 
 
 def test_should_merge_events_date_too_far() -> None:
-    """Test no merge when date delta too large."""
-    event1 = Event(
+    """Test no merge if date delta > 48 hours."""
+    event1 = create_test_event(
         message_id="msg1",
-        source_msg_event_idx=0,
+        object_name="Release v1.0",
         dedup_key="key1",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
         links=["https://example.com"],
         anchors=["PROJ-1"],
-        confidence=0.9,
-        source_channels=["#test"],
     )
 
-    event2 = Event(
+    event2 = create_test_event(
         message_id="msg2",
-        source_msg_event_idx=0,
+        object_name="Release v1.0",
         dedup_key="key2",
-        event_date=datetime(2025, 10, 15, 10, 0, tzinfo=pytz.UTC),  # 5 days later
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
-        links=["https://example.com"],  # Same link
-        anchors=["PROJ-1"],  # Same anchor
-        confidence=0.9,
-        source_channels=["#test"],
+        actual_start=datetime(2025, 10, 13, 10, 0, tzinfo=pytz.UTC),  # 3 days later
+        links=["https://example.com"],
+        anchors=["PROJ-1"],
     )
 
-    # Default window is 48 hours
     assert (
         deduplicator.should_merge_events(event1, event2, date_window_hours=48) is False
     )
 
 
-def test_should_merge_events_title_too_different() -> None:
-    """Test no merge when title similarity too low."""
-    event1 = Event(
+def test_should_merge_events_with_link_overlap() -> None:
+    """Test merge with link overlap."""
+    event1 = create_test_event(
         message_id="msg1",
-        source_msg_event_idx=0,
+        object_name="Release v1.0",
         dedup_key="key1",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
-        links=["https://example.com"],
-        anchors=["PROJ-1"],
-        confidence=0.9,
-        source_channels=["#test"],
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
+        links=["https://example.com/release"],
+        anchors=[],
     )
 
-    event2 = Event(
+    event2 = create_test_event(
         message_id="msg2",
-        source_msg_event_idx=0,
+        object_name="Release v1.0",
         dedup_key="key2",
-        event_date=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Completely Different Title",  # Very different
-        summary="Summary",
-        links=["https://example.com"],
-        anchors=["PROJ-1"],
-        confidence=0.9,
-        source_channels=["#test"],
-    )
-
-    assert (
-        deduplicator.should_merge_events(event1, event2, title_similarity_threshold=0.8)
-        is False
-    )
-
-
-def test_should_merge_events_valid_merge() -> None:
-    """Test valid merge case."""
-    event1 = Event(
-        message_id="msg1",
-        source_msg_event_idx=0,
-        dedup_key="key1",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
-        links=["https://example.com"],
-        anchors=["PROJ-1"],
-        confidence=0.9,
-        source_channels=["#releases"],
-    )
-
-    event2 = Event(
-        message_id="msg2",
-        source_msg_event_idx=0,
-        dedup_key="key2",
-        event_date=datetime(2025, 10, 10, 12, 0, tzinfo=pytz.UTC),  # 2 hours later
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",  # Same title
-        summary="Summary",
-        links=["https://example.com"],  # Same link
-        anchors=["PROJ-1"],  # Same anchor
-        confidence=0.8,
-        source_channels=["#updates"],
+        actual_start=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
+        links=["https://example.com/release"],
+        anchors=[],
     )
 
     assert deduplicator.should_merge_events(event1, event2) is True
 
 
-def test_merge_events_combines_attributes() -> None:
-    """Test event merging combines attributes correctly."""
-    event1 = Event(
+def test_should_merge_events_with_anchor_overlap() -> None:
+    """Test merge with anchor overlap."""
+    event1 = create_test_event(
         message_id="msg1",
-        source_msg_event_idx=0,
+        object_name="Fix critical bug",
         dedup_key="key1",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary 1",
-        links=["https://link1.com"],
-        anchors=["PROJ-1"],
-        tags=["tag1"],
-        confidence=0.8,
-        source_channels=["#releases"],
-        version=1,
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
+        links=[],
+        anchors=["PROJ-123"],
     )
 
-    event2 = Event(
+    event2 = create_test_event(
         message_id="msg2",
-        source_msg_event_idx=0,
+        object_name="Fix critical bug",
         dedup_key="key2",
-        event_date=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary 2",
+        actual_start=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
+        links=[],
+        anchors=["PROJ-123", "PROJ-456"],
+    )
+
+    assert deduplicator.should_merge_events(event1, event2) is True
+
+
+def test_merge_events_combines_fields() -> None:
+    """Test event merging combines relevant fields."""
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Release v1.0",
+        dedup_key="key1",
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
+        links=["https://link1.com"],
+        anchors=["PROJ-1"],
+        source_channels=["#releases"],
+        confidence=0.9,
+    )
+
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Release v1.0",
+        dedup_key="key2",
+        actual_start=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
         links=["https://link2.com"],
         anchors=["PROJ-2"],
-        tags=["tag2"],
-        confidence=0.9,  # Higher
-        source_channels=["#updates"],
-        version=1,
+        source_channels=["#announcements"],
+        confidence=0.95,
     )
 
     merged = deduplicator.merge_events(event1, event2)
 
-    # Check unions
+    # Verify combined fields
+    assert merged.confidence == 0.95  # Max confidence
     assert set(merged.links) == {"https://link1.com", "https://link2.com"}
-    assert set(merged.tags) == {"tag1", "tag2"}
-    assert set(merged.source_channels) == {"#releases", "#updates"}
     assert set(merged.anchors) == {"PROJ-1", "PROJ-2"}
-
-    # Check max values
-    assert merged.confidence == 0.9
-    assert merged.version == 2  # Incremented
-
-    # Check kept attributes
-    assert merged.title == event1.title
-    assert merged.event_id == event1.event_id
+    assert set(merged.source_channels) == {"#releases", "#announcements"}
 
 
-def test_find_merge_candidates() -> None:
-    """Test finding merge candidates."""
-    new_event = Event(
-        message_id="new_msg",
-        source_msg_event_idx=0,
-        dedup_key="new_key",
-        event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Summary",
+def test_merge_events_prefers_earlier_date() -> None:
+    """Test merged event uses earlier date."""
+    later_date = datetime(2025, 10, 10, 12, 0, tzinfo=pytz.UTC)
+    earlier_date = datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC)
+
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Release",
+        dedup_key="key1",
+        actual_start=later_date,
         links=["https://example.com"],
-        anchors=["PROJ-1"],
-        confidence=0.9,
-        source_channels=["#test"],
     )
 
-    existing_events = [
-        Event(
-            message_id="existing1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
-            event_date=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
-            category=EventCategory.PRODUCT,
-            title="Release v1.0",
-            summary="Summary",
-            links=["https://example.com"],
-            anchors=["PROJ-1"],
-            confidence=0.9,
-            source_channels=["#test"],
-        ),
-        Event(
-            message_id="existing2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
-            event_date=datetime(2025, 10, 10, 12, 0, tzinfo=pytz.UTC),
-            category=EventCategory.PRODUCT,
-            title="Different Event",
-            summary="Summary",
-            links=["https://other.com"],
-            anchors=["PROJ-2"],
-            confidence=0.9,
-            source_channels=["#test"],
-        ),
-    ]
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Release",
+        dedup_key="key2",
+        actual_start=earlier_date,
+        links=["https://example.com"],
+    )
 
-    candidates = deduplicator.find_merge_candidates(new_event, existing_events)
+    merged = deduplicator.merge_events(event1, event2)
 
-    assert len(candidates) == 1
-    assert candidates[0].message_id == "existing1"
+    assert merged.actual_start == earlier_date
 
 
-def test_deduplicate_event_list() -> None:
-    """Test deduplicating a list of events."""
-    events = [
-        Event(
-            message_id="msg1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
-            event_date=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
-            category=EventCategory.PRODUCT,
-            title="Release v1.0",
-            summary="Summary",
-            links=["https://example.com"],
-            anchors=["PROJ-1"],
-            confidence=0.9,
-            source_channels=["#test"],
-        ),
-        Event(
-            message_id="msg2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
-            event_date=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
-            category=EventCategory.PRODUCT,
-            title="Release v1.0",  # Should merge with first
-            summary="Summary",
-            links=["https://example.com"],
-            anchors=["PROJ-1"],
-            confidence=0.8,
-            source_channels=["#test"],
-        ),
-        Event(
-            message_id="msg3",
-            source_msg_event_idx=0,
-            dedup_key="key3",
-            event_date=datetime(2025, 10, 10, 12, 0, tzinfo=pytz.UTC),
-            category=EventCategory.PRODUCT,
-            title="Different Event",  # Should NOT merge
-            summary="Summary",
-            links=["https://other.com"],
-            anchors=["PROJ-2"],
-            confidence=0.9,
-            source_channels=["#test"],
-        ),
-    ]
+def test_deduplicate_event_list_same_message_no_merge() -> None:
+    """Test events from same message are not merged."""
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Event 1",
+        dedup_key="key1",
+        links=["https://example.com"],
+    )
 
+    event2 = create_test_event(
+        message_id="msg1",  # Same message
+        object_name="Event 2",
+        dedup_key="key2",
+        links=["https://example.com"],
+    )
+
+    events = [event1, event2]
     deduplicated = deduplicator.deduplicate_event_list(events)
 
-    # Should have 2 events (first two merged, third separate)
+    # Both events should remain
     assert len(deduplicated) == 2
+
+
+def test_deduplicate_event_list_merges_similar() -> None:
+    """Test similar events from different messages are merged."""
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Release",
+        dedup_key="key1",
+        actual_start=datetime(2025, 10, 10, 10, 0, tzinfo=pytz.UTC),
+        links=["https://example.com/release"],
+    )
+
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Release",
+        dedup_key="key2",
+        actual_start=datetime(2025, 10, 10, 11, 0, tzinfo=pytz.UTC),
+        links=["https://example.com/release"],
+    )
+
+    events = [event1, event2]
+    deduplicated = deduplicator.deduplicate_event_list(events)
+
+    # Should merge into 1 event
+    assert len(deduplicated) == 1
+    merged = deduplicated[0]
+    assert "msg1" in merged.message_id or "msg2" in merged.message_id
+
+
+def test_deduplicate_event_list_preserves_unique() -> None:
+    """Test unique events are preserved."""
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Release v1.0",
+        dedup_key="key1",
+        links=["https://release1.com"],
+        anchors=["PROJ-1"],
+    )
+
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Security fix",
+        dedup_key="key2",
+        links=["https://security.com"],
+        anchors=["SEC-100"],
+    )
+
+    event3 = create_test_event(
+        message_id="msg3",
+        object_name="Performance update",
+        dedup_key="key3",
+        links=["https://perf.com"],
+        anchors=["PERF-42"],
+    )
+
+    events = [event1, event2, event3]
+    deduplicated = deduplicator.deduplicate_event_list(events)
+
+    # All should remain
+    assert len(deduplicated) == 3
+
+
+def test_deduplicate_event_list_empty() -> None:
+    """Test deduplication with empty list."""
+    events: list[Event] = []
+    deduplicated = deduplicator.deduplicate_event_list(events)
+
+    assert deduplicated == []
+
+
+def test_deduplicate_event_list_single() -> None:
+    """Test deduplication with single event."""
+    event = create_test_event()
+
+    events = [event]
+    deduplicated = deduplicator.deduplicate_event_list(events)
+
+    assert len(deduplicated) == 1
+    assert deduplicated[0] == event

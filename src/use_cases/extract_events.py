@@ -4,6 +4,7 @@ Uses LLM to extract structured events from candidate messages.
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pytz
@@ -13,69 +14,202 @@ from src.adapters.query_builders import CandidateQueryCriteria
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.exceptions import BudgetExceededError, LLMAPIError, ValidationError
-from src.domain.models import CandidateStatus, Event, ExtractionResult
+from src.domain.models import (
+    ActionType,
+    CandidateStatus,
+    ChangeType,
+    Environment,
+    Event,
+    EventStatus,
+    ExtractionResult,
+    Severity,
+    TimeSource,
+)
 from src.services import deduplicator
+from src.services.importance_scorer import ImportanceScorer
+from src.services.object_registry import ObjectRegistry
+
+# Initialize services (singleton-style)
+_object_registry: ObjectRegistry | None = None
+_importance_scorer: ImportanceScorer | None = None
+
+
+def _get_object_registry() -> ObjectRegistry:
+    """Get or create ObjectRegistry instance."""
+    global _object_registry
+    if _object_registry is None:
+        from src.config.settings import get_settings
+
+        settings = get_settings()
+        registry_path = Path(settings.object_registry_path)
+
+        if not registry_path.exists():
+            # Graceful fallback if file doesn't exist
+            import logging
+
+            logging.warning(
+                f"Object registry not found at {registry_path}. "
+                "Object canonicalization disabled."
+            )
+            # Try fallback to example file
+            fallback_path = Path("config/defaults/object_registry.example.yaml")
+            if fallback_path.exists():
+                registry_path = fallback_path
+                logging.info(f"Using fallback registry: {fallback_path}")
+            else:
+                # Create minimal empty registry
+                logging.warning("No object registry available")
+
+        _object_registry = ObjectRegistry(registry_path)
+    return _object_registry
+
+
+def _get_importance_scorer() -> ImportanceScorer:
+    """Get or create ImportanceScorer instance."""
+    global _importance_scorer
+    if _importance_scorer is None:
+        _importance_scorer = ImportanceScorer()
+    return _importance_scorer
+
+
+def _parse_datetime(
+    dt_str: str | None, fallback: datetime | None = None
+) -> datetime | None:
+    """Parse ISO8601 datetime string with fallback."""
+    if not dt_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=pytz.UTC)
+        return dt
+    except (ValueError, AttributeError):
+        return fallback
 
 
 def convert_llm_event_to_domain(
     llm_event: Any,
     message_id: str,
-    event_idx: int,
     message_ts_dt: datetime,
     channel_name: str,
+    reaction_count: int = 0,
+    mention_count: int = 0,
 ) -> Event:
-    """Convert LLM event to domain Event model.
+    """Convert LLM event to domain Event model with new comprehensive structure.
+
+    Uses ObjectRegistry, ImportanceScorer, and deduplicator services.
 
     Args:
         llm_event: LLM event object
         message_id: Source message ID
-        event_idx: Index within message (0-4)
         message_ts_dt: Message timestamp for date fallback
         channel_name: Channel name
+        reaction_count: Reaction count from message (for importance)
+        mention_count: Mention count from message (for importance)
 
     Returns:
-        Domain Event object
+        Domain Event object with all new fields
     """
-    # Parse dates
-    try:
-        event_date_str = llm_event.event_date
-        event_date = datetime.fromisoformat(event_date_str.replace("Z", "+00:00"))
-        if event_date.tzinfo is None:
-            event_date = event_date.replace(tzinfo=pytz.UTC)
-    except (ValueError, AttributeError):
-        # Fall back to message timestamp
-        event_date = message_ts_dt
+    # Get services
+    object_registry = _get_object_registry()
+    importance_scorer = _get_importance_scorer()
 
-    event_end = None
-    if llm_event.event_end:
+    # Parse all time fields
+    planned_start = _parse_datetime(llm_event.planned_start, None)
+    planned_end = _parse_datetime(llm_event.planned_end, None)
+    actual_start = _parse_datetime(llm_event.actual_start, None)
+    actual_end = _parse_datetime(llm_event.actual_end, None)
+
+    # Canonicalize object_id using registry
+    object_id = object_registry.canonicalize_object(llm_event.object_name_raw)
+
+    # Parse enums
+    try:
+        action = ActionType(llm_event.action)
+    except ValueError:
+        action = ActionType.OTHER
+
+    try:
+        status = EventStatus(llm_event.status)
+    except ValueError:
+        status = EventStatus.UPDATED
+
+    try:
+        change_type = ChangeType(llm_event.change_type)
+    except ValueError:
+        change_type = ChangeType.OTHER
+
+    try:
+        environment = Environment(llm_event.environment)
+    except ValueError:
+        environment = Environment.UNKNOWN
+
+    severity = None
+    if llm_event.severity:
         try:
-            event_end_str = llm_event.event_end
-            event_end = datetime.fromisoformat(event_end_str.replace("Z", "+00:00"))
-            if event_end.tzinfo is None:
-                event_end = event_end.replace(tzinfo=pytz.UTC)
-        except (ValueError, AttributeError):
+            severity = Severity(llm_event.severity)
+        except ValueError:
             pass
 
-    # Create domain event
+    try:
+        time_source = TimeSource(llm_event.time_source)
+    except ValueError:
+        time_source = TimeSource.TS_FALLBACK
+
+    # Create event (importance will be calculated below)
     event = Event(
+        # Identification
         message_id=message_id,
-        source_msg_event_idx=event_idx,
-        dedup_key="",  # Will be generated
-        event_date=event_date,
-        event_end=event_end,
-        category=llm_event.category,
-        title=llm_event.title,
-        summary=llm_event.summary,
-        impact_area=llm_event.impact_area,
-        tags=llm_event.tags,
-        links=llm_event.links[:3],  # Max 3
-        anchors=[],  # Will be populated from links
-        confidence=llm_event.confidence,
         source_channels=[channel_name] if channel_name else [],
+        # Title slots
+        action=action,
+        object_id=object_id,
+        object_name_raw=llm_event.object_name_raw,
+        qualifiers=llm_event.qualifiers[:2],  # Max 2
+        stroke=llm_event.stroke,
+        anchor=llm_event.anchor,
+        # Classification
+        category=llm_event.category,
+        status=status,
+        change_type=change_type,
+        environment=environment,
+        severity=severity,
+        # Time fields
+        planned_start=planned_start,
+        planned_end=planned_end,
+        actual_start=actual_start,
+        actual_end=actual_end,
+        time_source=time_source,
+        time_confidence=llm_event.time_confidence,
+        # Content
+        summary=llm_event.summary,
+        why_it_matters=llm_event.why_it_matters,
+        links=llm_event.links[:3],  # Max 3
+        anchors=llm_event.anchors,
+        impact_area=llm_event.impact_area[:3],  # Max 3
+        impact_type=llm_event.impact_type,
+        # Quality (importance calculated below)
+        confidence=llm_event.confidence,
+        importance=0,  # Calculated below
+        # Clustering (generated below)
+        cluster_key="",
+        dedup_key="",
+        relations=[],
     )
 
-    # Generate dedup key
+    # Generate cluster_key and dedup_key
+    event.cluster_key = deduplicator.generate_cluster_key(event)
     event.dedup_key = deduplicator.generate_dedup_key(event)
+
+    # Calculate importance score
+    importance_result = importance_scorer.calculate_importance(
+        event,
+        llm_score=None,  # TODO: Add LLM importance scoring if needed
+        reaction_count=reaction_count,
+        mention_count=mention_count,
+        is_duplicate=False,
+    )
+    event.importance = importance_result.final_score
 
     return event
 
@@ -214,13 +348,18 @@ def extract_events_use_case(
             if llm_response.is_event and llm_response.events:
                 events_to_save: list[Event] = []
 
-                for idx, llm_event in enumerate(llm_response.events):
+                # Get reaction and mention counts from candidate features
+                reaction_count = candidate.features.reaction_count
+                mention_count = 1 if candidate.features.has_mention else 0
+
+                for llm_event in llm_response.events:
                     domain_event = convert_llm_event_to_domain(
                         llm_event,
                         candidate.message_id,
-                        idx,
                         candidate.ts_dt,
                         channel_name,
+                        reaction_count=reaction_count,
+                        mention_count=mention_count,
                     )
                     events_to_save.append(domain_event)
 

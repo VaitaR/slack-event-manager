@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime
-from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -105,26 +105,67 @@ def sample_event_candidate() -> EventCandidate:
     )
 
 
+def create_test_event(
+    message_id: str = "test_msg_123",
+    action: str | None = None,
+    object_name: str = "Feature v1.0",
+    category: EventCategory = EventCategory.PRODUCT,
+    status: str | None = None,
+    actual_start: datetime | None = None,
+    dedup_key: str = "abc123def456",
+    cluster_key: str = "launch-feature-v10",
+    confidence: float = 0.9,
+    importance: int = 75,
+    **kwargs: Any,
+) -> Event:
+    """Helper to create test event with new structure."""
+    from uuid import uuid4
+
+    from src.domain.models import (
+        ActionType,
+        ChangeType,
+        Environment,
+        EventStatus,
+        TimeSource,
+    )
+
+    if actual_start is None:
+        actual_start = datetime(2025, 10, 15, 8, 0, tzinfo=pytz.UTC)
+
+    action_type = ActionType.LAUNCH if action is None else ActionType(action)
+    status_type = EventStatus.COMPLETED if status is None else EventStatus(status)
+
+    defaults: dict[str, Any] = {
+        "event_id": uuid4(),
+        "message_id": message_id,
+        "source_channels": ["releases"],
+        "extracted_at": datetime(2025, 10, 10, 10, 5, tzinfo=pytz.UTC),
+        "action": action_type,
+        "object_name_raw": object_name,
+        "category": category,
+        "status": status_type,
+        "change_type": ChangeType.LAUNCH,
+        "environment": Environment.PROD,
+        "actual_start": actual_start,
+        "time_source": TimeSource.EXPLICIT,
+        "time_confidence": 0.9,
+        "summary": f"Summary for {object_name}",
+        "impact_area": ["payments", "wallet"],
+        "links": ["https://github.com/org/repo/issues/42"],
+        "anchors": ["org/repo#42"],
+        "confidence": confidence,
+        "importance": importance,
+        "cluster_key": cluster_key,
+        "dedup_key": dedup_key,
+    }
+    defaults.update(kwargs)
+    return Event(**defaults)
+
+
 @pytest.fixture
 def sample_event() -> Event:
     """Sample event for testing."""
-    return Event(
-        message_id="test_msg_123",
-        source_msg_event_idx=0,
-        dedup_key="abc123def456",
-        event_date=datetime(2025, 10, 15, 8, 0, tzinfo=pytz.UTC),
-        event_end=None,
-        category=EventCategory.PRODUCT,
-        title="Release v1.0",
-        summary="Major release with new features",
-        impact_area=["payments", "wallet"],
-        tags=["release", "v1.0"],
-        links=["https://github.com/org/repo/issues/42"],
-        anchors=["org/repo#42"],
-        confidence=0.9,
-        source_channels=["#releases"],
-        ingested_at=datetime(2025, 10, 10, 10, 5, tzinfo=pytz.UTC),
-    )
+    return create_test_event()
 
 
 @pytest.fixture

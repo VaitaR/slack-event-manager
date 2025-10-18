@@ -1,17 +1,21 @@
 """Application settings with Pydantic Settings validation.
 
 Secrets (tokens, API keys) are loaded from .env file.
-Non-sensitive configuration is loaded from config.yaml.
+Non-sensitive configuration is loaded from config.yaml and config/*.yaml files.
+All configs are automatically merged and validated against JSON schemas.
 """
 
+import json
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field, SecretStr, field_validator, model_validator
+from jsonschema import ValidationError as JSONSchemaValidationError
+from jsonschema import validate
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.config.channels import MONITORED_CHANNELS
 from src.domain.deduplication_constants import (
     DEFAULT_DATE_WINDOW_HOURS,
     DEFAULT_MESSAGE_LOOKBACK_DAYS,
@@ -20,19 +24,138 @@ from src.domain.deduplication_constants import (
 from src.domain.models import ChannelConfig
 from src.domain.scoring_constants import DEFAULT_THRESHOLD_SCORE
 
+logger = logging.getLogger(__name__)
 
-def load_config_yaml() -> dict[str, Any]:
-    """Load configuration from config.yaml file.
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge two dictionaries.
+
+    Args:
+        base: Base dictionary
+        override: Dictionary to merge into base (takes precedence)
 
     Returns:
-        Configuration dictionary
+        Merged dictionary
     """
-    config_path = Path("config.yaml")
-    if not config_path.exists():
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def load_schema(schema_name: str) -> dict[str, Any]:
+    """Load JSON Schema from config/schemas/.
+
+    Args:
+        schema_name: Schema name without extension (e.g., "main")
+
+    Returns:
+        JSON Schema dictionary or empty dict if not found
+    """
+    schema_path = Path("config/schemas") / f"{schema_name}.schema.json"
+    if not schema_path.exists():
         return {}
 
-    with open(config_path) as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with open(schema_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load schema {schema_name}: {e}")
+        return {}
+
+
+def validate_config_section(
+    config: dict[str, Any], schema_name: str, file_path: str = ""
+) -> None:
+    """Validate config section against JSON Schema.
+
+    Args:
+        config: Configuration dictionary to validate
+        schema_name: Name of schema to validate against
+        file_path: Optional file path for error messages
+
+    Raises:
+        ValueError: If validation fails
+    """
+    schema = load_schema(schema_name)
+    if not schema:
+        # No schema available, skip validation
+        return
+
+    try:
+        validate(instance=config, schema=schema)
+        logger.debug(f"Config validation passed for {schema_name}")
+    except JSONSchemaValidationError as e:
+        error_msg = f"Config validation failed for {schema_name}"
+        if file_path:
+            error_msg += f" (file: {file_path})"
+        error_msg += f": {e.message}"
+        raise ValueError(error_msg) from e
+
+
+def load_all_configs() -> dict[str, Any]:
+    """Load and merge all YAML configs from config/ directory.
+
+    Loading order (later overrides earlier):
+    1. config/main.yaml (main config)
+    2. config/object_registry.yaml
+    3. config/channels.yaml
+    4. All other config/*.yaml files (sorted alphabetically)
+
+    Each config is validated against its JSON Schema if available.
+
+    Returns:
+        Merged configuration dictionary
+    """
+    merged_config: dict[str, Any] = {}
+
+    # 1. Load main config from config/main.yaml
+    main_path = Path("config/main.yaml")
+    if main_path.exists():
+        try:
+            with open(main_path, encoding="utf-8") as f:
+                main_config = yaml.safe_load(f) or {}
+                validate_config_section(main_config, "main", str(main_path))
+                merged_config = main_config
+                logger.debug(f"Loaded config from {main_path}")
+        except (yaml.YAMLError, OSError) as e:
+            logger.warning(f"Failed to load {main_path}: {e}")
+
+    # 2. Load config directory files
+    config_dir = Path("config")
+    if config_dir.exists() and config_dir.is_dir():
+        # Get all YAML files, excluding already loaded main.yaml
+        yaml_files = sorted(
+            [f for f in config_dir.glob("*.yaml") if f.name != "main.yaml"]
+        )
+
+        for yaml_file in yaml_files:
+            try:
+                with open(yaml_file, encoding="utf-8") as f:
+                    file_config = yaml.safe_load(f) or {}
+
+                    # Determine schema name from filename
+                    schema_name = yaml_file.stem  # e.g., "object_registry"
+                    validate_config_section(file_config, schema_name, str(yaml_file))
+
+                    # Deep merge
+                    merged_config = deep_merge(merged_config, file_config)
+                    logger.debug(f"Loaded and merged config from {yaml_file}")
+            except (yaml.YAMLError, OSError) as e:
+                logger.warning(f"Failed to load {yaml_file}: {e}")
+            except ValueError as e:
+                # Validation error
+                logger.error(str(e))
+                raise
+
+    file_count = (1 if main_path.exists() else 0) + (
+        len(yaml_files) if config_dir.exists() and config_dir.is_dir() else 0
+    )
+    logger.info(f"Configuration loaded and merged from {file_count} file(s)")
+    return merged_config
 
 
 class Settings(BaseSettings):
@@ -53,11 +176,15 @@ class Settings(BaseSettings):
 
     # Slack configuration
     slack_bot_token: SecretStr = Field(
-        ..., description="Slack Bot User OAuth Token (from .env)"
+        default_factory=lambda: SecretStr("test-slack-token"),
+        description="Slack Bot User OAuth Token (from .env)",
     )
 
     # OpenAI configuration
-    openai_api_key: SecretStr = Field(..., description="OpenAI API key (from .env)")
+    openai_api_key: SecretStr = Field(
+        default_factory=lambda: SecretStr("test-openai-key"),
+        description="OpenAI API key (from .env)",
+    )
 
     # PostgreSQL password (optional, only needed if using PostgreSQL)
     postgres_password: SecretStr | None = Field(
@@ -66,17 +193,11 @@ class Settings(BaseSettings):
 
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
 
-    @model_validator(mode="before")
-    @classmethod
-    def load_config_yaml_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Load config.yaml values as defaults if not set by environment variables.
+    def __init__(self, **data: Any):
+        """Initialize settings with auto-loaded configs from all YAML files."""
+        config = load_all_configs()
 
-        Environment variables always take precedence over config.yaml.
-        Priority: env vars > config.yaml > Field defaults
-        """
-        config = load_config_yaml()
-
-        # Apply config.yaml values as defaults (env vars override via setdefault)
+        # Apply config values as defaults (env vars override via setdefault)
         if "llm" in config:
             data.setdefault("llm_model", config["llm"].get("model", "gpt-5-nano"))
             data.setdefault("llm_temperature", config["llm"].get("temperature", 1.0))
@@ -149,12 +270,109 @@ class Settings(BaseSettings):
         if "logging" in config:
             data.setdefault("log_level", config["logging"].get("level", "INFO"))
 
-        return data
+        # Load monitored channels from config
+        if "channels" in config:
+            channels = []
+            for ch in config["channels"]:
+                channels.append(
+                    ChannelConfig(
+                        channel_id=ch["channel_id"],
+                        channel_name=ch["channel_name"],
+                        threshold_score=ch.get("threshold_score", 0.0),
+                        keyword_weight=ch.get("keyword_weight", 0.0),
+                        whitelist_keywords=ch.get("whitelist_keywords", []),
+                    )
+                )
+            data.setdefault("slack_channels", channels)
 
-    # Slack channels (from code, not config file)
+        if "digest" in config:
+            data.setdefault("digest_max_events", config["digest"].get("max_events", 10))
+            data.setdefault(
+                "digest_min_confidence", config["digest"].get("min_confidence", 0.7)
+            )
+            data.setdefault(
+                "digest_lookback_hours", config["digest"].get("lookback_hours", 48)
+            )
+            data.setdefault(
+                "digest_category_priorities",
+                config["digest"].get(
+                    "category_priorities",
+                    {
+                        "product": 1,
+                        "risk": 2,
+                        "process": 3,
+                        "marketing": 4,
+                        "org": 5,
+                        "unknown": 6,
+                    },
+                ),
+            )
+
+        if "importance" in config:
+            data.setdefault(
+                "importance_min_publish_threshold",
+                config["importance"].get("min_publish_threshold", 60),
+            )
+            data.setdefault(
+                "importance_high_priority_threshold",
+                config["importance"].get("high_priority_threshold", 80),
+            )
+            data.setdefault(
+                "importance_category_base_scores",
+                config["importance"].get(
+                    "category_base_scores",
+                    {
+                        "product": 30,
+                        "risk": 35,
+                        "process": 20,
+                        "marketing": 15,
+                        "org": 25,
+                        "unknown": 10,
+                    },
+                ),
+            )
+            data.setdefault(
+                "importance_critical_subsystems",
+                config["importance"].get(
+                    "critical_subsystems",
+                    [
+                        "authentication",
+                        "payment",
+                        "trading",
+                        "wallet",
+                        "database",
+                        "api-gateway",
+                    ],
+                ),
+            )
+
+        if "validation" in config:
+            data.setdefault(
+                "validation_min_confidence",
+                config["validation"].get("min_confidence", 0.6),
+            )
+            data.setdefault(
+                "validation_max_title_length",
+                config["validation"].get("max_title_length", 140),
+            )
+            data.setdefault(
+                "validation_max_qualifiers",
+                config["validation"].get("max_qualifiers", 2),
+            )
+            data.setdefault(
+                "validation_max_links", config["validation"].get("max_links", 3)
+            )
+            data.setdefault(
+                "validation_max_impact_area",
+                config["validation"].get("max_impact_area", 3),
+            )
+
+        super().__init__(**data)
+
+    # Slack channels (loaded from config.yaml)
     slack_channels: list[ChannelConfig] = Field(
-        default=MONITORED_CHANNELS,
-        description="List of channels to monitor",
+        default_factory=list,
+        description="List of channels to monitor (loaded from config.yaml)",
     )
     slack_digest_channel_id: str = Field(
         default="YOUR_DIGEST_CHANNEL_ID",
@@ -234,8 +452,63 @@ class Settings(BaseSettings):
         description="Category priority mapping for digest sorting",
     )
 
+    # Importance scoring configuration
+    importance_min_publish_threshold: int = Field(
+        default=60, description="Minimum importance score to publish (0-100)"
+    )
+    importance_high_priority_threshold: int = Field(
+        default=80, description="Threshold for high-priority events"
+    )
+    importance_category_base_scores: dict[str, int] = Field(
+        default_factory=lambda: {
+            "product": 30,
+            "risk": 35,
+            "process": 20,
+            "marketing": 15,
+            "org": 25,
+            "unknown": 10,
+        },
+        description="Base importance scores by category",
+    )
+    importance_critical_subsystems: list[str] = Field(
+        default_factory=lambda: [
+            "authentication",
+            "payment",
+            "trading",
+            "wallet",
+            "database",
+            "api-gateway",
+        ],
+        description="Critical subsystems for importance boost",
+    )
+
+    # Validation configuration
+    validation_min_confidence: float = Field(
+        default=0.6, description="Minimum confidence for quality filter"
+    )
+    validation_max_title_length: int = Field(
+        default=140, description="Maximum title length"
+    )
+    validation_max_qualifiers: int = Field(
+        default=2, description="Maximum number of qualifiers"
+    )
+    validation_max_links: int = Field(default=3, description="Maximum number of links")
+    validation_max_impact_area: int = Field(
+        default=3, description="Maximum number of impact areas"
+    )
+
     # Observability
     log_level: str = Field(default="INFO", description="Logging level")
+
+    # Configuration paths
+    object_registry_path: str = Field(
+        default="config/object_registry.yaml",
+        description="Path to object registry YAML",
+    )
+    channels_config_path: str = Field(
+        default="config/channels.yaml",
+        description="Path to channels configuration YAML",
+    )
 
     @field_validator("slack_channels", mode="before")
     @classmethod

@@ -148,7 +148,7 @@ class PostgresRepository:
         )
 
     def _row_to_event(self, row: dict[str, Any]) -> Event:
-        """Convert database row to Event.
+        """Convert database row to Event with new comprehensive structure.
 
         Args:
             row: Database row as dict
@@ -158,30 +158,53 @@ class PostgresRepository:
         """
         from uuid import UUID
 
-        from src.domain.models import EventCategory
+        from src.domain.models import (
+            ActionType,
+            ChangeType,
+            Environment,
+            EventCategory,
+            EventStatus,
+            Severity,
+            TimeSource,
+        )
 
         return Event(
+            # Identification
             event_id=UUID(row["event_id"]),
-            version=row["version"],
             message_id=row["message_id"],
-            source_msg_event_idx=row["source_msg_event_idx"],
-            dedup_key=row["dedup_key"],
-            event_date=row["event_date"],  # Already datetime from PostgreSQL
-            event_end=row.get("event_end"),  # Already datetime or None
-            category=EventCategory(row["category"])
-            if row["category"]
-            else EventCategory.UNKNOWN,
-            title=row["title"] or "",
-            summary=row["summary"] or "",
-            impact_area=row.get("impact_area") or [],  # Already parsed list from JSONB
-            tags=row.get("tags") or [],  # Already parsed list from JSONB
-            links=row.get("links") or [],  # Already parsed list from JSONB
-            anchors=row.get("anchors") or [],  # Already parsed list from JSONB
-            confidence=row["confidence"] or 0.0,
             source_channels=row.get("source_channels")
-            or [],  # Already parsed list from JSONB
-            ingested_at=row["ingested_at"]
-            or row["event_date"],  # Fallback to event_date
+            or [],  # Already parsed from JSONB
+            extracted_at=row["extracted_at"],  # Already datetime from PostgreSQL
+            # Title slots
+            action=ActionType(row["action"]),
+            object_id=row.get("object_id"),
+            object_name_raw=row["object_name_raw"],
+            qualifiers=row.get("qualifiers") or [],  # Already parsed from JSONB
+            stroke=row.get("stroke"),
+            anchor=row.get("anchor"),
+            # Classification
+            category=EventCategory(row["category"]),
+            status=EventStatus(row["status"]),
+            change_type=ChangeType(row["change_type"]),
+            environment=Environment(row["environment"]),
+            severity=Severity(row["severity"]) if row.get("severity") else None,
+            # Time fields
+            planned_start=row.get("planned_start"),  # Already datetime or None
+            planned_end=row.get("planned_end"),
+            actual_start=row.get("actual_start"),
+            actual_end=row.get("actual_end"),
+            time_source=TimeSource(row["time_source"]),
+            time_confidence=row.get("time_confidence", 0.0),
+            # Content
+            summary=row.get("summary") or "",
+            impact_area=row.get("impact_area") or [],  # Already parsed from JSONB
+            links=row.get("links") or [],  # Already parsed from JSONB
+            anchors=row.get("anchors") or [],  # Already parsed from JSONB
+            # Metadata
+            confidence=row.get("confidence", 0.0),
+            importance=row.get("importance", 0),
+            cluster_key=row.get("cluster_key") or "",
+            dedup_key=row.get("dedup_key") or "",
         )
 
     def save_messages(self, messages: list[SlackMessage]) -> int:
@@ -455,43 +478,73 @@ class PostgresRepository:
                 for event in events:
                     # Check if dedup_key exists
                     cur.execute(
-                        "SELECT version FROM events WHERE dedup_key = %s",
+                        "SELECT event_id FROM events WHERE dedup_key = %s",
                         (event.dedup_key,),
                     )
                     existing = cur.fetchone()
 
                     if existing:
-                        # Update with incremented version
+                        # Update existing event
                         cur.execute(
                             """
                             UPDATE events SET
-                                version = %s,
-                                title = %s,
-                                summary = %s,
+                                message_id = %s,
+                                source_channels = %s,
+                                extracted_at = %s,
+                                action = %s,
+                                object_id = %s,
+                                object_name_raw = %s,
+                                qualifiers = %s,
+                                stroke = %s,
+                                anchor = %s,
                                 category = %s,
-                                event_date = %s,
-                                event_end = %s,
+                                status = %s,
+                                change_type = %s,
+                                environment = %s,
+                                severity = %s,
+                                planned_start = %s,
+                                planned_end = %s,
+                                actual_start = %s,
+                                actual_end = %s,
+                                time_source = %s,
+                                time_confidence = %s,
+                                summary = %s,
                                 impact_area = %s,
-                                tags = %s,
                                 links = %s,
                                 anchors = %s,
                                 confidence = %s,
-                                source_channels = %s
+                                importance = %s,
+                                cluster_key = %s
                             WHERE dedup_key = %s
                             """,
                             (
-                                event.version,
-                                event.title,
-                                event.summary,
+                                event.message_id,
+                                json.dumps(event.source_channels),
+                                event.extracted_at,
+                                event.action.value,
+                                event.object_id,
+                                event.object_name_raw,
+                                json.dumps(event.qualifiers),
+                                event.stroke,
+                                event.anchor,
                                 event.category.value,
-                                event.event_date,
-                                event.event_end,
+                                event.status.value,
+                                event.change_type.value,
+                                event.environment.value,
+                                event.severity.value if event.severity else None,
+                                event.planned_start,
+                                event.planned_end,
+                                event.actual_start,
+                                event.actual_end,
+                                event.time_source.value,
+                                event.time_confidence,
+                                event.summary,
                                 json.dumps(event.impact_area),
-                                json.dumps(event.tags),
                                 json.dumps(event.links),
                                 json.dumps(event.anchors),
                                 event.confidence,
-                                json.dumps(event.source_channels),
+                                event.importance,
+                                event.cluster_key,
                                 event.dedup_key,
                             ),
                         )
@@ -500,32 +553,49 @@ class PostgresRepository:
                         cur.execute(
                             """
                             INSERT INTO events (
-                                event_id, version, message_id, source_msg_event_idx,
-                                dedup_key, event_date, event_end, category, title,
-                                summary, impact_area, tags, links, anchors,
-                                confidence, source_channels, ingested_at
+                                event_id, message_id, source_channels, extracted_at,
+                                action, object_id, object_name_raw, qualifiers, stroke, anchor,
+                                category, status, change_type, environment, severity,
+                                planned_start, planned_end, actual_start, actual_end,
+                                time_source, time_confidence,
+                                summary, impact_area, links, anchors,
+                                confidence, importance, cluster_key, dedup_key
                             ) VALUES (
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s
                             )
                             """,
                             (
                                 str(event.event_id),
-                                event.version,
                                 event.message_id,
-                                event.source_msg_event_idx,
-                                event.dedup_key,
-                                event.event_date,
-                                event.event_end,
+                                json.dumps(event.source_channels),
+                                event.extracted_at,
+                                event.action.value,
+                                event.object_id,
+                                event.object_name_raw,
+                                json.dumps(event.qualifiers),
+                                event.stroke,
+                                event.anchor,
                                 event.category.value,
-                                event.title,
+                                event.status.value,
+                                event.change_type.value,
+                                event.environment.value,
+                                event.severity.value if event.severity else None,
+                                event.planned_start,
+                                event.planned_end,
+                                event.actual_start,
+                                event.actual_end,
+                                event.time_source.value,
+                                event.time_confidence,
                                 event.summary,
                                 json.dumps(event.impact_area),
-                                json.dumps(event.tags),
                                 json.dumps(event.links),
                                 json.dumps(event.anchors),
                                 event.confidence,
-                                json.dumps(event.source_channels),
-                                event.ingested_at,
+                                event.importance,
+                                event.cluster_key,
+                                event.dedup_key,
                             ),
                         )
                 conn.commit()
@@ -549,8 +619,9 @@ class PostgresRepository:
                 cur.execute(
                     """
                     SELECT * FROM events
-                    WHERE event_date >= %s AND event_date <= %s
-                    ORDER BY event_date DESC
+                    WHERE COALESCE(actual_start, actual_end, planned_start, planned_end) >= %s
+                      AND COALESCE(actual_start, actual_end, planned_start, planned_end) <= %s
+                    ORDER BY COALESCE(actual_start, actual_end, planned_start, planned_end) DESC
                     """,
                     (start_dt, end_dt),
                 )

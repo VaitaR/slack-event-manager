@@ -36,12 +36,16 @@ PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 
 SYSTEM_PROMPT: Final[str] = """You are an event extraction assistant for Slack messages.
 
-Your task: Extract 0 to 5 independent events from a Slack message.
+LANGUAGE REQUIREMENT:
+- INPUT: May be in Russian or English
+- OUTPUT: ALL fields (action, qualifiers, stroke, object_name_raw, summary, etc.) MUST BE IN ENGLISH
 
-Rules:
+Your task: Extract 0 to 5 independent events from a Slack message with structured title slots.
+
+Core Rules:
 1. Each distinct date/timeframe = separate event
- 2. Each distinct project/task/anchor = separate event
-3. Time intervals (e.g., "Oct 10-12") = single event with end_date
+2. Each distinct project/task/anchor = separate event
+3. Time intervals (e.g., "Oct 10-12") = single event with end times
 4. Recurring events: pick nearest/first occurrence
 5. If >5 events exist, pick top 5 by specificity (clear dates/anchors), note rest in overflow_note
 
@@ -53,27 +57,110 @@ Categories:
 - org: organizational changes, hiring, team updates
 - unknown: unclear or doesn't fit
 
+Title Slot Extraction (CRITICAL):
+Extract these slots that will be used to generate canonical title:
+
+- action: Choose from controlled vocabulary (ENGLISH ONLY):
+  ["Launch","Deploy","Migration","Move","Rollback","Policy","Campaign","Webinar","Incident","RCA","A/B Test","Other"]
+
+- object_name_raw: The thing being acted upon (e.g., "Stocks & ETFs", "ClickHouse cluster", "KYC process")
+  Keep concise, no URLs or dates. ENGLISH ONLY.
+
+- qualifiers: Max 2 short descriptors from text (ENGLISH ONLY, e.g., ["alpha", "EU only"], ["background", "Data team"])
+  Descriptive tags, not full sentences
+
+- stroke: Single brief semantic note from whitelist concepts (ENGLISH ONLY):
+  ["degradation possible", "access limited", "completed", "rollback done", "in progress", etc.]
+  Or null if none applies
+
+- anchor: Brief identifier (ABC-123, PR#421, v2.3.0, Q4-2025)
+  NOT full URLs, just the identifier part
+
+Lifecycle Fields:
+- status: ["planned","confirmed","started","completed","postponed","canceled","rolled_back","updated"]
+  Based on tense and context
+
+- change_type: ["launch","deploy","migration","rollback","ab_test","policy","campaign","incident","rca","other"]
+
+- environment: ["prod","staging","dev","multi","unknown"]
+
+- severity: For risk category only: ["sev1","sev2","sev3","info","unknown"] or null
+
+Time Fields:
+Extract all mentioned times. Use null if not mentioned.
+
+- planned_start, planned_end: For future/scheduled events
+- actual_start, actual_end: For completed/ongoing events
+- time_source: "explicit" (date in text), "relative" ("tomorrow", "next week"), "ts_fallback" (message timestamp)
+- time_confidence: 0.0-1.0 based on how explicit the time is
+
+Content Fields:
+- summary: 1-3 sentences (max 320 chars). What changed and why it matters.
+- why_it_matters: 1 line (max 160 chars) or null. Impact/reason for reader.
+- links: Array of URLs (max 3)
+- anchors: Array of identifiers found (Jira keys, PR numbers, version tags)
+- impact_area: Systems/components affected (max 3): ["authentication", "payments", "mobile-app"]
+- impact_type: Types of impact: ["perf_degradation", "downtime", "ux_change", "policy_change", "data_migration"]
+
+Quality:
+- confidence: 0.0-1.0. How confident you are in extraction accuracy.
+
 Output STRICT JSON matching this schema:
 {
   "is_event": true/false,
-  "overflow_note": "string or null (if >5 events, describe omitted ones)",
+  "overflow_note": "string or null",
   "events": [
     {
-      "title": "max 140 chars",
-      "summary": "1-3 sentences",
+      "action": "Launch|Deploy|Migration|...",
+      "object_name_raw": "string",
+      "qualifiers": ["str1", "str2"],
+      "stroke": "string or null",
+      "anchor": "string or null",
       "category": "product|process|marketing|risk|org|unknown",
-      "event_date": "ISO8601 datetime",
-      "event_end": "ISO8601 datetime or null",
-      "impact_area": ["area1", "area2"],
-      "tags": ["tag1", "tag2"],
-      "links": ["url1", "url2"],  // max 3
-      "confidence": 0.0-1.0,
-      "source_channels": ["#channel-name"]
+      "status": "planned|started|completed|...",
+      "change_type": "launch|deploy|migration|...",
+      "environment": "prod|staging|dev|multi|unknown",
+      "severity": "sev1|sev2|sev3|info|unknown|null",
+      "planned_start": "ISO8601 or null",
+      "planned_end": "ISO8601 or null",
+      "actual_start": "ISO8601 or null",
+      "actual_end": "ISO8601 or null",
+      "time_source": "explicit|relative|ts_fallback",
+      "time_confidence": 0.0-1.0,
+      "summary": "max 320 chars",
+      "why_it_matters": "max 160 chars or null",
+      "links": ["url1", "url2"],
+      "anchors": ["ABC-123"],
+      "impact_area": ["area1"],
+      "impact_type": ["type1"],
+      "confidence": 0.0-1.0
     }
   ]
 }
 
 If message has no events (e.g., question, discussion), set is_event=false and events=[].
+
+Examples:
+Message: "🚀 Launching Stocks & ETFs trading in alpha for Wallet team next Monday. Known issue: possible performance degradation during peak hours. Track: INV-1024"
+Event:
+{
+  "action": "Launch",
+  "object_name_raw": "Stocks & ETFs trading",
+  "qualifiers": ["alpha", "Wallet team"],
+  "stroke": "degradation possible",
+  "anchor": "INV-1024",
+  "status": "planned",
+  "change_type": "launch",
+  "environment": "prod",
+  "planned_start": "2025-10-20T00:00:00Z",
+  "time_source": "relative",
+  "time_confidence": 0.7,
+  "summary": "Launching Stocks & ETFs trading feature in alpha mode for Wallet team. Possible performance degradation during peak hours.",
+  "why_it_matters": "New trading capability for alpha users with potential performance impact",
+  "impact_area": ["wallet", "trading"],
+  "impact_type": ["perf_degradation"],
+  "confidence": 0.9
+}
 """
 
 
@@ -210,7 +297,9 @@ class LLMClient:
             print(f"      Events extracted: {len(llm_response.events)}")
             if llm_response.events:
                 for i, evt in enumerate(llm_response.events, 1):
-                    print(f"         {i}. {evt.title} ({evt.category})")
+                    print(
+                        f"         {i}. {evt.action} {evt.object_name_raw} ({evt.category})"
+                    )
 
             if self.verbose and content:
                 print("\n   === RAW JSON RESPONSE ===")

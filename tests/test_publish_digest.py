@@ -13,7 +13,15 @@ import pytz
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
-from src.domain.models import Event, EventCategory
+from src.domain.models import (
+    ActionType,
+    ChangeType,
+    Environment,
+    Event,
+    EventCategory,
+    EventStatus,
+    TimeSource,
+)
 from src.use_cases.publish_digest import (
     build_digest_blocks,
     build_event_block,
@@ -25,10 +33,43 @@ from src.use_cases.publish_digest import (
 )
 
 
+def create_test_event(
+    category: EventCategory = EventCategory.PRODUCT,
+    confidence: float = 0.95,
+    importance: int = 75,
+    event_date: datetime | None = None,
+    title_suffix: str = "",
+) -> Event:
+    """Helper to create test event with new structure."""
+    if event_date is None:
+        event_date = datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC)
+
+    return Event(
+        event_id=uuid4(),
+        message_id=f"msg_{uuid4().hex[:8]}",
+        source_channels=["test-channel"],
+        extracted_at=datetime.utcnow(),
+        action=ActionType.LAUNCH,
+        object_name_raw=f"Test Feature {title_suffix}",
+        category=category,
+        status=EventStatus.COMPLETED,
+        change_type=ChangeType.LAUNCH,
+        environment=Environment.PROD,
+        actual_start=event_date,
+        time_source=TimeSource.EXPLICIT,
+        time_confidence=0.9,
+        summary=f"Test feature {title_suffix}",
+        confidence=confidence,
+        importance=importance,
+        cluster_key=f"cluster_{uuid4().hex[:8]}",
+        dedup_key=f"dedup_{uuid4().hex[:8]}",
+    )
+
+
 @pytest.fixture
 def mock_settings() -> Settings:
     """Create mock settings."""
-    with patch("src.config.settings.load_config_yaml") as mock_config:
+    with patch("src.config.settings.load_all_configs") as mock_config:
         mock_config.return_value = {
             "llm": {"model": "gpt-5-nano", "temperature": 1.0},
             "database": {"path": "data/test.db"},
@@ -61,71 +102,47 @@ def sample_events() -> list[Event]:
     base_date = datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC)
 
     return [
-        Event(
-            event_id=uuid4(),
-            message_id="msg1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
-            event_date=base_date,
+        create_test_event(
             category=EventCategory.PRODUCT,
-            title="Product Release v2.0",
-            summary="Major product release with new features",
             confidence=0.95,
+            importance=80,
+            event_date=base_date,
+            title_suffix="v2.0",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
-            event_date=base_date + timedelta(hours=1),
+        create_test_event(
             category=EventCategory.RISK,
-            title="Security Incident",
-            summary="Critical security issue detected",
             confidence=0.85,
+            importance=85,
+            event_date=base_date + timedelta(hours=1),
+            title_suffix="Security",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg3",
-            source_msg_event_idx=0,
-            dedup_key="key3",
-            event_date=base_date + timedelta(hours=2),
+        create_test_event(
             category=EventCategory.PROCESS,
-            title="Process Update",
-            summary="Updated workflow process",
             confidence=0.75,
+            importance=70,
+            event_date=base_date + timedelta(hours=2),
+            title_suffix="Process",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg4",
-            source_msg_event_idx=0,
-            dedup_key="key4",
-            event_date=base_date + timedelta(hours=3),
+        create_test_event(
             category=EventCategory.MARKETING,
-            title="Campaign Launch",
-            summary="Marketing campaign started",
             confidence=0.65,
+            importance=65,
+            event_date=base_date + timedelta(hours=3),
+            title_suffix="Campaign",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg5",
-            source_msg_event_idx=0,
-            dedup_key="key5",
-            event_date=base_date + timedelta(hours=4),
+        create_test_event(
             category=EventCategory.ORG,
-            title="Team Restructure",
-            summary="Organizational changes",
             confidence=0.55,
+            importance=55,
+            event_date=base_date + timedelta(hours=4),
+            title_suffix="Restructure",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg6",
-            source_msg_event_idx=0,
-            dedup_key="key6",
-            event_date=base_date + timedelta(hours=5),
+        create_test_event(
             category=EventCategory.UNKNOWN,
-            title="Unknown Event",
-            summary="Unclear event type",
             confidence=0.45,
+            importance=45,
+            event_date=base_date + timedelta(hours=5),
+            title_suffix="Unknown",
         ),
     ]
 
@@ -164,7 +181,21 @@ def test_sort_events_for_digest_by_date(sample_events: list[Event]) -> None:
 
     # Assert
     for i in range(len(sorted_events) - 1):
-        assert sorted_events[i].event_date <= sorted_events[i + 1].event_date
+        time_i = (
+            sorted_events[i].actual_start
+            or sorted_events[i].actual_end
+            or sorted_events[i].planned_start
+            or sorted_events[i].planned_end
+            or sorted_events[i].extracted_at
+        )
+        time_next = (
+            sorted_events[i + 1].actual_start
+            or sorted_events[i + 1].actual_end
+            or sorted_events[i + 1].planned_start
+            or sorted_events[i + 1].planned_end
+            or sorted_events[i + 1].extracted_at
+        )
+        assert time_i <= time_next
 
 
 def test_sort_events_for_digest_by_category(sample_events: list[Event]) -> None:
@@ -172,37 +203,22 @@ def test_sort_events_for_digest_by_category(sample_events: list[Event]) -> None:
     # Arrange
     base_date = datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC)
     same_date_events = [
-        Event(
-            event_id=uuid4(),
-            message_id="msg1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.MARKETING,
-            title="Marketing",
-            summary="Test",
+            title_suffix="Marketing",
             confidence=0.8,
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.PRODUCT,
-            title="Product",
-            summary="Test",
+            title_suffix="Product",
             confidence=0.8,
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg3",
-            source_msg_event_idx=0,
-            dedup_key="key3",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.RISK,
-            title="Risk",
-            summary="Test",
+            title_suffix="Risk",
             confidence=0.8,
         ),
     ]
@@ -217,56 +233,43 @@ def test_sort_events_for_digest_by_category(sample_events: list[Event]) -> None:
 
 
 def test_sort_events_for_digest_by_confidence(sample_events: list[Event]) -> None:
-    """Test sorting events by confidence when date and category are same."""
+    """Test sorting events by importance when date and category are same."""
     # Arrange
     base_date = datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC)
     same_category_events = [
-        Event(
-            event_id=uuid4(),
-            message_id="msg1",
-            source_msg_event_idx=0,
-            dedup_key="key1",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.PRODUCT,
-            title="Low confidence",
-            summary="Test",
+            title_suffix="Low",
             confidence=0.6,
+            importance=60,
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg2",
-            source_msg_event_idx=0,
-            dedup_key="key2",
+        create_test_event(
             event_date=base_date,
             category=EventCategory.PRODUCT,
-            title="High confidence",
-            summary="Test",
+            title_suffix="High",
             confidence=0.9,
+            importance=90,
         ),
     ]
 
     # Act
     sorted_events = sort_events_for_digest(same_category_events)
 
-    # Assert - higher confidence first
-    assert sorted_events[0].confidence == 0.9
-    assert sorted_events[1].confidence == 0.6
+    # Assert - higher importance first
+    assert sorted_events[0].importance == 90
+    assert sorted_events[1].importance == 60
 
 
 def test_build_event_block() -> None:
     """Test building event block with compact format."""
     # Arrange
-    event = Event(
-        event_id=uuid4(),
-        message_id="msg1",
-        source_msg_event_idx=0,
-        dedup_key="key1",
-        event_date=datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC),
+    event = create_test_event(
         category=EventCategory.PRODUCT,
-        title="Test Event",
-        summary="This is a test event",
         confidence=0.85,
-        links=["https://example.com"],
+        importance=75,
+        event_date=datetime(2025, 10, 13, 10, 0, 0, tzinfo=pytz.UTC),
+        title_suffix="Test",
     )
 
     # Act
@@ -277,8 +280,7 @@ def test_build_event_block() -> None:
     assert "text" in block
     assert block["text"]["type"] == "mrkdwn"
     assert "🚀" in block["text"]["text"]  # Product category emoji
-    assert "Test Event" in block["text"]["text"]
-    assert block["text"]["text"] == "🚀 Test Event"  # Exact format
+    assert "Launch: Test Feature Test" in block["text"]["text"]
 
 
 def test_build_digest_blocks_with_events(sample_events: list[Event]) -> None:
@@ -292,7 +294,7 @@ def test_build_digest_blocks_with_events(sample_events: list[Event]) -> None:
     # Assert
     assert len(blocks) > 0
     assert blocks[0]["type"] == "header"
-    assert "События 13.10.2025" in blocks[0]["text"]["text"]
+    assert "Events 13.10.2025" in blocks[0]["text"]["text"]
     assert any(block["type"] == "divider" for block in blocks)
     assert any(block["type"] == "context" for block in blocks)
 
@@ -308,7 +310,7 @@ def test_build_digest_blocks_empty() -> None:
     # Assert
     assert len(blocks) > 0
     assert blocks[0]["type"] == "header"
-    assert any("Нет новых событий" in str(block) for block in blocks)
+    assert any("No new events" in str(block) for block in blocks)
 
 
 def test_chunk_blocks_under_limit() -> None:

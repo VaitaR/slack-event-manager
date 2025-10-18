@@ -12,6 +12,10 @@ from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import DigestResult, Event, EventCategory
+from src.services.title_renderer import TitleRenderer
+
+# Initialize title renderer
+_title_renderer = TitleRenderer()
 
 
 def format_event_date(event_date: datetime, tz_name: str = "Europe/Amsterdam") -> str:
@@ -88,16 +92,40 @@ def build_event_block(event: Event, tz_name: str) -> dict[str, Any]:
 
     emoji = category_emoji.get(event.category, "•")
 
-    # Format date
-    date_str = format_event_date(event.event_date, tz_name)
-    if event.event_end:
-        end_str = format_event_date(event.event_end, tz_name)
-        date_str = f"{date_str} - {end_str}"
+    # Render title from slots using TitleRenderer
+    # Use severity-first format for risk events, otherwise canonical
+    format_style = (
+        "severity_first" if event.category == EventCategory.RISK else "canonical"
+    )
+    title = _title_renderer.render_canonical_title(event, format_style=format_style)
 
     # Compact format: only category emoji + title
-    text = f"{emoji} {event.title}"
+    text = f"{emoji} {title}"
 
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+
+
+def _get_event_primary_time(event: Event) -> datetime:
+    """Get primary time for event (prefer actual, fallback to planned).
+
+    Args:
+        event: Event to get time for
+
+    Returns:
+        Primary datetime
+    """
+    # Prefer actual times (started/completed events)
+    if event.actual_start:
+        return event.actual_start
+    if event.actual_end:
+        return event.actual_end
+    # Fallback to planned times
+    if event.planned_start:
+        return event.planned_start
+    if event.planned_end:
+        return event.planned_end
+    # Last resort: use extraction time
+    return event.extracted_at
 
 
 def sort_events_for_digest(
@@ -105,9 +133,9 @@ def sort_events_for_digest(
 ) -> list[Event]:
     """Sort events for digest display.
 
-    Primary: event_date ASC
+    Primary: primary_time (actual > planned) ASC
     Secondary: category priority
-    Tertiary: confidence DESC
+    Tertiary: importance DESC (changed from confidence)
 
     Args:
         events: List of events
@@ -133,9 +161,9 @@ def sort_events_for_digest(
     return sorted(
         events,
         key=lambda e: (
-            e.event_date,
+            _get_event_primary_time(e),
             category_priorities.get(e.category.value, 99),
-            -e.confidence,
+            -e.importance,  # Higher importance first
         ),
     )
 
@@ -164,7 +192,7 @@ def build_digest_blocks(
     blocks.append(
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"События {date_str}"},
+            "text": {"type": "plain_text", "text": f"Events {date_str}"},
         }
     )
 
@@ -175,7 +203,7 @@ def build_digest_blocks(
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "_Нет новых событий._"},
+                "text": {"type": "mrkdwn", "text": "_No new events._"},
             }
         )
     else:
@@ -191,7 +219,7 @@ def build_digest_blocks(
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": f"Всего событий: *{len(events)}*",
+                        "text": f"Total events: *{len(events)}*",
                     }
                 ],
             }

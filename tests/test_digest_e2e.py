@@ -14,11 +14,48 @@ import pytz
 from src.adapters.slack_client import SlackClient
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import get_settings
-from src.domain.models import Event, EventCategory
+from src.domain.models import (
+    ActionType,
+    ChangeType,
+    Environment,
+    Event,
+    EventCategory,
+    EventStatus,
+    TimeSource,
+)
 from src.use_cases.publish_digest import publish_digest_use_case
 
 # Test channel ID
 TEST_CHANNEL = "C06B5NJLY4B"
+
+
+def create_e2e_event(
+    category: EventCategory,
+    confidence: float,
+    importance: int,
+    event_date: datetime,
+    title_suffix: str,
+) -> Event:
+    """Helper to create E2E test event with new structure."""
+    return Event(
+        event_id=uuid4(),
+        message_id=f"msg_e2e_{uuid4().hex[:8]}",
+        source_channels=["e2e-test"],
+        action=ActionType.LAUNCH,
+        object_name_raw=f"E2E Test: {title_suffix}",
+        category=category,
+        status=EventStatus.COMPLETED,
+        change_type=ChangeType.LAUNCH,
+        environment=Environment.PROD,
+        actual_start=event_date,
+        time_source=TimeSource.EXPLICIT,
+        time_confidence=0.9,
+        summary=f"Test event for digest E2E validation - {category.value}",
+        confidence=confidence,
+        importance=importance,
+        cluster_key=f"e2e_cluster_{uuid4().hex[:8]}",
+        dedup_key=f"e2e_dedup_{uuid4().hex[:8]}",
+    )
 
 
 @pytest.fixture
@@ -74,83 +111,48 @@ def test_repository(tmp_path: Path) -> SQLiteRepository:
     base_date = datetime.utcnow().replace(tzinfo=pytz.UTC) - timedelta(hours=24)
 
     events = [
-        Event(
-            event_id=uuid4(),
-            message_id="msg_e2e_1",
-            source_msg_event_idx=0,
-            dedup_key="e2e_key_1",
-            event_date=base_date,
+        create_e2e_event(
             category=EventCategory.PRODUCT,
-            title="E2E Test: Product Release v3.0",
-            summary="Test event for digest E2E validation - Product category",
             confidence=0.95,
-            links=["https://github.com/test/release"],
-            tags=["e2e-test", "product"],
+            importance=85,
+            event_date=base_date,
+            title_suffix="Product Release v3.0",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg_e2e_2",
-            source_msg_event_idx=0,
-            dedup_key="e2e_key_2",
-            event_date=base_date + timedelta(hours=2),
+        create_e2e_event(
             category=EventCategory.RISK,
-            title="E2E Test: Security Alert",
-            summary="Test event for digest E2E validation - Risk category",
             confidence=0.88,
-            links=["https://security.test/alert"],
-            tags=["e2e-test", "security"],
+            importance=80,
+            event_date=base_date + timedelta(hours=2),
+            title_suffix="Security Alert",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg_e2e_3",
-            source_msg_event_idx=0,
-            dedup_key="e2e_key_3",
-            event_date=base_date + timedelta(hours=4),
+        create_e2e_event(
             category=EventCategory.PROCESS,
-            title="E2E Test: Process Update",
-            summary="Test event for digest E2E validation - Process category",
             confidence=0.82,
-            links=["https://docs.test/process"],
-            tags=["e2e-test", "process"],
+            importance=75,
+            event_date=base_date + timedelta(hours=4),
+            title_suffix="Process Update",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg_e2e_4",
-            source_msg_event_idx=0,
-            dedup_key="e2e_key_4",
-            event_date=base_date + timedelta(hours=6),
+        create_e2e_event(
             category=EventCategory.MARKETING,
-            title="E2E Test: Campaign Launch",
-            summary="Test event for digest E2E validation - Marketing category",
             confidence=0.75,
-            links=["https://marketing.test/campaign"],
-            tags=["e2e-test", "marketing"],
+            importance=70,
+            event_date=base_date + timedelta(hours=6),
+            title_suffix="Campaign Launch",
         ),
-        Event(
-            event_id=uuid4(),
-            message_id="msg_e2e_5",
-            source_msg_event_idx=0,
-            dedup_key="e2e_key_5",
-            event_date=base_date + timedelta(hours=8),
+        create_e2e_event(
             category=EventCategory.ORG,
-            title="E2E Test: Team Change",
-            summary="Test event for digest E2E validation - Org category",
             confidence=0.68,
-            links=["https://hr.test/announcement"],
-            tags=["e2e-test", "org"],
+            importance=60,
+            event_date=base_date + timedelta(hours=8),
+            title_suffix="Team Change",
         ),
         # Low confidence event (should be filtered out with default settings)
-        Event(
-            event_id=uuid4(),
-            message_id="msg_e2e_6",
-            source_msg_event_idx=0,
-            dedup_key="e2e_key_6",
-            event_date=base_date + timedelta(hours=10),
+        create_e2e_event(
             category=EventCategory.UNKNOWN,
-            title="E2E Test: Low Confidence Event",
-            summary="This should be filtered out with min_confidence=0.7",
             confidence=0.45,
-            tags=["e2e-test", "low-confidence"],
+            importance=40,
+            event_date=base_date + timedelta(hours=10),
+            title_suffix="Low Confidence Event",
         ),
     ]
 
