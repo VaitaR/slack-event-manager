@@ -167,6 +167,10 @@ class ChannelConfig(BaseModel):
     whitelist_keywords: list[str] = Field(
         default_factory=list, description="Keywords that boost score"
     )
+    trusted_bots: list[str] = Field(
+        default_factory=list,
+        description="List of bot user IDs that should be treated as trusted",
+    )
     keyword_weight: float = Field(default=10.0, description="Weight for keywords")
     mention_weight: float = Field(default=8.0, description="Weight for @channel/@here")
     reply_weight: float = Field(default=5.0, description="Weight for replies")
