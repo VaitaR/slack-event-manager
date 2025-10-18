@@ -149,9 +149,9 @@ class TestTelegramRawMessagesTable:
             "ingested_at",
         }
 
-        assert expected_columns.issubset(
-            columns
-        ), f"Missing columns: {expected_columns - columns}"
+        assert expected_columns.issubset(columns), (
+            f"Missing columns: {expected_columns - columns}"
+        )
 
 
 class TestSaveTelegramMessages:

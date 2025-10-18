@@ -96,9 +96,9 @@ class TestLLMPromptLoading:
         # Use absolute path from project root
         project_root = Path(__file__).parent.parent
         prompt_path = project_root / "config" / "prompts" / "telegram.txt"
-        assert (
-            prompt_path.exists()
-        ), f"Telegram prompt file should exist at {prompt_path}"
+        assert prompt_path.exists(), (
+            f"Telegram prompt file should exist at {prompt_path}"
+        )
 
         content = prompt_path.read_text()
         assert len(content) > 0, "Telegram prompt should not be empty"
@@ -122,9 +122,9 @@ class TestLLMPromptLoading:
             content = prompt_path.read_text().lower()
 
             for keyword in required_keywords:
-                assert (
-                    keyword.lower() in content
-                ), f"{source} prompt should contain '{keyword}'"
+                assert keyword.lower() in content, (
+                    f"{source} prompt should contain '{keyword}'"
+                )
 
     def test_llm_client_prompt_file_overrides_template(self, tmp_path: Path) -> None:
         """Test that prompt_file parameter takes precedence over prompt_template."""
