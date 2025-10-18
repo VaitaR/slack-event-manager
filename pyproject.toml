@@ -46,6 +46,14 @@ disallow_any_decorated = false
 disallow_any_explicit = false
 disallow_subclassing_any = false
 
+# Ignore missing imports for external libraries without stubs
+[[tool.mypy.overrides]]
+module = [
+    "telethon.*",
+    "slack_sdk.*",
+]
+ignore_missing_imports = true
+
 # Relax strict mode for tests
 [[tool.mypy.overrides]]
 module = "tests.*"

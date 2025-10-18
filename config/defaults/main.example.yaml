@@ -76,3 +76,9 @@ validation:
 # Observability
 logging:
   level: INFO
+
+# Telegram Configuration (optional)
+# Uncomment and configure if using Telegram integration
+# telegram:
+#   session_path: data/telegram_session  # Path to session file (without .session extension)
+#   channels:  # Configure in config/telegram_channels.yaml instead
