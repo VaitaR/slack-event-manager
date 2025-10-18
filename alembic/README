@@ -1,0 +1,39 @@
+Generic single-database configuration for Slack Event Manager.
+
+This directory contains Alembic migrations for the PostgreSQL database schema.
+
+## Running Migrations
+
+### Development
+```bash
+# Upgrade to latest
+alembic upgrade head
+
+# Downgrade one revision
+alembic downgrade -1
+
+# Show current revision
+alembic current
+
+# Show migration history
+alembic history --verbose
+```
+
+### Docker
+Migrations run automatically via docker-entrypoint.sh when using PostgreSQL.
+
+## Creating New Migrations
+
+```bash
+# Auto-generate migration from model changes
+alembic revision --autogenerate -m "description"
+
+# Create empty migration
+alembic revision -m "description"
+```
+
+## Configuration
+
+Database connection details are loaded from Settings (config.yaml + .env).
+See alembic/env.py for configuration logic.
+

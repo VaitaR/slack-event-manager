@@ -445,6 +445,31 @@ class Event(BaseModel):
             raise ValueError(f"Maximum {MAX_LINKS} links allowed")
         return v
 
+    @property
+    def event_date(self) -> datetime | None:
+        """Get primary event date for backward compatibility.
+
+        Returns first non-None value from: actual_start, actual_end, planned_start, planned_end.
+        """
+        return (
+            self.actual_start
+            or self.actual_end
+            or self.planned_start
+            or self.planned_end
+        )
+
+    @property
+    def title(self) -> str:
+        """Generate title from slots for backward compatibility.
+
+        Returns:
+            Rendered title string
+        """
+        from src.services.title_renderer import TitleRenderer
+
+        renderer = TitleRenderer()
+        return renderer.render_canonical_title(self)
+
 
 class LLMEvent(BaseModel):
     """Single event from LLM extraction (before domain conversion).

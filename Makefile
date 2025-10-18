@@ -49,6 +49,20 @@ test-cov: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
 	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy pytest --cov=src --cov-report=term-missing --cov-report=html && echo "$(GREEN)✓ Tests passed with coverage$(NC)" || (echo "$(RED)✗ Tests failed$(NC)" && exit 1)
 
+test-postgres: ## Run PostgreSQL tests (requires PostgreSQL running and TEST_POSTGRES=1)
+	@echo "$(BLUE)Running PostgreSQL tests...$(NC)"
+	@if [ -z "$$POSTGRES_PASSWORD" ]; then \
+		echo "$(RED)✗ POSTGRES_PASSWORD not set$(NC)"; \
+		echo "$(YELLOW)Set POSTGRES_PASSWORD and TEST_POSTGRES=1 to run PostgreSQL tests$(NC)"; \
+		exit 1; \
+	fi
+	@if [ "$$TEST_POSTGRES" != "1" ]; then \
+		echo "$(RED)✗ TEST_POSTGRES not set to 1$(NC)"; \
+		echo "$(YELLOW)Set TEST_POSTGRES=1 to run PostgreSQL tests$(NC)"; \
+		exit 1; \
+	fi
+	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy pytest tests/test_postgres_repository.py -v && echo "$(GREEN)✓ PostgreSQL tests passed$(NC)" || (echo "$(RED)✗ PostgreSQL tests failed$(NC)" && exit 1)
+
 ci: format-check lint typecheck test ## Run all CI checks (format, lint, typecheck, test)
 	@echo "$(GREEN)✓ All CI checks passed!$(NC)"
 

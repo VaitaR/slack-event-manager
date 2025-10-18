@@ -6,7 +6,6 @@ This app provides a visual interface for the Slack Event Manager pipeline,
 allowing users to configure settings, run the pipeline, and visualize results.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -17,32 +16,30 @@ import streamlit as st
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-import sqlite3
+from datetime import UTC
 
 from adapters.llm_client import LLMClient
+from adapters.repository_factory import create_repository
 from adapters.slack_client import SlackClient
-from adapters.sqlite_repository import SQLiteRepository
 from config.settings import get_settings
 from use_cases.build_candidates import build_candidates_use_case
 from use_cases.deduplicate_events import deduplicate_events_use_case
 from use_cases.extract_events import extract_events_use_case
 from use_cases.ingest_messages import process_slack_message
 
+# UI Constants
+MAX_MESSAGE_LENGTH = 150
+MAX_CANDIDATE_TEXT_LENGTH = 200
 
-def get_readonly_connection(db_path: str) -> sqlite3.Connection:
-    """Get read-only SQLite connection.
 
-    Args:
-        db_path: Path to database file
+def get_repository():
+    """Get repository instance based on settings.
 
     Returns:
-        SQLite connection in read-only mode
+        Repository instance (SQLite or PostgreSQL)
     """
-    # Open database in read-only mode using URI
-    uri = f"file:{db_path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    settings = get_settings()
+    return create_repository(settings)
 
 
 # Page configuration
@@ -121,12 +118,13 @@ def main():
         # Convert back to channel IDs
         channels = [channel_options[name] for name in selected_channel_names]
 
-        # Database path - use main production database by default
-        db_path = st.text_input(
-            "Database Path",
-            value=settings.db_path,  # Use settings.db_path (data/slack_events.db)
-            help="Path to the database (read from production by default)",
-        )
+        # Show database info
+        if settings.database_type == "postgres":
+            st.info(
+                f"🐘 PostgreSQL: {settings.postgres_user}@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+            )
+        else:
+            st.info(f"📁 SQLite: {settings.db_path}")
 
         # Run pipeline button
         run_pipeline = st.button(
@@ -135,12 +133,12 @@ def main():
 
     # Main content
     if run_pipeline:
-        run_full_pipeline(message_limit, channels, db_path)
+        run_full_pipeline(message_limit, channels)
     else:
-        show_database_inspection(db_path)
+        show_database_inspection()
 
 
-def run_full_pipeline(message_limit: int, channels: list, db_path: str):
+def run_full_pipeline(message_limit: int, channels: list):
     """Run the complete pipeline and show results."""
 
     with st.spinner("Running pipeline... This may take a few minutes."):
@@ -164,9 +162,8 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
                 verbose=False,  # Disable verbose for demo
             )
 
-            # Create database if it doesn't exist
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
-            repo = SQLiteRepository(db_path)
+            # Create repository (works for both SQLite and PostgreSQL)
+            repo = create_repository(settings)
 
             # Progress tracking
             progress_bar = st.progress(0)
@@ -274,19 +271,15 @@ def run_full_pipeline(message_limit: int, channels: list, db_path: str):
             return
 
     # Show detailed results
-    show_pipeline_results(db_path)
+    show_pipeline_results()
 
 
-def show_pipeline_results(db_path: str):
+def show_pipeline_results():
     """Show detailed results from the pipeline."""
 
     st.header("📊 Pipeline Results")
 
-    if not os.path.exists(db_path):
-        st.error("Database not found. Please run the pipeline first.")
-        return
-
-    # Database inspection using read-only connection
+    # Database inspection using repository
     try:
         # Create tabs for different views
         tab1, tab2, tab3, tab4 = st.tabs(
@@ -294,68 +287,119 @@ def show_pipeline_results(db_path: str):
         )
 
         with tab1:
-            show_messages_table(db_path)
+            show_messages_table()
 
         with tab2:
-            show_candidates_table(db_path)
+            show_candidates_table()
 
         with tab3:
-            show_events_table(db_path)
+            show_events_table()
 
         with tab4:
-            show_gantt_chart(db_path)
+            show_gantt_chart()
 
     except Exception as e:
         st.error(f"Error reading database: {str(e)}")
 
 
-def show_database_inspection(db_path: str):
+def show_database_inspection():
     """Show database inspection when pipeline hasn't been run."""
 
     st.header("🔍 Database Inspection")
 
-    if not os.path.exists(db_path):
-        st.info("No database found. Run the pipeline to generate data.")
-        return
-
     try:
-        # Use read-only mode for inspection (no schema creation needed)
-        show_pipeline_results(db_path)
+        # Use repository for inspection
+        show_pipeline_results()
     except Exception as e:
         st.error(f"Error reading database: {str(e)}")
 
 
-def show_messages_table(db_path: str):
+def show_messages_table():
     """Display messages table."""
 
     st.subheader("📨 Raw Messages")
 
     try:
-        # Query messages with new fields using read-only connection
-        conn = get_readonly_connection(db_path)
-        messages_df = pd.read_sql_query(
-            """
-            SELECT message_id, text, ts, user_real_name, user_email,
-                   total_reactions, reply_count, attachments_count, files_count,
-                   permalink, edited_ts
-            FROM raw_slack_messages
-            ORDER BY ts DESC
-        """,
-            conn,
-        )
-        conn.close()
+        # Get repository and fetch ALL messages for UI display
+        repo = get_repository()
+        settings = get_settings()
+
+        # Show which database we're using
+        if settings.database_type == "postgres":
+            st.caption(
+                f"🐘 Source: PostgreSQL ({settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database})"
+            )
+        else:
+            st.caption(f"📁 Source: SQLite ({settings.db_path})")
+
+        # Get all messages for UI display (not just unprocessed)
+        # For now, we'll fetch pending + some processed (PostgreSQL-specific query)
+        from src.adapters.postgres_repository import PostgresRepository
+        from src.adapters.sqlite_repository import SQLiteRepository
+
+        if isinstance(repo, PostgresRepository):
+            # Direct SQL for PostgreSQL to get all messages
+            with repo._get_connection() as conn:
+                with conn.cursor(
+                    cursor_factory=__import__(
+                        "psycopg2.extras", fromlist=["RealDictCursor"]
+                    ).RealDictCursor
+                ) as cur:
+                    cur.execute("""
+                        SELECT m.* FROM raw_slack_messages m
+                        ORDER BY m.ts_dt DESC
+                        LIMIT 100
+                    """)
+                    rows = cur.fetchall()
+                    messages = [repo._row_to_message(dict(row)) for row in rows]
+        elif isinstance(repo, SQLiteRepository):
+            # Direct SQL for SQLite
+            import sqlite3
+
+            conn = sqlite3.connect(settings.db_path)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM raw_slack_messages
+                ORDER BY ts_dt DESC
+                LIMIT 100
+            """)
+            rows = cur.fetchall()
+            messages = [repo._row_to_message(dict(row)) for row in rows]
+            conn.close()
+        else:
+            messages = repo.get_new_messages_for_candidates()
+
+        if not messages:
+            st.info("No messages found.")
+            return
+
+        # Convert to DataFrame
+        messages_data = []
+        for msg in messages:
+            messages_data.append(
+                {
+                    "message_id": msg.message_id,
+                    "text": msg.text[:MAX_MESSAGE_LENGTH] + "..."
+                    if len(msg.text) > MAX_MESSAGE_LENGTH
+                    else msg.text,
+                    "ts": pd.to_datetime(msg.ts, unit="s"),
+                    "user_real_name": msg.user_real_name or "",
+                    "user_email": msg.user_email or "",
+                    "total_reactions": msg.total_reactions or 0,
+                    "reply_count": msg.reply_count or 0,
+                    "attachments_count": msg.attachments_count or 0,
+                    "files_count": msg.files_count or 0,
+                    "permalink": msg.permalink or "",
+                    "edited": msg.edited_ts is not None,
+                }
+            )
+
+        messages_df = pd.DataFrame(messages_data)
 
         if messages_df.empty:
             st.info("No messages found.")
             return
-
-        # Format timestamps
-        messages_df["ts"] = pd.to_datetime(messages_df["ts"], unit="s")
-        messages_df["text"] = messages_df["text"].str.slice(0, 150) + "..."
-
-        # Format edited_ts if present
-        if "edited_ts" in messages_df.columns:
-            messages_df["edited"] = messages_df["edited_ts"].notna()
 
         st.dataframe(
             messages_df,
@@ -404,32 +448,78 @@ def show_messages_table(db_path: str):
         st.error(f"Error loading messages: {str(e)}")
 
 
-def show_candidates_table(db_path: str):
+def show_candidates_table():
     """Display candidates table."""
 
     st.subheader("🎯 Event Candidates")
 
     try:
-        # Query candidates using read-only connection
-        conn = get_readonly_connection(db_path)
-        candidates_df = pd.read_sql_query(
-            """
-            SELECT message_id, text_norm, score, status, features_json
-            FROM event_candidates
-            ORDER BY score DESC
-        """,
-            conn,
-        )
-        conn.close()
+        # Get repository and fetch ALL candidates for UI display
+        repo = get_repository()
+        settings = get_settings()
+
+        from src.adapters.postgres_repository import PostgresRepository
+        from src.adapters.sqlite_repository import SQLiteRepository
+
+        if isinstance(repo, PostgresRepository):
+            # Direct SQL for PostgreSQL to get all candidates
+            with repo._get_connection() as conn:
+                with conn.cursor(
+                    cursor_factory=__import__(
+                        "psycopg2.extras", fromlist=["RealDictCursor"]
+                    ).RealDictCursor
+                ) as cur:
+                    cur.execute("""
+                        SELECT * FROM event_candidates
+                        ORDER BY score DESC
+                        LIMIT 100
+                    """)
+                    rows = cur.fetchall()
+                    candidates = [repo._row_to_candidate(dict(row)) for row in rows]
+        elif isinstance(repo, SQLiteRepository):
+            # Direct SQL for SQLite
+            import sqlite3
+
+            conn = sqlite3.connect(settings.db_path)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM event_candidates
+                ORDER BY score DESC
+                LIMIT 100
+            """)
+            rows = cur.fetchall()
+            candidates = [repo._row_to_candidate(dict(row)) for row in rows]
+            conn.close()
+        else:
+            candidates = repo.get_candidates_for_extraction(batch_size=100)
+
+        if not candidates:
+            st.info("No candidates found.")
+            return
+
+        # Convert to DataFrame
+        candidates_data = []
+        for cand in candidates:
+            candidates_data.append(
+                {
+                    "message_id": cand.message_id,
+                    "text_norm": cand.text_norm[:MAX_CANDIDATE_TEXT_LENGTH] + "..."
+                    if len(cand.text_norm) > MAX_CANDIDATE_TEXT_LENGTH
+                    else cand.text_norm,
+                    "score": cand.score,
+                    "status": cand.status,
+                    "features_json": str(
+                        cand.features.model_dump() if cand.features else {}
+                    ),
+                }
+            )
+
+        candidates_df = pd.DataFrame(candidates_data)
 
         if candidates_df.empty:
             st.info("No candidates found.")
             return
-
-        # Format data
-        candidates_df["text_norm"] = (
-            candidates_df["text_norm"].str.slice(0, 200) + "..."
-        )
 
         st.dataframe(
             candidates_df,
@@ -451,35 +541,48 @@ def show_candidates_table(db_path: str):
         st.error(f"Error loading candidates: {str(e)}")
 
 
-def show_events_table(db_path: str):
+def show_events_table():
     """Display events table."""
 
     st.subheader("📝 Extracted Events")
 
     try:
-        # Query events using read-only connection
-        conn = get_readonly_connection(db_path)
-        events_df = pd.read_sql_query(
-            """
-            SELECT event_id, message_id,
-                   action || ' ' || object_name_raw as title,
-                   category, status,
-                   COALESCE(actual_start, actual_end, planned_start, planned_end) as event_date,
-                   confidence, importance,
-                   cluster_key, dedup_key
-            FROM events
-            ORDER BY event_date DESC
-        """,
-            conn,
-        )
-        conn.close()
+        # Get repository and fetch events
+        repo = get_repository()
+        # Get recent events (last 90 days)
+        from datetime import datetime, timedelta
+
+        start_date = datetime.now(UTC) - timedelta(days=90)
+        end_date = datetime.now(UTC) + timedelta(days=365)
+        events = repo.get_events_in_window(start_date, end_date)
+
+        if not events:
+            st.info("No events found.")
+            return
+
+        # Convert to DataFrame with new event structure
+        events_data = []
+        for evt in events:
+            events_data.append(
+                {
+                    "event_id": evt.event_id,
+                    "message_id": evt.message_id,
+                    "title": evt.title,  # Property that renders from slots
+                    "category": evt.category.value,
+                    "status": evt.status.value,
+                    "event_date": evt.event_date,  # Property that returns first non-None time
+                    "confidence": evt.confidence,
+                    "importance": evt.importance,
+                    "cluster_key": evt.cluster_key,
+                    "dedup_key": evt.dedup_key or "",
+                }
+            )
+
+        events_df = pd.DataFrame(events_data)
 
         if events_df.empty:
             st.info("No events found.")
             return
-
-        # Format dates
-        events_df["event_date"] = pd.to_datetime(events_df["event_date"])
 
         st.dataframe(
             events_df,
@@ -506,6 +609,7 @@ def show_events_table(db_path: str):
                 ),
                 "dedup_key": st.column_config.TextColumn("Dedup Key", width="small"),
             },
+            hide_index=True,
         )
 
         st.caption(f"Total events: {len(events_df)}")
@@ -514,34 +618,41 @@ def show_events_table(db_path: str):
         st.error(f"Error loading events: {str(e)}")
 
 
-def show_gantt_chart(db_path: str):
+def show_gantt_chart():
     """Display Gantt chart visualization."""
 
     st.subheader("📈 Events Timeline (Gantt Chart)")
 
     try:
-        # Query events with dates using read-only connection
-        conn = get_readonly_connection(db_path)
-        events_df = pd.read_sql_query(
-            """
-            SELECT
-                action || ' ' || object_name_raw as title,
-                category,
-                COALESCE(actual_start, actual_end, planned_start, planned_end) as event_date
-            FROM events
-            WHERE COALESCE(actual_start, actual_end, planned_start, planned_end) IS NOT NULL
-            ORDER BY event_date
-        """,
-            conn,
-        )
-        conn.close()
+        # Get repository and fetch events with dates
+        repo = get_repository()
+        from datetime import datetime, timedelta
+
+        start_date = datetime.now(UTC) - timedelta(days=90)
+        end_date = datetime.now(UTC) + timedelta(days=365)
+        events = repo.get_events_in_window(start_date, end_date)
+
+        if not events:
+            st.info("No events with dates found for timeline.")
+            return
+
+        # Convert to DataFrame - only events with dates
+        events_data = []
+        for evt in events:
+            if evt.event_date:
+                events_data.append(
+                    {
+                        "title": evt.title,  # Property that renders from slots
+                        "category": evt.category.value,
+                        "event_date": evt.event_date,  # Property that returns first non-None time
+                    }
+                )
+
+        events_df = pd.DataFrame(events_data)
 
         if events_df.empty:
             st.info("No events with dates found for timeline.")
             return
-
-        # Convert to datetime
-        events_df["event_date"] = pd.to_datetime(events_df["event_date"])
 
         # Create Gantt chart
         fig = px.timeline(

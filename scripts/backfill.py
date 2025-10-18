@@ -14,8 +14,8 @@ import pytz
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.llm_client import LLMClient
+from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import get_settings
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
@@ -77,7 +77,7 @@ def main() -> None:
     # Initialize adapters
     print("Initializing clients...")
     slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
-    repository = SQLiteRepository(db_path=settings.db_path)
+    repository = create_repository(settings)
     llm_client = LLMClient(
         api_key=settings.openai_api_key.get_secret_value(),
         model=settings.llm_model,
