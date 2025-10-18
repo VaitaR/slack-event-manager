@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Final
 
 import pytz
@@ -33,6 +34,25 @@ PREVIEW_LENGTH_PROMPT: Final[int] = 800
 
 PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
+
+
+def load_prompt_from_file(file_path: str) -> str:
+    """Load prompt template from a file.
+
+    Args:
+        file_path: Path to the prompt file
+
+    Returns:
+        Prompt content as a string
+
+    Raises:
+        FileNotFoundError: If the file doesn't exist
+    """
+    prompt_file = Path(file_path)
+    if not prompt_file.exists():
+        raise FileNotFoundError(f"Prompt file not found: {file_path}")
+    return prompt_file.read_text()
+
 
 SYSTEM_PROMPT: Final[str] = """You are an event extraction assistant for Slack messages.
 
@@ -174,6 +194,8 @@ class LLMClient:
         temperature: float | None = None,
         timeout: int = 30,
         verbose: bool = False,
+        prompt_template: str | None = None,
+        prompt_file: str | None = None,
     ) -> None:
         """Initialize LLM client.
 
@@ -183,6 +205,8 @@ class LLMClient:
             temperature: Sampling temperature (1.0 for gpt-5-nano, 0.7 for gpt-4o-mini)
             timeout: Request timeout in seconds
             verbose: If True, log full prompts and responses
+            prompt_template: Custom prompt template (optional)
+            prompt_file: Path to prompt file (takes precedence over prompt_template)
         """
         self.client = OpenAI(api_key=api_key, timeout=timeout)
         self.model = model
@@ -198,6 +222,14 @@ class LLMClient:
                     f"⚠️ Warning: gpt-5-nano only supports temperature=1.0, using {temperature} as requested"
                 )
             self.temperature = temperature
+
+        # Load prompt (priority: file > template > default)
+        if prompt_file:
+            self.system_prompt = load_prompt_from_file(prompt_file)
+        elif prompt_template:
+            self.system_prompt = prompt_template
+        else:
+            self.system_prompt = SYSTEM_PROMPT
 
         self._last_call_metadata: LLMCallMetadata | None = None
 
@@ -238,11 +270,11 @@ class LLMClient:
         print(f"      Model: {self.model}")
         print(f"      Temperature: {self.temperature}")
         print(f"      Prompt length: {len(prompt)} chars")
-        print(f"      System prompt length: {len(SYSTEM_PROMPT)} chars")
+        print(f"      System prompt length: {len(self.system_prompt)} chars")
 
         if self.verbose:
             print("\n   === SYSTEM PROMPT ===")
-            print(f"   {SYSTEM_PROMPT[:500]}...")
+            print(f"   {self.system_prompt[:500]}...")
             print("\n   === USER PROMPT ===")
             print(f"   {prompt[:PREVIEW_LENGTH_PROMPT]}...")
             if len(prompt) > PREVIEW_LENGTH_PROMPT:
@@ -255,7 +287,7 @@ class LLMClient:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=self.temperature,

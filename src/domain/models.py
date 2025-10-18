@@ -17,6 +17,42 @@ from src.domain.validation_constants import (
 )
 
 
+class MessageSource(str, Enum):
+    """Message source type."""
+
+    SLACK = "slack"
+    TELEGRAM = "telegram"
+
+
+class MessageSourceConfig(BaseModel):
+    """Configuration for a message source (Slack, Telegram, etc.).
+
+    Each source has its own configuration including channels, LLM settings,
+    and database table names.
+    """
+
+    source_id: MessageSource = Field(..., description="Message source identifier")
+    enabled: bool = Field(default=True, description="Whether source is enabled")
+    bot_token_env: str = Field(
+        default="",
+        description="Environment variable name for bot token (optional for source-specific token)",
+    )
+    raw_table: str = Field(
+        ..., description="Database table name for raw messages from this source"
+    )
+    state_table: str = Field(
+        ..., description="Database table name for ingestion state tracking"
+    )
+    prompt_file: str = Field(default="", description="Path to LLM prompt template file")
+    llm_settings: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-source LLM settings (temperature, timeout)",
+    )
+    channels: list[str] = Field(
+        default_factory=list, description="List of channel IDs to monitor"
+    )
+
+
 class CandidateStatus(str, Enum):
     """Status of event candidate processing."""
 
@@ -176,6 +212,51 @@ class SlackMessage(BaseModel):
     ingested_at: datetime = Field(
         default_factory=datetime.utcnow, description="Ingestion timestamp"
     )
+    source_id: MessageSource = Field(
+        default=MessageSource.SLACK, description="Message source (always slack)"
+    )
+
+
+class TelegramMessage(BaseModel):
+    """Raw Telegram message model (stub for future implementation)."""
+
+    message_id: str = Field(..., description="Telegram message ID")
+    channel: str = Field(..., description="Channel username or ID")
+    message_date: datetime = Field(..., description="Message date as UTC datetime")
+    sender_id: str | None = Field(default=None, description="Sender user ID")
+    sender_name: str | None = Field(default=None, description="Sender display name")
+    is_bot: bool = Field(default=False, description="Whether sender is a bot")
+    text: str = Field(default="", description="Raw message text")
+    text_norm: str = Field(default="", description="Normalized text")
+    blocks_text: str = Field(
+        default="", description="Formatted text (for scoring compatibility)"
+    )
+    forward_from_channel: str | None = Field(
+        default=None, description="Original channel if forwarded"
+    )
+    forward_from_message_id: str | None = Field(
+        default=None, description="Original message ID if forwarded"
+    )
+    media_type: str | None = Field(
+        default=None, description="Media type (photo, video, document, etc.)"
+    )
+    links_raw: list[str] = Field(default_factory=list, description="Raw URLs")
+    links_norm: list[str] = Field(default_factory=list, description="Normalized URLs")
+    anchors: list[str] = Field(default_factory=list, description="Extracted anchors")
+    views: int = Field(default=0, description="View count")
+    reply_count: int = Field(default=0, description="Reply/comment count")
+    reactions: dict[str, int] = Field(default_factory=dict, description="Reactions")
+    ingested_at: datetime = Field(
+        default_factory=datetime.utcnow, description="Ingestion timestamp"
+    )
+    source_id: MessageSource = Field(
+        default=MessageSource.TELEGRAM, description="Message source (always telegram)"
+    )
+
+    @property
+    def ts_dt(self) -> datetime:
+        """Alias for message_date for compatibility with SlackMessage."""
+        return self.message_date
 
 
 class NormalizedMessage(BaseModel):
@@ -214,6 +295,9 @@ class EventCandidate(BaseModel):
     score: float
     status: CandidateStatus = CandidateStatus.NEW
     features: ScoringFeatures
+    source_id: MessageSource = Field(
+        default=MessageSource.SLACK, description="Message source"
+    )
 
 
 class EventRelation(BaseModel):
@@ -330,6 +414,11 @@ class Event(BaseModel):
     )
     relations: list[EventRelation] = Field(
         default_factory=list, description="Relationships to other events"
+    )
+
+    # 3.8 Source Tracking
+    source_id: MessageSource = Field(
+        default=MessageSource.SLACK, description="Message source (slack, telegram)"
     )
 
     @field_validator("qualifiers")

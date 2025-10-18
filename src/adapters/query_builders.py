@@ -56,6 +56,10 @@ class EventQueryCriteria:
     source_channels: list[str] | None = None
     """Filter by source channel names (OR logic)"""
 
+    # Source filters
+    source_id: str | None = None
+    """Filter by message source (slack, telegram, etc.)"""
+
     # Message filters
     message_ids: list[str] | None = None
     """Filter by specific message IDs (OR logic)"""
@@ -145,6 +149,11 @@ class EventQueryCriteria:
                 channel_conditions.append("source_channels LIKE ?")
                 params.append(f'%"{channel}"%')
             conditions.append(f"({' OR '.join(channel_conditions)})")
+
+        # Source filter
+        if self.source_id:
+            conditions.append("source_id = ?")
+            params.append(self.source_id)
 
         # Message ID filter
         if self.message_ids:

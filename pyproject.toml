@@ -45,6 +45,13 @@ disallow_any_expr = false
 disallow_any_decorated = false
 disallow_any_explicit = false
 disallow_subclassing_any = false
+
+# Relax strict mode for tests
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_any_generics = false
+warn_return_any = false
 warn_no_return = false
 
 [[tool.mypy.overrides]]

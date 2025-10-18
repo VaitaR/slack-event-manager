@@ -73,7 +73,7 @@ def mock_settings() -> Settings:
         mock_config.return_value = {
             "llm": {"model": "gpt-5-nano", "temperature": 1.0},
             "database": {"path": "data/test.db"},
-            "slack": {"digest_channel_id": "C06B5NJLY4B"},
+            "slack": {"digest_channel_id": "C09LS9V0RRV"},
             "processing": {"tz_default": "Europe/Amsterdam"},
             "digest": {
                 "max_events": 10,
