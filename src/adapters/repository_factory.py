@@ -3,6 +3,8 @@
 Supports SQLite (development) and PostgreSQL (production).
 """
 
+from typing import cast
+
 from src.adapters.postgres_repository import PostgresRepository
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
@@ -24,7 +26,7 @@ def create_repository(settings: Settings) -> RepositoryProtocol:
     """
     if settings.database_type == "sqlite":
         print(f"📁 SQLite database mode: {settings.db_path}")
-        return SQLiteRepository(db_path=settings.db_path)
+        return cast(RepositoryProtocol, SQLiteRepository(db_path=settings.db_path))
 
     elif settings.database_type == "postgres":
         # Validate that password is provided
@@ -37,12 +39,15 @@ def create_repository(settings: Settings) -> RepositoryProtocol:
             f"🐘 PostgreSQL database mode: {settings.postgres_user}@"
             f"{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
         )
-        return PostgresRepository(
-            host=settings.postgres_host,
-            port=settings.postgres_port,
-            database=settings.postgres_database,
-            user=settings.postgres_user,
-            password=settings.postgres_password.get_secret_value(),
+        return cast(
+            RepositoryProtocol,
+            PostgresRepository(
+                host=settings.postgres_host,
+                port=settings.postgres_port,
+                database=settings.postgres_database,
+                user=settings.postgres_user,
+                password=settings.postgres_password.get_secret_value(),
+            ),
         )
 
     else:
