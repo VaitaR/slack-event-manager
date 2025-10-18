@@ -289,6 +289,7 @@ class Settings(BaseSettings):
                         threshold_score=ch.get("threshold_score", 0.0),
                         keyword_weight=ch.get("keyword_weight", 0.0),
                         whitelist_keywords=ch.get("whitelist_keywords", []),
+                        trusted_bots=ch.get("trusted_bots", []),
                     )
                 )
             data.setdefault("slack_channels", channels)

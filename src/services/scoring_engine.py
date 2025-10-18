@@ -72,8 +72,8 @@ def extract_features(
     anchor_count = len(message.anchors)
     link_count = len(message.links_norm)
 
-    # File attachments (would need to be added to message model)
-    has_files = False  # TODO: Add file detection if needed
+    # File attachments
+    has_files = message.attachments_count > 0 or message.files_count > 0
 
     return ScoringFeatures(
         has_keywords=has_keywords,
@@ -86,6 +86,8 @@ def extract_features(
         has_files=has_files,
         is_bot=message.is_bot,
         channel_name=channel_config.channel_name,
+        author_id=message.user,
+        bot_id=message.bot_id,
     )
 
 
@@ -106,6 +108,7 @@ def calculate_score(features: ScoringFeatures, channel_config: ChannelConfig) ->
         20.0
     """
     score = 0.0
+    features.explanations.clear()
 
     # Positive features
     if features.has_keywords:
@@ -130,11 +133,24 @@ def calculate_score(features: ScoringFeatures, channel_config: ChannelConfig) ->
 
     if features.has_files:
         score += channel_config.file_weight
+        if channel_config.file_weight:
+            features.explanations.append(
+                f"attachments weight +{channel_config.file_weight}"
+            )
 
     # Negative features
     if features.is_bot:
-        # TODO: Implement whitelist bot check
-        score += channel_config.bot_penalty
+        trusted_ids = set(channel_config.trusted_bots or [])
+        bot_identifiers = [features.author_id, features.bot_id]
+        trusted_match = next(
+            (identifier for identifier in bot_identifiers if identifier in trusted_ids),
+            None,
+        )
+        if trusted_match:
+            features.explanations.append("trusted bot bypass")
+        else:
+            score += channel_config.bot_penalty
+            features.explanations.append("bot penalty applied")
 
     return score
 

@@ -9,14 +9,17 @@ from datetime import datetime, timedelta
 import pytz
 
 from src.adapters.query_builders import EventQueryCriteria
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import DeduplicationResult, MessageSource
+from src.domain.protocols import RepositoryProtocol
 from src.services import deduplicator
+from src.services.title_renderer import TitleRenderer
+
+_TITLE_RENDERER = TitleRenderer()
 
 
 def deduplicate_events_use_case(
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     lookback_days: int = 7,
     source_id: MessageSource | None = None,
@@ -34,7 +37,7 @@ def deduplicate_events_use_case(
     3. Return counts
 
     Args:
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         lookback_days: Days to look back for deduplication
         source_id: Optional source filter for strict isolation (prevents cross-source merging)
@@ -110,6 +113,7 @@ def deduplicate_events_use_case(
         all_events,
         date_window_hours=settings.dedup_date_window_hours,
         title_similarity_threshold=settings.dedup_title_similarity,
+        title_renderer=_TITLE_RENDERER,
     )
 
     final_count = len(deduplicated_events)

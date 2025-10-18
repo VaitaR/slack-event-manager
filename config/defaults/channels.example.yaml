@@ -9,6 +9,8 @@ channels:
     channel_name: releases
     threshold_score: 0.0
     keyword_weight: 0.0
+    trusted_bots:
+      - B1234567890
     whitelist_keywords:
       - release
       - deploy
@@ -33,6 +35,7 @@ channels:
     channel_name: product-updates
     threshold_score: 0.0
     keyword_weight: 0.0
+    trusted_bots: []
     whitelist_keywords:
       - release
       - deploy
@@ -46,3 +49,4 @@ channels:
     channel_name: team-engineering
     threshold_score: 0.0
     keyword_weight: 0.0
+    trusted_bots: []
