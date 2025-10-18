@@ -1,160 +1,236 @@
-"""
-Tests for LLM prompt file loading functionality.
+"""Tests for prompt loading and caching in the LLM client."""
 
-Tests that LLMClient can load prompts from files and use them
-for event extraction with source-specific configurations.
-"""
+from __future__ import annotations
 
+import hashlib
+import os
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.adapters.llm_client import LLMClient
+from src.adapters import llm_client
+from src.adapters.llm_client import LLMClient, PromptFileData, load_prompt_from_file
 
 
-class TestLLMPromptLoading:
-    """Test prompt file loading in LLMClient."""
+@pytest.fixture(autouse=True)
+def clear_prompt_cache() -> None:
+    """Ensure prompt cache is cleared between tests."""
 
-    def test_load_prompt_from_file(self, tmp_path: Path) -> None:
-        """Test loading prompt from a file."""
-        # Create a temporary prompt file
-        prompt_file = tmp_path / "test_prompt.txt"
-        prompt_content = "Test prompt for {source_id}\nExtract events from messages."
-        prompt_file.write_text(prompt_content)
+    llm_client._PROMPT_CACHE.clear()
 
-        # Load prompt
-        from src.adapters.llm_client import load_prompt_from_file
 
-        loaded_prompt = load_prompt_from_file(str(prompt_file))
-        assert loaded_prompt == prompt_content
+class TestPromptLoading:
+    """Validate prompt loading from YAML and legacy text files."""
 
-    def test_load_prompt_file_not_found(self) -> None:
-        """Test loading prompt from non-existent file raises error."""
-        from src.adapters.llm_client import load_prompt_from_file
+    def test_loads_yaml_with_version(self) -> None:
+        """The loader returns versioned prompts for YAML files."""
 
-        with pytest.raises(FileNotFoundError):
-            load_prompt_from_file("nonexistent_prompt.txt")
+        prompt = load_prompt_from_file("config/prompts/slack.yaml")
+        assert isinstance(prompt, PromptFileData)
+        assert prompt.version is not None
+        assert "Slack" in prompt.content
+        assert prompt.checksum == hashlib.sha256(prompt.content.encode("utf-8")).hexdigest()
 
-    def test_llm_client_accepts_custom_prompt(self) -> None:
-        """Test LLMClient accepts custom prompt template."""
-        custom_prompt = "Custom prompt for testing"
+    def test_loads_telegram_yaml(self) -> None:
+        """Telegram YAML prompt is parsed correctly."""
 
-        with patch("openai.OpenAI"):
-            client = LLMClient(
-                api_key="test-key",
-                model="gpt-4o-mini",
-                temperature=0.7,
-                prompt_template=custom_prompt,
+        prompt = load_prompt_from_file("config/prompts/telegram.yaml")
+        assert prompt.version is not None
+        assert "Telegram" in prompt.content
+
+    def test_supports_legacy_text_prompts(self, tmp_path: Path) -> None:
+        """Legacy .txt prompts still load without a version."""
+
+        prompt_file = tmp_path / "legacy.txt"
+        prompt_file.write_text("Legacy prompt content")
+
+        prompt = load_prompt_from_file(str(prompt_file))
+        assert prompt.version is None
+        assert prompt.content == "Legacy prompt content"
+
+    def test_cache_hit_without_mtime_change(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The loader reuses cached prompts when mtime is unchanged."""
+
+        prompt_file = tmp_path / "cached.yaml"
+        prompt_file.write_text(
+            "\n".join(
+                [
+                    'version: "20250101.1"',
+                    'description: "test"',
+                    "system: |",
+                    "  cached prompt",
+                ]
             )
-
-            assert client.system_prompt == custom_prompt
-
-    def test_llm_client_uses_default_prompt_if_none_provided(self) -> None:
-        """Test LLMClient uses default prompt if custom one not provided."""
-        with patch("openai.OpenAI"):
-            client = LLMClient(
-                api_key="test-key",
-                model="gpt-4o-mini",
-                temperature=0.7,
-            )
-
-            # Should have a non-empty default prompt
-            assert client.system_prompt
-            assert len(client.system_prompt) > 0
-
-    def test_llm_client_with_prompt_file_path(self, tmp_path: Path) -> None:
-        """Test LLMClient loading prompt from file path."""
-        # Create a temporary prompt file
-        prompt_file = tmp_path / "slack_prompt.txt"
-        prompt_content = "Slack-specific extraction prompt"
-        prompt_file.write_text(prompt_content)
-
-        with patch("openai.OpenAI"):
-            client = LLMClient(
-                api_key="test-key",
-                model="gpt-4o-mini",
-                temperature=0.7,
-                prompt_file=str(prompt_file),
-            )
-
-            assert client.system_prompt == prompt_content
-
-    def test_slack_prompt_file_exists(self) -> None:
-        """Test that slack.txt prompt file exists."""
-        # Use absolute path from project root
-        project_root = Path(__file__).parent.parent
-        prompt_path = project_root / "config" / "prompts" / "slack.txt"
-        assert prompt_path.exists(), f"Slack prompt file should exist at {prompt_path}"
-
-        content = prompt_path.read_text()
-        assert len(content) > 0, "Slack prompt should not be empty"
-        assert "Slack" in content, "Slack prompt should mention Slack"
-
-    def test_telegram_prompt_file_exists(self) -> None:
-        """Test that telegram.txt prompt file exists."""
-        # Use absolute path from project root
-        project_root = Path(__file__).parent.parent
-        prompt_path = project_root / "config" / "prompts" / "telegram.txt"
-        assert prompt_path.exists(), (
-            f"Telegram prompt file should exist at {prompt_path}"
         )
 
-        content = prompt_path.read_text()
-        assert len(content) > 0, "Telegram prompt should not be empty"
-        assert "Telegram" in content, "Telegram prompt should mention Telegram"
+        read_count = 0
+        original_read_text = Path.read_text
 
-    def test_prompt_files_contain_required_sections(self) -> None:
-        """Test that prompt files contain all required sections."""
-        required_keywords = [
-            "event extraction",
-            "category",
-            "product",
-            "risk",
-            "JSON",
-        ]
+        def tracked_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            nonlocal read_count
+            if self == prompt_file:
+                read_count += 1
+            return original_read_text(self, *args, **kwargs)
 
-        # Use absolute path from project root
-        project_root = Path(__file__).parent.parent
+        monkeypatch.setattr(Path, "read_text", tracked_read_text)
 
-        for source in ["slack", "telegram"]:
-            prompt_path = project_root / "config" / "prompts" / f"{source}.txt"
-            content = prompt_path.read_text().lower()
+        load_prompt_from_file(str(prompt_file))
+        load_prompt_from_file(str(prompt_file))
 
-            for keyword in required_keywords:
-                assert keyword.lower() in content, (
-                    f"{source} prompt should contain '{keyword}'"
-                )
+        assert read_count == 1
 
-    def test_llm_client_prompt_file_overrides_template(self, tmp_path: Path) -> None:
-        """Test that prompt_file parameter takes precedence over prompt_template."""
-        prompt_file = tmp_path / "test.txt"
-        prompt_file.write_text("File prompt")
+    def test_cache_miss_on_mtime_change(self, tmp_path: Path) -> None:
+        """Cache invalidates when prompt mtime changes."""
 
-        with patch("openai.OpenAI"):
+        prompt_file = tmp_path / "changing.yaml"
+        prompt_file.write_text(
+            "\n".join(
+                [
+                    'version: "20250101.1"',
+                    'description: "test"',
+                    "system: |",
+                    "  first version",
+                ]
+            )
+        )
+
+        first = load_prompt_from_file(str(prompt_file))
+
+        previous_stat = prompt_file.stat()
+
+        prompt_file.write_text(
+            "\n".join(
+                [
+                    'version: "20250101.2"',
+                    'description: "test"',
+                    "system: |",
+                    "  second version",
+                ]
+            )
+        )
+        os.utime(prompt_file, (previous_stat.st_atime, previous_stat.st_mtime + 1))
+
+        second = load_prompt_from_file(str(prompt_file))
+
+        assert first.content != second.content
+        assert first.checksum != second.checksum
+        assert second.version == "20250101.2"
+
+    def test_checksum_consistency(self, tmp_path: Path) -> None:
+        """Checksum is derived solely from the system prompt text."""
+
+        prompt_file = tmp_path / "checksum.yaml"
+        prompt_file.write_text(
+            "\n".join(
+                [
+                    'version: "20250101.1"',
+                    'description: "test"',
+                    "system: |",
+                    "  checksum body",
+                ]
+            )
+        )
+
+        prompt = load_prompt_from_file(str(prompt_file))
+        expected = hashlib.sha256(b"checksum body").hexdigest()
+        assert prompt.checksum == expected
+
+
+class TestLLMClientPromptSelection:
+    """Ensure LLMClient selects prompts with correct precedence."""
+
+    def test_default_prompt_uses_slack_yaml(self) -> None:
+        """Default prompt loads from bundled Slack YAML."""
+
+        with patch("src.adapters.llm_client.OpenAI"):
+            client = LLMClient(api_key="test", model="gpt-4o-mini", temperature=0.7)
+
+        bundled = load_prompt_from_file("config/prompts/slack.yaml")
+        assert client.system_prompt == bundled.content
+        assert client.prompt_version == bundled.version
+        assert client._system_prompt_hash == hashlib.sha256(
+            client.system_prompt.encode("utf-8")
+        ).hexdigest()
+
+    def test_prompt_file_overrides_template(self, tmp_path: Path) -> None:
+        """prompt_file parameter takes precedence over template."""
+
+        prompt_file = tmp_path / "custom.yaml"
+        prompt_file.write_text(
+            "\n".join(
+                [
+                    'version: "20250101.1"',
+                    'description: "test"',
+                    "system: |",
+                    "  file prompt",
+                ]
+            )
+        )
+
+        with patch("src.adapters.llm_client.OpenAI"):
             client = LLMClient(
-                api_key="test-key",
+                api_key="test",
                 model="gpt-4o-mini",
                 temperature=0.7,
                 prompt_template="Template prompt",
                 prompt_file=str(prompt_file),
             )
 
-            # File should take precedence
-            assert client.system_prompt == "File prompt"
+        assert client.system_prompt.strip() == "file prompt"
+        assert client.prompt_version == "20250101.1"
 
-    def test_llm_client_handles_empty_prompt_file(self, tmp_path: Path) -> None:
-        """Test LLMClient handles empty prompt file gracefully."""
-        prompt_file = tmp_path / "empty.txt"
-        prompt_file.write_text("")
+    def test_prompt_template_has_no_version(self) -> None:
+        """Inline prompt templates have no version metadata."""
 
-        with patch("openai.OpenAI"):
+        with patch("src.adapters.llm_client.OpenAI"):
             client = LLMClient(
-                api_key="test-key",
+                api_key="test",
+                model="gpt-4o-mini",
+                temperature=0.7,
+                prompt_template="Inline prompt",
+            )
+
+        assert client.prompt_version is None
+
+    def test_metadata_prompt_hash_matches_system_prompt(self, tmp_path: Path) -> None:
+        """LLM call metadata stores the system prompt hash."""
+
+        prompt_file = tmp_path / "meta.yaml"
+        prompt_file.write_text(
+            "\n".join(
+                [
+                    'version: "20250101.1"',
+                    'description: "test"',
+                    "system: |",
+                    "  metadata prompt",
+                ]
+            )
+        )
+
+        with patch("src.adapters.llm_client.OpenAI") as mock_openai:
+            client_instance = MagicMock()
+            response_mock = MagicMock()
+            response_mock.choices = [MagicMock(message=MagicMock(content='{ "is_event": false, "events": [] }'))]
+            response_mock.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+            client_instance.chat.completions.create.return_value = response_mock
+            mock_openai.return_value = client_instance
+
+            client = LLMClient(
+                api_key="test",
                 model="gpt-4o-mini",
                 temperature=0.7,
                 prompt_file=str(prompt_file),
             )
 
-            # Should fall back to default or handle empty
-            assert client.system_prompt is not None
+            response = client.extract_events(
+                text="message", links=[], message_ts_dt=datetime.utcnow(), channel_name=""
+            )
+
+            assert response.is_event is False
+            metadata = client.get_call_metadata()
+            expected_hash = hashlib.sha256(client.system_prompt.encode("utf-8")).hexdigest()
+            assert metadata.prompt_hash == expected_hash

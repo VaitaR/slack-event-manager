@@ -25,7 +25,7 @@ class TestMessageSourceConfigLoading:
                     "enabled": True,
                     "raw_table": "raw_slack_messages",
                     "state_table": "ingestion_state_slack",
-                    "prompt_file": "config/prompts/slack.txt",
+                    "prompt_file": "config/prompts/slack.yaml",
                     "llm_settings": {"temperature": 1.0, "timeout_seconds": 30},
                     "channels": ["C123", "C456"],
                 },
@@ -34,7 +34,7 @@ class TestMessageSourceConfigLoading:
                     "enabled": False,
                     "raw_table": "raw_telegram_messages",
                     "state_table": "ingestion_state_telegram",
-                    "prompt_file": "config/prompts/telegram.txt",
+                    "prompt_file": "config/prompts/telegram.yaml",
                     "llm_settings": {"temperature": 0.7, "timeout_seconds": 30},
                     "channels": [],
                 },
@@ -60,7 +60,7 @@ class TestMessageSourceConfigLoading:
                     "enabled": True,
                     "raw_table": "raw_slack_messages",
                     "state_table": "ingestion_state_slack",
-                    "prompt_file": "config/prompts/slack.txt",
+                    "prompt_file": "config/prompts/slack.yaml",
                     "llm_settings": {"temperature": 1.0},
                     "channels": ["C123"],
                 }
@@ -137,13 +137,13 @@ class TestPerSourceLLMSettings:
         """Test different prompt files per source."""
         slack_config = {
             "source_id": "slack",
-            "prompt_file": "config/prompts/slack.txt",
+            "prompt_file": "config/prompts/slack.yaml",
         }
 
         telegram_config = {
             "source_id": "telegram",
-            "prompt_file": "config/prompts/telegram.txt",
+            "prompt_file": "config/prompts/telegram.yaml",
         }
 
-        assert "slack.txt" in slack_config["prompt_file"]
-        assert "telegram.txt" in telegram_config["prompt_file"]
+        assert "slack.yaml" in slack_config["prompt_file"]
+        assert "telegram.yaml" in telegram_config["prompt_file"]
