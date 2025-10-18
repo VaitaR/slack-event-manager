@@ -18,17 +18,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: false
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
-
       - name: Install linting tools only
         run: |
-          uv pip install --system ruff==0.12.8
+          uv pip install --python $(which python) ruff==0.12.8
 
       - name: Ruff (format check)
         run: |
@@ -45,17 +47,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: false
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
-
       - name: Install dependencies
         run: |
-          uv pip install --system -r requirements.txt
+          uv pip install --python $(which python) -r requirements.txt
 
       - name: Mypy (strict)
         run: |
@@ -69,17 +73,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: false
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
-
       - name: Install dependencies
         run: |
-          uv pip install --system -r requirements.txt
+          uv pip install --python $(which python) -r requirements.txt
 
       - name: Run tests with coverage
         env:
