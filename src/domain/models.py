@@ -240,6 +240,12 @@ class TelegramMessage(BaseModel):
     media_type: str | None = Field(
         default=None, description="Media type (photo, video, document, etc.)"
     )
+    attachments_count: int = Field(
+        default=0, description="Number of attachments (for scoring compatibility)"
+    )
+    files_count: int = Field(
+        default=0, description="Number of files (for scoring compatibility)"
+    )
     links_raw: list[str] = Field(default_factory=list, description="Raw URLs")
     links_norm: list[str] = Field(default_factory=list, description="Normalized URLs")
     anchors: list[str] = Field(default_factory=list, description="Extracted anchors")
