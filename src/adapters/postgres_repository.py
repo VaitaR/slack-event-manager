@@ -197,7 +197,9 @@ class PostgresRepository:
             time_confidence=row.get("time_confidence", 0.0),
             # Content
             summary=row.get("summary") or "",
+            why_it_matters=row.get("why_it_matters"),
             impact_area=row.get("impact_area") or [],  # Already parsed from JSONB
+            impact_type=row.get("impact_type") or [],  # Already parsed from JSONB
             links=row.get("links") or [],  # Already parsed from JSONB
             anchors=row.get("anchors") or [],  # Already parsed from JSONB
             # Metadata
@@ -509,7 +511,9 @@ class PostgresRepository:
                                 time_source = %s,
                                 time_confidence = %s,
                                 summary = %s,
+                                why_it_matters = %s,
                                 impact_area = %s,
+                                impact_type = %s,
                                 links = %s,
                                 anchors = %s,
                                 confidence = %s,
@@ -539,7 +543,9 @@ class PostgresRepository:
                                 event.time_source.value,
                                 event.time_confidence,
                                 event.summary,
+                                event.why_it_matters,
                                 json.dumps(event.impact_area),
+                                json.dumps(event.impact_type),
                                 json.dumps(event.links),
                                 json.dumps(event.anchors),
                                 event.confidence,
@@ -558,12 +564,12 @@ class PostgresRepository:
                                 category, status, change_type, environment, severity,
                                 planned_start, planned_end, actual_start, actual_end,
                                 time_source, time_confidence,
-                                summary, impact_area, links, anchors,
+                                summary, why_it_matters, impact_area, impact_type, links, anchors,
                                 confidence, importance, cluster_key, dedup_key
                             ) VALUES (
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                             )
                             """,
                             (
@@ -589,7 +595,9 @@ class PostgresRepository:
                                 event.time_source.value,
                                 event.time_confidence,
                                 event.summary,
+                                event.why_it_matters,
                                 json.dumps(event.impact_area),
+                                json.dumps(event.impact_type),
                                 json.dumps(event.links),
                                 json.dumps(event.anchors),
                                 event.confidence,
