@@ -225,6 +225,9 @@ class TelegramMessage(BaseModel):
     message_date: datetime = Field(..., description="Message date as UTC datetime")
     sender_id: str | None = Field(default=None, description="Sender user ID")
     sender_name: str | None = Field(default=None, description="Sender display name")
+    user: str | None = Field(
+        default=None, description="User ID (for scoring compatibility)"
+    )
     is_bot: bool = Field(default=False, description="Whether sender is a bot")
     text: str = Field(default="", description="Raw message text")
     text_norm: str = Field(default="", description="Normalized text")
