@@ -741,6 +741,81 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 - Documentation updates (README.md, MULTI_SOURCE.md)
 - Optional: Additional integration tests for orchestrator
 
+### 2025-10-18: Telegram Integration (Phase 7) ✅
+
+**Complete Telegram Text Extraction:**
+- ✅ TelegramClient with Telethon library (async→sync wrapper)
+- ✅ User client authentication (API_ID/API_HASH via .env)
+- ✅ FloodWait error handling with automatic retry
+- ✅ URL and anchor extraction from entities
+- ✅ Post URL construction for public channels
+- ✅ Message processing and normalization
+- ✅ Integration with multi-source pipeline
+- ✅ 33+ comprehensive tests (client, processing, E2E)
+
+**New Files Created:**
+- `src/adapters/telegram_client.py` - Telethon wrapper (270 lines)
+- `src/use_cases/ingest_telegram_messages.py` - Telegram ingestion (320 lines)
+- `scripts/telegram_auth.py` - Interactive authentication helper
+- `config/telegram_channels.yaml` - Channel configuration template
+- `tests/test_telegram_client.py` - 17 client tests
+- `tests/test_telegram_message_processing.py` - 10+ processing tests
+- `tests/test_telegram_e2e.py` - 6 E2E tests
+- `scripts/test_telegram_ingestion.py` - Manual test script
+- `docs/TELEGRAM_INTEGRATION.md` - Complete integration guide
+
+**Modified Files:**
+- `requirements.txt` - Added telethon>=1.36.0
+- `src/config/settings.py` - Added telegram_api_id, telegram_api_hash, telegram_channels
+- `src/adapters/message_client_factory.py` - Added Telegram client creation
+- `scripts/run_multi_source_pipeline.py` - Added Telegram ingestion branch
+
+**Features:**
+- Text message extraction from public channels
+- Historical backfill (1 day default, configurable)
+- Incremental ingestion (only new messages)
+- State tracking per channel (last_processed_message_id)
+- URL extraction from entities (MessageEntityUrl, MessageEntityTextUrl)
+- Post URL construction: `https://t.me/{username}/{message_id}`
+- FloodWait handling with exponential backoff (max 3 retries)
+
+**Scope (V1):**
+- ✅ Text messages only
+- ✅ Public channels by @username
+- ✅ 1 day backfill
+- ❌ Media (photos/videos) - out of scope
+- ❌ Reactions/views - out of scope
+- ❌ Private channels - out of scope
+
+**Testing:**
+- 33+ tests total (17 client + 10 processing + 6 E2E)
+- All existing 240+ tests still passing
+- Manual test script for real API verification
+- Zero breaking changes
+
+**Documentation:**
+- Complete integration guide (docs/TELEGRAM_INTEGRATION.md)
+- Setup instructions with step-by-step authentication
+- Troubleshooting section
+- Architecture and technical details
+
+**Usage:**
+```bash
+# Authenticate (first time only)
+python scripts/telegram_auth.py
+
+# Test ingestion
+python scripts/test_telegram_ingestion.py
+
+# Run Telegram pipeline
+python scripts/run_multi_source_pipeline.py --source telegram
+
+# Run all sources (Slack + Telegram)
+python scripts/run_multi_source_pipeline.py
+```
+
+**Status:** Phase 7 complete (100% of planned implementation) 🎉
+
 ### 2025-10-17: PostgreSQL Support ✅
 
 **Full PostgreSQL Integration:**

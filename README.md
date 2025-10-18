@@ -1,6 +1,6 @@
 # Slack Event Manager MVP
 
-AI-powered event extraction and digest system for Slack channels. Automatically processes Slack messages to extract structured events, deduplicate them, and publish daily digests.
+AI-powered event extraction and digest system for **Slack and Telegram** channels. Automatically processes messages to extract structured events, deduplicate them, and publish daily digests.
 
 ## Features
 
@@ -11,7 +11,7 @@ AI-powered event extraction and digest system for Slack channels. Automatically 
 - 🔄 **Deduplication**: Merges similar events across messages with fuzzy matching
 - 💾 **Dual database**: PostgreSQL (production) or SQLite (development) with seamless switching
 - 💰 **Budget control**: Daily LLM cost tracking with graceful degradation
-- 🌍 **Multi-channel**: Whitelist channels with per-channel configurations
+- 🌍 **Multi-source**: Slack + Telegram with unified pipeline (Phase 7 ✅)
 - 📨 **Digest publishing**: Beautiful Slack Block Kit digests
 - 🐳 **Docker-ready**: Full Docker Compose setup with PostgreSQL, auto-migrations, and Streamlit UI
 
@@ -36,6 +36,8 @@ src/
 │   └── deduplicator.py
 ├── adapters/           # External integrations
 │   ├── slack_client.py
+│   ├── telegram_client.py        # Telegram adapter (NEW - Phase 7)
+│   ├── message_client_factory.py # Multi-source factory (NEW)
 │   ├── llm_client.py
 │   ├── sqlite_repository.py
 │   ├── postgres_repository.py    # PostgreSQL adapter (NEW)
@@ -43,6 +45,7 @@ src/
 │   └── query_builders.py         # Type-safe queries
 ├── use_cases/          # Application orchestration
 │   ├── ingest_messages.py
+│   ├── ingest_telegram_messages.py  # Telegram ingestion (NEW - Phase 7)
 │   ├── build_candidates.py
 │   ├── extract_events.py
 │   ├── deduplicate_events.py
@@ -61,11 +64,14 @@ src/
 ## Prerequisites
 
 - Python 3.11+
-- Slack Bot Token with permissions:
+- **Slack Bot Token** with permissions:
   - `channels:read`, `channels:history`
   - `users:read`, `reactions:read`
   - `chat:write` (for digest posting)
-- OpenAI API Key
+- **Telegram API Credentials** (optional, for Telegram integration):
+  - API ID and API hash from https://my.telegram.org
+  - Phone number for user client authentication
+- **OpenAI API Key**
 
 ## Quick Start
 
@@ -106,12 +112,17 @@ cp config/defaults/*.example.yaml config/
 cat > .env << 'EOF'
 SLACK_BOT_TOKEN=xoxb-your-token
 OPENAI_API_KEY=sk-your-key
+
+# Optional: For Telegram integration
+TELEGRAM_API_ID=12345
+TELEGRAM_API_HASH=abc123...
 EOF
 
 # 3. Edit all files with your actual values
 # - config/main.yaml
 # - config/object_registry.yaml
 # - config/channels.yaml
+# - config/telegram_channels.yaml (if using Telegram)
 ```
 
 **Configuration System:**
@@ -159,7 +170,7 @@ logging:
 ### 3. Run Pipeline
 
 ```bash
-# Run complete pipeline
+# Run complete pipeline (Slack only)
 python scripts/run_pipeline.py
 
 # With optional digest publication
@@ -168,6 +179,35 @@ python scripts/run_pipeline.py --publish
 # Dry run (don't post digest)
 python scripts/run_pipeline.py --publish --dry-run
 ```
+
+### 4. Telegram Integration (Optional)
+
+**Setup:**
+```bash
+# 1. Get API credentials from https://my.telegram.org
+# 2. Add to .env:
+#    TELEGRAM_API_ID=12345
+#    TELEGRAM_API_HASH=abc123...
+
+# 3. Run authentication (creates session file)
+python scripts/telegram_auth.py
+
+# 4. Configure channels in config/telegram_channels.yaml
+```
+
+**Usage:**
+```bash
+# Test Telegram ingestion
+python scripts/test_telegram_ingestion.py
+
+# Run Telegram pipeline only
+python scripts/run_multi_source_pipeline.py --source telegram
+
+# Run both Slack and Telegram
+python scripts/run_multi_source_pipeline.py
+```
+
+**See [docs/TELEGRAM_INTEGRATION.md](docs/TELEGRAM_INTEGRATION.md) for complete guide.**
 
 ## Usage
 
