@@ -304,7 +304,8 @@ class SQLiteRepository:
             """
             CREATE TABLE IF NOT EXISTS ingestion_state_slack (
                 channel_id TEXT PRIMARY KEY,
-                last_ts REAL NOT NULL
+                last_processed_ts REAL NOT NULL,
+                updated_at TIMESTAMP NOT NULL
             )
         """
         )
@@ -313,7 +314,8 @@ class SQLiteRepository:
             """
             CREATE TABLE IF NOT EXISTS ingestion_state_telegram (
                 channel_id TEXT PRIMARY KEY,
-                last_ts REAL NOT NULL
+                last_processed_ts REAL NOT NULL,
+                updated_at TIMESTAMP NOT NULL
             )
         """
         )
@@ -1440,7 +1442,7 @@ class SQLiteRepository:
 
             cursor.execute(
                 f"""
-                SELECT last_ts FROM {table_name}
+                SELECT last_processed_ts FROM {table_name}
                 WHERE channel_id = ?
                 """,
                 (channel,),
@@ -1449,7 +1451,7 @@ class SQLiteRepository:
             row = cursor.fetchone()
             conn.close()
 
-            return float(row["last_ts"]) if row else None
+            return float(row[0]) if row else None
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get last processed ts: {e}")
@@ -1482,8 +1484,8 @@ class SQLiteRepository:
 
             cursor.execute(
                 f"""
-                INSERT OR REPLACE INTO {table_name} (channel_id, last_ts)
-                VALUES (?, ?)
+                INSERT OR REPLACE INTO {table_name} (channel_id, last_processed_ts, updated_at)
+                VALUES (?, ?, datetime('now'))
                 """,
                 (channel, ts),
             )

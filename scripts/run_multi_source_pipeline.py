@@ -280,8 +280,13 @@ def run_single_iteration(
         source_filter = args.source.lower()
         try:
             filtered_source = MessageSource(source_filter)
-            if filtered_source in enabled_sources:
-                enabled_sources = [filtered_source]
+            # Check if filtered source is in enabled configs
+            enabled_source_ids = [s.source_id for s in enabled_sources]
+            if filtered_source in enabled_source_ids:
+                # Keep only the matching config
+                enabled_sources = [
+                    s for s in enabled_sources if s.source_id == filtered_source
+                ]
                 logger.info(f"🎯 Filtering to single source: {source_filter}")
             else:
                 logger.warning(
@@ -295,7 +300,9 @@ def run_single_iteration(
             )
             return
 
-    print(f"\n📋 Processing sources: {', '.join(s.value for s in enabled_sources)}")
+    print(
+        f"\n📋 Processing sources: {', '.join(s.source_id.value for s in enabled_sources)}"
+    )
 
     # Aggregate statistics across all sources
     total_stats = {
@@ -309,13 +316,13 @@ def run_single_iteration(
     }
 
     # Process each source independently
-    for source_id in enabled_sources:
+    for source_config in enabled_sources:
         if _shutdown_requested:
             logger.info("🛑 Shutdown requested, stopping source processing")
             break
 
         source_stats = run_source_pipeline(
-            source_id=source_id,
+            source_id=source_config.source_id,  # Extract source_id from config
             repository=repository,
             settings=settings,
             args=args,
