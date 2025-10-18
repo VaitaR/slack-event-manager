@@ -31,6 +31,7 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
+from src.adapters.telegram_client import TelegramClient
 from src.config.settings import Settings, get_settings
 from src.domain.models import MessageSource
 from src.domain.protocols import RepositoryProtocol
@@ -136,15 +137,65 @@ def run_source_pipeline(
         logger.error(f"❌ Failed to create message client for {source_id.value}: {e}")
         return stats
 
-    if not isinstance(message_client, SlackClient):
+    if isinstance(message_client, SlackClient):
+        slack_client = message_client
+    elif isinstance(message_client, TelegramClient):
+        # Process Telegram source
+        logger.info(f"📥 Processing Telegram source: {source_id.value}")
+        telegram_client = message_client
+
+        # Create Telegram-specific LLM client
+        try:
+            llm_settings = source_config.llm_settings or {}
+            llm_temperature = llm_settings.get("temperature", settings.llm_temperature)
+            llm_timeout = llm_settings.get(
+                "timeout_seconds", settings.llm_timeout_seconds
+            )
+            prompt_file = source_config.prompt_file
+
+            llm_client = LLMClient(
+                api_key=settings.openai_api_key.get_secret_value(),
+                model=settings.llm_model,
+                temperature=llm_temperature,
+                timeout_seconds=llm_timeout,
+                prompt_file=prompt_file,
+            )
+            logger.info("✓ Created Telegram LLM client")
+        except Exception as e:
+            logger.error(f"❌ Failed to create LLM client for Telegram: {e}")
+            return stats
+
+        # Run Telegram ingestion
+        try:
+            result = ingest_telegram_messages_use_case(
+                telegram_client=telegram_client,
+                repository=repository,
+                settings=settings,
+                source_config=source_config,
+            )
+
+            stats.messages_fetched += result.messages_fetched
+            stats.messages_saved += result.messages_saved
+            stats.channels_processed.extend(result.channels_processed)
+            stats.errors.extend(result.errors)
+
+            logger.info(
+                f"✅ Telegram ingestion completed: {result.messages_saved} messages saved"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Telegram ingestion failed: {e}")
+            stats.errors.append(f"Telegram ingestion error: {str(e)}")
+
+        return stats
+
+    else:
         logger.warning(
-            "⚠️  Message client does not support Slack-specific ingestion yet; skipping source"
+            f"⚠️  Message client type {type(message_client)} not supported yet; skipping source"
         )
         return stats
 
-    slack_client = message_client
-
-    # Create source-specific LLM client
+    # Create source-specific LLM client for Slack
     try:
         llm_settings = source_config.llm_settings or {}
         llm_temperature = llm_settings.get("temperature", settings.llm_temperature)
