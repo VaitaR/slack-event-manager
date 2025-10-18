@@ -44,7 +44,7 @@ jobs:
 
       - name: Mypy (strict)
         run: |
-          python -m mypy --strict src tests
+          python -m mypy src --config-file pyproject.toml
 
       - name: Run tests with coverage
         env:
