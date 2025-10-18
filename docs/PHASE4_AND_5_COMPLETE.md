@@ -1,6 +1,6 @@
 # Phase 4 & 5 Complete: Configuration + Use Case Layer ✅
 
-**Completion Date:** 2025-10-17  
+**Completion Date:** 2025-10-17
 **Status:** Core multi-source infrastructure complete (~80% total implementation)
 
 ## Overview
@@ -90,7 +90,7 @@ class LLMClient:
         prompt_file: str | None = None,       # NEW
     ) -> None:
         # ... existing initialization ...
-        
+
         # Load prompt (priority: file > template > default)
         if prompt_file:
             self.system_prompt = load_prompt_from_file(prompt_file)
@@ -144,7 +144,7 @@ def deduplicate_events_use_case(
     source_id: MessageSource | None = None,  # NEW parameter
 ) -> DeduplicationResult:
     """Deduplicate events within lookback window.
-    
+
     Args:
         source_id: Optional source filter for strict isolation
     """
@@ -155,7 +155,7 @@ def deduplicate_events_use_case(
         order_by="extracted_at",
         order_desc=False,
     )
-    
+
     all_events = repository.query_events(criteria)
     # ... deduplication logic ...
 ```
@@ -167,15 +167,15 @@ result = deduplicate_events_use_case(repo, settings)
 
 # Deduplicate only Slack events (strict isolation)
 result = deduplicate_events_use_case(
-    repo, 
-    settings, 
+    repo,
+    settings,
     source_id=MessageSource.SLACK
 )
 
 # Deduplicate only Telegram events
 result = deduplicate_events_use_case(
-    repo, 
-    settings, 
+    repo,
+    settings,
     source_id=MessageSource.TELEGRAM
 )
 ```
@@ -363,4 +363,3 @@ The core multi-source infrastructure is now in place:
 - CLI enhancements and final testing
 
 The foundation is solid and extensible. The remaining work is primarily orchestration and polish! 🚀
-

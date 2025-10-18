@@ -1,13 +1,19 @@
 """Pytest configuration and shared fixtures."""
 
+from __future__ import annotations
+
 import os
+from collections.abc import Generator
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 import pytz
 
+from src.adapters.repository_factory import create_repository
+from src.config.settings import Settings
 from src.domain.models import (
     CandidateStatus,
     ChannelConfig,
@@ -17,6 +23,62 @@ from src.domain.models import (
     ScoringFeatures,
     SlackMessage,
 )
+from src.domain.protocols import RepositoryProtocol
+
+
+@pytest.fixture
+def settings(
+    tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest
+) -> Settings:
+    """Create settings configured for the requested database backend."""
+
+    base_settings = Settings()
+
+    backend = "sqlite"
+    if hasattr(request.node, "callspec"):
+        backend = request.node.callspec.params.get("repo", backend)
+
+    if request.node.get_closest_marker("postgres"):
+        backend = "postgres"
+
+    if backend == "postgres":
+        if os.environ.get("TEST_POSTGRES", "0") != "1":
+            pytest.skip("PostgreSQL tests disabled (TEST_POSTGRES!=1)")
+        if not os.environ.get("POSTGRES_PASSWORD"):
+            pytest.skip("POSTGRES_PASSWORD not set for PostgreSQL tests")
+        return base_settings.model_copy(update={"database_type": "postgres"})
+
+    temp_dir = tmp_path_factory.mktemp("db")
+    db_path = temp_dir / "test.sqlite"
+    return base_settings.model_copy(
+        update={"database_type": "sqlite", "db_path": str(db_path)}
+    )
+
+
+@pytest.fixture
+def repo(settings: Settings) -> Generator[RepositoryProtocol, None, None]:
+    """Provide a repository instance for the configured backend."""
+
+    repository = create_repository(settings)
+
+    try:
+        yield repository
+    finally:
+        close = getattr(repository, "close", None)
+        if callable(close):
+            close()
+
+        if settings.database_type == "sqlite":
+            db_path = Path(settings.db_path)
+            if db_path.exists():
+                try:
+                    db_path.unlink()
+                except OSError:
+                    pass
+            try:
+                db_path.parent.rmdir()
+            except OSError:
+                pass
 
 
 @pytest.fixture
@@ -188,19 +250,25 @@ def mock_llm_client() -> Mock:
 @pytest.fixture
 def mock_repository() -> Mock:
     """Mock repository."""
-    mock = Mock()
+    mock = Mock(spec=RepositoryProtocol)
     mock.save_messages.return_value = 1
     mock.get_watermark.return_value = None
     mock.update_watermark.return_value = None
     mock.get_new_messages_for_candidates.return_value = []
+    mock.get_new_messages_for_candidates_by_source.return_value = []
     mock.save_candidates.return_value = 1
     mock.get_candidates_for_extraction.return_value = []
+    mock.get_candidates_by_source.return_value = []
     mock.update_candidate_status.return_value = None
     mock.save_events.return_value = 1
+    mock.get_events_by_source.return_value = []
     mock.get_events_in_window.return_value = []
+    mock.get_events_in_window_filtered.return_value = []
     mock.save_llm_call.return_value = None
     mock.get_daily_llm_cost.return_value = 0.0
     mock.get_cached_llm_response.return_value = None
+    mock.save_telegram_messages.return_value = 0
+    mock.get_telegram_messages.return_value = []
     return mock
 
 

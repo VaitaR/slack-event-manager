@@ -1,6 +1,6 @@
 # Phase 5 Summary: Use Case Layer - LLM Prompt Loading Complete ✅
 
-**Completion Date:** 2025-10-17  
+**Completion Date:** 2025-10-17
 **Status:** LLMClient updated with prompt loading capability
 
 ## Overview
@@ -15,7 +15,7 @@ Phase 5 focuses on updating the use case layer to support multi-source operation
 ```python
 def load_prompt_from_file(file_path: str) -> str:
     """Load prompt template from a file.
-    
+
     Raises:
         FileNotFoundError: If the file doesn't exist
     """
@@ -38,7 +38,7 @@ def __init__(
     prompt_file: str | None = None,       # NEW
 ) -> None:
     # ... existing initialization ...
-    
+
     # Load prompt (priority: file > template > default)
     if prompt_file:
         self.system_prompt = load_prompt_from_file(prompt_file)
@@ -138,7 +138,7 @@ telegram_config = settings.get_source_config(MessageSource.TELEGRAM)
 slack_llm = LLMClient(
     api_key=settings.openai_api_key.get_secret_value(),
     model=settings.llm_model,
-    prompt_file=slack_config.llm_settings.get("prompt_file")  
+    prompt_file=slack_config.llm_settings.get("prompt_file")
 )
 
 telegram_llm = LLMClient(
@@ -174,17 +174,17 @@ Create new `run_multi_source_pipeline.py`:
 def run_for_source(source_config: MessageSourceConfig, settings: Settings):
     # 1. Get source-specific message client
     message_client = get_message_client(
-        source_config.source_id, 
+        source_config.source_id,
         bot_token=get_token(source_config.bot_token_env)
     )
-    
+
     # 2. Create source-specific LLM client
     llm_client = LLMClient(
         api_key=settings.openai_api_key.get_secret_value(),
         prompt_file=source_config.llm_settings.get("prompt_file"),
         temperature=source_config.llm_settings.get("temperature"),
     )
-    
+
     # 3. Run pipeline steps
     ingest_messages_use_case(message_client, repository, source_config)
     build_candidates_use_case(repository, settings)
@@ -254,4 +254,3 @@ Phase 5.1 (LLM Prompt Loading) is **100% complete** with:
 - ✅ Ready for multi-source integration
 
 **Next:** Refactor pipeline orchestrator to loop through sources and create source-specific LLMClient instances.
-

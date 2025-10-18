@@ -6,6 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.adapters.repository_factory import create_repository
+from src.config.settings import Settings, get_settings
+from src.domain.protocols import RepositoryProtocol
+
 
 def log(msg: str) -> None:
     """Print with immediate flush."""
@@ -13,7 +17,7 @@ def log(msg: str) -> None:
     sys.stdout.flush()
 
 
-def main():
+def main() -> bool:
     """Run quick tests."""
     log("\n🔍 Quick Sanity Check")
     log("=" * 70)
@@ -21,8 +25,6 @@ def main():
     # Test 1: Settings
     log("\n1️⃣ Testing settings...")
     try:
-        from src.config.settings import get_settings
-
         settings = get_settings()
         log(f"   ✅ Model: {settings.llm_model}")
         log(f"   ✅ Temperature: {settings.llm_temperature}")
@@ -71,12 +73,17 @@ def main():
     try:
         import tempfile
 
-        from src.adapters.sqlite_repository import SQLiteRepository
-
         temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         temp_db.close()
 
-        SQLiteRepository(temp_db.name)
+        temp_settings: Settings = settings.model_copy(
+            update={"db_path": temp_db.name, "database_type": "sqlite"}
+        )
+        repository: RepositoryProtocol = create_repository(temp_settings)
+        # Explicitly close repository if supported
+        close_method = getattr(repository, "close", None)
+        if callable(close_method):
+            close_method()
         log("   ✅ Database initialized")
 
         import os

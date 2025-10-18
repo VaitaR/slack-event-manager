@@ -1,40 +1,21 @@
 """Tests for multi-source candidate building."""
 
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 import pytz
 
-from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.config.settings import Settings
 from src.domain.models import MessageSource, TelegramMessage
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 
 
-@pytest.fixture
-def temp_db(tmp_path: Path) -> Path:
-    """Create temporary database for testing."""
-    db_path = tmp_path / "test_candidates.db"
-    return db_path
-
-
-@pytest.fixture
-def repository(temp_db: Path) -> SQLiteRepository:
-    """Create repository instance."""
-    return SQLiteRepository(db_path=str(temp_db))
-
-
-@pytest.fixture
-def settings() -> object:
-    """Get settings."""
-    return get_settings()
-
-
 def test_build_candidates_telegram_source(
-    repository: SQLiteRepository, settings: object
+    repo: RepositoryProtocol, settings: Settings
 ) -> None:
     """Test building candidates from Telegram messages."""
+    repository = repo
     # Create and save Telegram messages
     now = datetime.now(tz=pytz.UTC)
     messages = [
@@ -97,9 +78,10 @@ def test_build_candidates_telegram_source(
 
 
 def test_build_candidates_source_isolation(
-    repository: SQLiteRepository, settings: object
+    repo: RepositoryProtocol, settings: Settings
 ) -> None:
     """Test that Telegram and Slack candidates are isolated."""
+    repository = repo
     now = datetime.now(tz=pytz.UTC)
 
     # Save Telegram message
@@ -141,9 +123,10 @@ def test_build_candidates_source_isolation(
 
 
 def test_build_candidates_backward_compatibility(
-    repository: SQLiteRepository, settings: object
+    repo: RepositoryProtocol, settings: Settings
 ) -> None:
     """Test that build_candidates_use_case still works without source_id (Slack default)."""
+    repository = repo
     # Call without source_id (should default to Slack)
     result = build_candidates_use_case(repository=repository, settings=settings)
 
@@ -157,8 +140,9 @@ def test_build_candidates_backward_compatibility(
     print(f"   Candidates created: {result.candidates_created}")
 
 
-def test_get_new_messages_by_source_telegram(repository: SQLiteRepository) -> None:
+def test_get_new_messages_by_source_telegram(repo: RepositoryProtocol) -> None:
     """Test get_new_messages_for_candidates_by_source for Telegram."""
+    repository = repo
     now = datetime.now(tz=pytz.UTC)
 
     # Save Telegram messages
@@ -192,8 +176,9 @@ def test_get_new_messages_by_source_telegram(repository: SQLiteRepository) -> No
     print(f"\n✅ Retrieved {len(new_messages)} Telegram messages for candidates")
 
 
-def test_get_new_messages_by_source_slack(repository: SQLiteRepository) -> None:
+def test_get_new_messages_by_source_slack(repo: RepositoryProtocol) -> None:
     """Test get_new_messages_for_candidates_by_source for Slack."""
+    repository = repo
     # Get new messages for Slack source (should be empty)
     new_messages = repository.get_new_messages_for_candidates_by_source(
         MessageSource.SLACK

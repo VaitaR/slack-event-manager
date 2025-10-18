@@ -9,26 +9,23 @@ Tests the complete pipeline flow for Telegram source:
 
 import os
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 import pytz
 
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.adapters.telegram_client import TelegramClient
 from src.domain.models import (
     ChannelConfig,
     MessageSource,
     TelegramMessage,
 )
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 
-
-@pytest.fixture
-def temp_db(tmp_path: Path) -> Path:
-    """Create temporary database for testing."""
-    db_path = tmp_path / "test_telegram_pipeline.db"
-    return db_path
+DATABASE_BACKENDS = [
+    "sqlite",
+    pytest.param("postgres", marks=pytest.mark.postgres),
+]
 
 
 @pytest.fixture
@@ -216,8 +213,9 @@ def mock_llm_response() -> dict:
     }
 
 
+@pytest.mark.parametrize("repo", DATABASE_BACKENDS, indirect=True)
 def test_telegram_pipeline_full_flow(
-    temp_db: Path,
+    repo: RepositoryProtocol,
     mock_telegram_messages: list[TelegramMessage],
     mock_llm_response: dict,
     mock_settings: object,
@@ -231,7 +229,7 @@ def test_telegram_pipeline_full_flow(
     4. Multi-source architecture is fully functional
     """
     # Initialize repository and settings
-    repository = SQLiteRepository(db_path=str(temp_db))
+    repository = repo
     settings = mock_settings
 
     print("\n" + "=" * 80)
@@ -255,7 +253,7 @@ def test_telegram_pipeline_full_flow(
     # STEP 2: Build candidates from Telegram messages
     print("\n🎯 STEP 2: Building candidates from Telegram messages...")
     candidate_result = build_candidates_use_case(
-        repository=repository,  # type: ignore
+        repository=repository,
         settings=settings,  # type: ignore
         source_id=MessageSource.TELEGRAM,
     )
@@ -313,9 +311,10 @@ def test_telegram_client_stub() -> None:
     print("✅ TelegramClient stub works correctly")
 
 
-def test_telegram_source_isolation(temp_db: Path) -> None:
+@pytest.mark.parametrize("repo", DATABASE_BACKENDS, indirect=True)
+def test_telegram_source_isolation(repo: RepositoryProtocol) -> None:
     """Test that Telegram and Slack data are properly isolated."""
-    repository = SQLiteRepository(db_path=str(temp_db))
+    repository = repo
 
     # Create mock Telegram message
     tg_msg = TelegramMessage(
