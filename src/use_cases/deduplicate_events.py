@@ -13,6 +13,9 @@ from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import DeduplicationResult, MessageSource
 from src.services import deduplicator
+from src.services.title_renderer import TitleRenderer
+
+_TITLE_RENDERER = TitleRenderer()
 
 
 def deduplicate_events_use_case(
@@ -110,6 +113,7 @@ def deduplicate_events_use_case(
         all_events,
         date_window_hours=settings.dedup_date_window_hours,
         title_similarity_threshold=settings.dedup_title_similarity,
+        title_renderer=_TITLE_RENDERER,
     )
 
     final_count = len(deduplicated_events)
