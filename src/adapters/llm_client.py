@@ -39,10 +39,11 @@ PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
 @dataclass(frozen=True)
 class PromptCacheEntry:
-    """Cached prompt metadata."""
+    """Cached prompt metadata with filesystem timestamps."""
 
     path: Path
     mtime: float
+    mtime_ns: int
     content: str
     version: str | None
     description: str | None
@@ -78,9 +79,11 @@ def load_prompt_from_file(file_path: str) -> tuple[PromptCacheEntry, bool]:
         raise FileNotFoundError(f"Prompt file not found: {file_path}")
 
     cache_key = str(prompt_file)
-    mtime = prompt_file.stat().st_mtime
+    stat_result = prompt_file.stat()
+    mtime = stat_result.st_mtime
+    mtime_ns = getattr(stat_result, "st_mtime_ns", int(mtime * 1_000_000_000))
     cached_entry = _PROMPT_CACHE.get(cache_key)
-    if cached_entry and cached_entry.mtime == mtime:
+    if cached_entry and cached_entry.mtime_ns == mtime_ns:
         return cached_entry, True
 
     raw_text = prompt_file.read_text(encoding="utf-8")
@@ -118,6 +121,7 @@ def load_prompt_from_file(file_path: str) -> tuple[PromptCacheEntry, bool]:
     entry = PromptCacheEntry(
         path=prompt_file,
         mtime=mtime,
+        mtime_ns=mtime_ns,
         content=content,
         version=version,
         description=description,
