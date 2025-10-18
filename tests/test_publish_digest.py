@@ -11,7 +11,6 @@ import pytest
 import pytz
 
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.models import (
     ActionType,
@@ -22,6 +21,7 @@ from src.domain.models import (
     EventStatus,
     TimeSource,
 )
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.publish_digest import (
     build_digest_blocks,
     build_event_block,
@@ -352,7 +352,7 @@ def test_publish_digest_use_case_dry_run(
     """Test publish digest in dry-run mode."""
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     mock_repository.get_events_in_window_filtered.return_value = sample_events[:3]
 
     # Act
@@ -377,7 +377,7 @@ def test_publish_digest_use_case_with_posting(
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
     mock_slack_client.post_message.return_value = "1234567890.123456"
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     mock_repository.get_events_in_window_filtered.return_value = sample_events[:3]
 
     # Act
@@ -400,7 +400,7 @@ def test_publish_digest_use_case_confidence_filter(
     """Test publish digest with confidence filtering."""
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     # Only return events with confidence >= 0.7
     filtered_events = [e for e in sample_events if e.confidence >= 0.7]
     mock_repository.get_events_in_window_filtered.return_value = filtered_events
@@ -427,7 +427,7 @@ def test_publish_digest_use_case_max_events_limit(
     """Test publish digest with max events limit."""
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     mock_repository.get_events_in_window_filtered.return_value = sample_events
 
     # Act
@@ -449,7 +449,7 @@ def test_publish_digest_use_case_unlimited_events(
     """Test publish digest with no max events limit."""
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     mock_repository.get_events_in_window_filtered.return_value = sample_events
 
     # Act
@@ -471,7 +471,7 @@ def test_publish_digest_use_case_custom_channel(
     """Test publish digest with custom channel."""
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     mock_repository.get_events_in_window_filtered.return_value = sample_events[:3]
     custom_channel = "C12345678"
 
@@ -494,7 +494,7 @@ def test_publish_digest_use_case_uses_settings_defaults(
     """Test that publish digest uses settings defaults when parameters not provided."""
     # Arrange
     mock_slack_client = Mock(spec=SlackClient)
-    mock_repository = Mock(spec=SQLiteRepository)
+    mock_repository = Mock(spec=RepositoryProtocol)
     mock_repository.get_events_in_window_filtered.return_value = sample_events
 
     # Act
