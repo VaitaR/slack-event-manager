@@ -226,7 +226,7 @@ class RepositoryProtocol(Protocol):
         ...
 
     def get_candidates_for_extraction(
-        self, batch_size: int = 50, min_score: float | None = None
+        self, batch_size: int | None = 50, min_score: float | None = None
     ) -> list[EventCandidate]:
         """Get candidates ready for LLM extraction.
 
@@ -364,6 +364,16 @@ class RepositoryProtocol(Protocol):
         Raises:
             RepositoryError: On storage errors
         """
+        ...
+
+    def query_events(self, criteria: "EventQueryCriteria") -> list[Event]:
+        """Query events using repository-specific criteria."""
+        ...
+
+    def query_candidates(
+        self, criteria: "CandidateQueryCriteria"
+    ) -> list[EventCandidate]:
+        """Query candidates using repository-specific criteria."""
         ...
 
     def get_cached_llm_response(self, prompt_hash: str) -> str | None:

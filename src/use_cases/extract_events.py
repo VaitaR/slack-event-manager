@@ -218,7 +218,7 @@ def extract_events_use_case(
     llm_client: LLMClient,
     repository: RepositoryProtocol,
     settings: Settings,
-    batch_size: int = 50,
+    batch_size: int | None = 50,
     check_budget: bool = True,
 ) -> ExtractionResult:
     """Extract events from candidates using LLM.

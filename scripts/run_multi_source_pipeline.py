@@ -29,9 +29,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.llm_client import LLMClient
 from src.adapters.message_client_factory import get_message_client
-from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.adapters.repository_factory import create_repository
+from src.adapters.slack_client import SlackClient
+from src.config.settings import Settings, get_settings
 from src.domain.models import MessageSource
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
@@ -68,11 +70,11 @@ def setup_logging(log_dir: Path) -> None:
 
 def run_source_pipeline(
     source_id: MessageSource,
-    repository: SQLiteRepository,
-    settings: object,
+    repository: RepositoryProtocol,
+    settings: Settings,
     args: argparse.Namespace,
     backfill_from_date: datetime | None = None,
-) -> dict[str, int]:
+) -> dict[str, int | float]:
     """Run pipeline for a single message source.
 
     Args:
@@ -86,7 +88,7 @@ def run_source_pipeline(
         Dictionary with pipeline statistics
     """
     logger = logging.getLogger(__name__)
-    stats = {
+    stats: dict[str, int | float] = {
         "messages_fetched": 0,
         "messages_saved": 0,
         "candidates_created": 0,
@@ -133,6 +135,14 @@ def run_source_pipeline(
         logger.error(f"❌ Failed to create message client for {source_id.value}: {e}")
         return stats
 
+    if not isinstance(message_client, SlackClient):
+        logger.warning(
+            "⚠️  Message client does not support Slack-specific ingestion yet; skipping source"
+        )
+        return stats
+
+    slack_client = message_client
+
     # Create source-specific LLM client
     try:
         llm_settings = source_config.llm_settings or {}
@@ -160,7 +170,7 @@ def run_source_pipeline(
     print("=" * 60)
     try:
         ingest_result = ingest_messages_use_case(
-            slack_client=message_client,  # TODO: Refactor to accept generic client
+            slack_client=slack_client,
             repository=repository,
             settings=settings,
             lookback_hours=args.lookback_hours,
@@ -254,8 +264,8 @@ def run_source_pipeline(
 
 
 def run_single_iteration(
-    repository: SQLiteRepository,
-    settings: object,
+    repository: RepositoryProtocol,
+    settings: Settings,
     args: argparse.Namespace,
     backfill_from_date: datetime | None = None,
 ) -> None:
@@ -305,7 +315,7 @@ def run_single_iteration(
     )
 
     # Aggregate statistics across all sources
-    total_stats = {
+    total_stats: dict[str, int | float] = {
         "messages_fetched": 0,
         "messages_saved": 0,
         "candidates_created": 0,
@@ -355,6 +365,8 @@ def run_single_iteration(
             slack_client = get_message_client(
                 MessageSource.SLACK, settings.slack_bot_token.get_secret_value()
             )
+            if not isinstance(slack_client, SlackClient):
+                raise TypeError("Slack message client factory did not return SlackClient")
             digest_result = publish_digest_use_case(
                 slack_client=slack_client,
                 repository=repository,
@@ -469,7 +481,7 @@ Examples:
     # Load settings
     logger.info("Loading configuration...")
     try:
-        settings = get_settings()
+        settings: Settings = get_settings()
     except Exception as e:
         logger.error(f"Failed to load settings: {e}")
         return 1
@@ -477,7 +489,7 @@ Examples:
     # Initialize repository
     logger.info("Initializing repository...")
     try:
-        repository = SQLiteRepository(db_path=settings.db_path)
+        repository: RepositoryProtocol = create_repository(settings)
     except Exception as e:
         logger.error(f"Failed to initialize repository: {e}")
         return 1

@@ -16,16 +16,17 @@ def log(msg: str) -> None:
 
 
 from src.adapters.llm_client import LLMClient
+from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.ingest_messages import process_slack_message
 
 
-def main():
+def main() -> bool:
     """Run minimal pipeline test."""
     log("\n🚀 Minimal Pipeline Test (5 messages only)")
     log("=" * 70)
@@ -33,7 +34,7 @@ def main():
 
     # Initialize
     log("⏳ Step 0: Initializing...")
-    settings = get_settings()
+    settings: Settings = get_settings()
     slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
     llm_client = LLMClient(
         api_key=settings.openai_api_key.get_secret_value(),
@@ -45,8 +46,12 @@ def main():
     temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     temp_db.close()
 
+    repository: RepositoryProtocol | None = None
     try:
-        repo = SQLiteRepository(temp_db.name)
+        temp_settings: Settings = settings.model_copy(
+            update={"db_path": temp_db.name, "database_type": "sqlite"}
+        )
+        repository = create_repository(temp_settings)
         log("✅ Components initialized")
         log("")
 
@@ -77,14 +82,14 @@ def main():
         processed_messages = [
             process_slack_message(msg, "C04V0TK7UG6") for msg in raw_messages
         ]
-        saved_count = repo.save_messages(processed_messages)
+        saved_count = repository.save_messages(processed_messages)
         log(f"✅ Saved {saved_count} messages")
 
         # Step 3: Build candidates
         log("")
         log("⏳ Step 3: Building candidates...")
         candidate_result = build_candidates_use_case(
-            repository=repo,
+            repository=repository,
             settings=settings,
         )
         log(f"✅ Created {candidate_result.candidates_created} candidates")
@@ -99,7 +104,7 @@ def main():
         log("⏳ Step 4: Extracting events with LLM...")
         extraction_result = extract_events_use_case(
             llm_client=llm_client,
-            repository=repo,
+            repository=repository,
             settings=settings,
             batch_size=10,
             check_budget=False,
@@ -112,7 +117,7 @@ def main():
         log("")
         log("⏳ Step 5: Deduplicating...")
         dedup_result = deduplicate_events_use_case(
-            repository=repo,
+            repository=repository,
             settings=settings,
             lookback_days=7,
         )
@@ -138,6 +143,10 @@ def main():
         return False
 
     finally:
+        if repository is not None:
+            close_method = getattr(repository, "close", None)
+            if callable(close_method):
+                close_method()
         try:
             os.unlink(temp_db.name)
         except:

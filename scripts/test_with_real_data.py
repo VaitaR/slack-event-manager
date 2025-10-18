@@ -13,7 +13,7 @@ LOG_FILE = "pipeline_detailed.log"
 log_handle = None
 
 
-def setup_logging():
+def setup_logging() -> None:
     """Setup logging to file."""
     global log_handle
     log_handle = open(LOG_FILE, "w", encoding="utf-8")
@@ -33,9 +33,10 @@ def log(msg: str) -> None:
 
 
 from src.adapters.llm_client import LLMClient
+from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
@@ -167,7 +168,7 @@ def inspect_database(db_path: str, stage: str = "") -> None:
     conn.close()
 
 
-def main():
+def main() -> bool:
     """Run pipeline test with real data."""
     setup_logging()
 
@@ -177,7 +178,7 @@ def main():
 
     # Initialize
     log("⏳ Step 0: Initializing...")
-    settings = get_settings()
+    settings: Settings = get_settings()
     log("   Settings loaded:")
     log(f"   - LLM model: {settings.llm_model}")
     log(f"   - LLM temperature: {settings.llm_temperature}")
@@ -203,7 +204,10 @@ def main():
         log("🗑️ Removed old test database")
 
     try:
-        repo = SQLiteRepository(db_path)
+        temp_settings: Settings = settings.model_copy(
+            update={"db_path": db_path, "database_type": "sqlite"}
+        )
+        repo: RepositoryProtocol = create_repository(temp_settings)
         log("✅ Components initialized")
         log(f"📊 Database: {db_path}")
         log("")

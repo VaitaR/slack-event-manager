@@ -2,18 +2,19 @@
 """Quick test: extract events from candidates."""
 
 from src.adapters.llm_client import LLMClient
-from src.adapters.sqlite_repository import SQLiteRepository
-from src.config.settings import get_settings
+from src.adapters.repository_factory import create_repository
+from src.config.settings import Settings, get_settings
+from src.domain.protocols import RepositoryProtocol
 from src.use_cases.extract_events import extract_events_use_case
 
 if __name__ == "__main__":
-    settings = get_settings()
+    settings: Settings = get_settings()
     llm_client = LLMClient(
         settings.openai_api_key.get_secret_value(),
         settings.llm_model,
         settings.llm_temperature,
     )
-    repository = SQLiteRepository(settings.db_path)
+    repository: RepositoryProtocol = create_repository(settings)
 
     print("Extracting events from candidates (batch_size=5)...")
     result = extract_events_use_case(
@@ -21,8 +22,8 @@ if __name__ == "__main__":
     )
     print(f"\n✅ Events extracted: {result.events_extracted}")
     print(f"✅ LLM calls: {result.llm_calls}")
-    print(f"✅ Cost: ${result.cost_usd:.4f}")
-    print(f"⚠️ Errors: {result.error_count}")
+    print(f"✅ Cost: ${result.total_cost_usd:.4f}")
+    print(f"⚠️ Errors: {len(result.errors)}")
 
     # Check database
     import sqlite3
