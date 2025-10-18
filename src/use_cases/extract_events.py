@@ -11,7 +11,6 @@ import pytz
 
 from src.adapters.llm_client import LLMClient
 from src.adapters.query_builders import CandidateQueryCriteria
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import Settings
 from src.domain.exceptions import BudgetExceededError, LLMAPIError, ValidationError
 from src.domain.models import (
@@ -25,6 +24,7 @@ from src.domain.models import (
     Severity,
     TimeSource,
 )
+from src.domain.protocols import RepositoryProtocol
 from src.services import deduplicator
 from src.services.importance_scorer import ImportanceScorer
 from src.services.object_registry import ObjectRegistry
@@ -216,7 +216,7 @@ def convert_llm_event_to_domain(
 
 def extract_events_use_case(
     llm_client: LLMClient,
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     batch_size: int = 50,
     check_budget: bool = True,
@@ -238,7 +238,7 @@ def extract_events_use_case(
 
     Args:
         llm_client: LLM client
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         batch_size: Max candidates to process
         check_budget: Whether to enforce budget limits

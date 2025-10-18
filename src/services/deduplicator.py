@@ -190,7 +190,7 @@ def should_merge_events(
     renderer = title_renderer or _DEFAULT_TITLE_RENDERER
     title1 = renderer.render_canonical_title(event1)
     title2 = renderer.render_canonical_title(event2)
-    similarity = fuzz.ratio(title1, title2) / 100.0
+    similarity: float = fuzz.ratio(title1, title2) / 100.0
 
     return similarity >= title_similarity_threshold
 

@@ -92,7 +92,7 @@ class TestRepositoryProtocolMultiSource:
         ]
 
         # Repository should accept list of any message type
-        count = mock_repo.save_messages(messages)  # type: ignore[arg-type]
+        count = mock_repo.save_messages(messages)
         assert count == 1
 
     def test_save_candidates_preserves_source_id(self) -> None:

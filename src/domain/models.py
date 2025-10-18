@@ -167,6 +167,10 @@ class ChannelConfig(BaseModel):
     whitelist_keywords: list[str] = Field(
         default_factory=list, description="Keywords that boost score"
     )
+    trusted_bots: list[str] = Field(
+        default_factory=list,
+        description="List of bot user IDs that should be treated as trusted",
+    )
     keyword_weight: float = Field(default=10.0, description="Weight for keywords")
     mention_weight: float = Field(default=8.0, description="Weight for @channel/@here")
     reply_weight: float = Field(default=5.0, description="Weight for replies")
@@ -185,6 +189,7 @@ class SlackMessage(BaseModel):
     ts: str = Field(..., description="Slack timestamp")
     ts_dt: datetime = Field(..., description="Timestamp as UTC datetime")
     user: str | None = Field(default=None, description="User ID")
+    bot_id: str | None = Field(default=None, description="Slack bot identifier")
     user_real_name: str | None = Field(default=None, description="User real name")
     user_display_name: str | None = Field(default=None, description="User display name")
     user_email: str | None = Field(default=None, description="User email")
@@ -225,6 +230,8 @@ class TelegramMessage(BaseModel):
     message_date: datetime = Field(..., description="Message date as UTC datetime")
     sender_id: str | None = Field(default=None, description="Sender user ID")
     sender_name: str | None = Field(default=None, description="Sender display name")
+    user: str | None = Field(default=None, description="User ID")
+    bot_id: str | None = Field(default=None, description="Bot identifier")
     is_bot: bool = Field(default=False, description="Whether sender is a bot")
     text: str = Field(default="", description="Raw message text")
     text_norm: str = Field(default="", description="Normalized text")
@@ -246,6 +253,8 @@ class TelegramMessage(BaseModel):
     views: int = Field(default=0, description="View count")
     reply_count: int = Field(default=0, description="Reply/comment count")
     reactions: dict[str, int] = Field(default_factory=dict, description="Reactions")
+    attachments_count: int = Field(default=0, description="Number of attachments")
+    files_count: int = Field(default=0, description="Number of files")
     ingested_at: datetime = Field(
         default_factory=datetime.utcnow, description="Ingestion timestamp"
     )
@@ -281,6 +290,12 @@ class ScoringFeatures(BaseModel):
     has_files: bool = False
     is_bot: bool = False
     channel_name: str = ""
+    author_id: str | None = None
+    bot_id: str | None = None
+    explanations: list[str] = Field(
+        default_factory=list,
+        description="Human-readable scoring explanation entries",
+    )
 
 
 class EventCandidate(BaseModel):

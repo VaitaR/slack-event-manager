@@ -39,6 +39,15 @@
             },
             "uniqueItems": true,
             "description": "Keywords to boost message score"
+          },
+          "trusted_bots": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "description": "Bot user IDs that should not be penalized"
           }
         },
         "required": ["channel_id", "channel_name"],
