@@ -59,7 +59,8 @@ def process_slack_message(
         else datetime.utcnow().replace(tzinfo=pytz.UTC)
     )
     user = raw_msg.get("user")
-    is_bot = bool(raw_msg.get("bot_id") or raw_msg.get("subtype") == "bot_message")
+    bot_id = raw_msg.get("bot_id")
+    is_bot = bool(bot_id or raw_msg.get("subtype") == "bot_message")
     subtype = raw_msg.get("subtype")
     text = raw_msg.get("text", "")
 
@@ -136,6 +137,7 @@ def process_slack_message(
         user_email=user_email,
         user_profile_image=user_profile_image,
         is_bot=is_bot,
+        bot_id=bot_id,
         subtype=subtype,
         text=text,
         blocks_text=blocks_text,

@@ -49,6 +49,34 @@ def test_extract_features_anchors(
     assert features.anchor_count == 1
 
 
+def test_extract_features_sets_has_files_from_attachments(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
+    """Attachments should set the has_files flag."""
+    message_with_attachment = sample_slack_message.model_copy(
+        update={"attachments_count": 1}
+    )
+
+    features = scoring_engine.extract_features(
+        message_with_attachment, sample_channel_config
+    )
+
+    assert features.has_files is True
+
+
+def test_extract_features_sets_has_files_from_files(
+    sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
+) -> None:
+    """Slack file uploads should set the has_files flag."""
+    message_with_file = sample_slack_message.model_copy(update={"files_count": 2})
+
+    features = scoring_engine.extract_features(
+        message_with_file, sample_channel_config
+    )
+
+    assert features.has_files is True
+
+
 def test_calculate_score_keywords(sample_channel_config: ChannelConfig) -> None:
     """Test score calculation with keywords."""
     features = ScoringFeatures(
@@ -110,6 +138,57 @@ def test_calculate_score_bot_penalty(sample_channel_config: ChannelConfig) -> No
 
     # 10 (keyword) - 15 (bot penalty) = -5
     assert score == -5.0
+    assert "bot penalty applied" in features.explanations
+
+
+def test_calculate_score_attachments_weight(sample_channel_config: ChannelConfig) -> None:
+    """Attachments should use configurable weight."""
+    config = sample_channel_config.model_copy(update={"file_weight": 9.5})
+    features = ScoringFeatures(
+        has_files=True,
+        channel_name="test",
+    )
+
+    score = scoring_engine.calculate_score(features, config)
+
+    assert score == 9.5
+    assert "attachments weight +9.5" in features.explanations
+
+
+def test_calculate_score_trusted_bot_bypass(
+    sample_channel_config: ChannelConfig,
+) -> None:
+    """Trusted bots should bypass the penalty with explanation."""
+    config = sample_channel_config.model_copy(
+        update={"trusted_bots": ["U_TRUSTED", "B987"]}
+    )
+    features = ScoringFeatures(
+        is_bot=True,
+        channel_name="test",
+        author_id="U_TRUSTED",
+    )
+
+    score = scoring_engine.calculate_score(features, config)
+
+    assert score == 0.0
+    assert "trusted bot bypass" in features.explanations
+
+
+def test_calculate_score_untrusted_bot_penalty(
+    sample_channel_config: ChannelConfig,
+) -> None:
+    """Untrusted bots should still incur the penalty."""
+    config = sample_channel_config.model_copy(update={"trusted_bots": ["U_TRUSTED"]})
+    features = ScoringFeatures(
+        is_bot=True,
+        channel_name="test",
+        author_id="U_OTHER",
+    )
+
+    score = scoring_engine.calculate_score(features, config)
+
+    assert score == sample_channel_config.bot_penalty
+    assert "bot penalty applied" in features.explanations
 
 
 def test_calculate_score_anchors_capped(sample_channel_config: ChannelConfig) -> None:
