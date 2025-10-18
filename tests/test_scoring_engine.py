@@ -70,9 +70,7 @@ def test_extract_features_sets_has_files_from_files(
     """Slack file uploads should set the has_files flag."""
     message_with_file = sample_slack_message.model_copy(update={"files_count": 2})
 
-    features = scoring_engine.extract_features(
-        message_with_file, sample_channel_config
-    )
+    features = scoring_engine.extract_features(message_with_file, sample_channel_config)
 
     assert features.has_files is True
 
@@ -141,7 +139,9 @@ def test_calculate_score_bot_penalty(sample_channel_config: ChannelConfig) -> No
     assert "bot penalty applied" in features.explanations
 
 
-def test_calculate_score_attachments_weight(sample_channel_config: ChannelConfig) -> None:
+def test_calculate_score_attachments_weight(
+    sample_channel_config: ChannelConfig,
+) -> None:
     """Attachments should use configurable weight."""
     config = sample_channel_config.model_copy(update={"file_weight": 9.5})
     features = ScoringFeatures(

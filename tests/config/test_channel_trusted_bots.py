@@ -1,7 +1,7 @@
 """Regression tests for trusted bot configuration handling."""
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import pytest
 import yaml
@@ -10,7 +10,9 @@ from src.config import settings as settings_module
 from src.domain.models import ChannelConfig
 
 
-def _write_channels_config(tmp_path: Path, channels: Iterable[dict[str, object]]) -> None:
+def _write_channels_config(
+    tmp_path: Path, channels: Iterable[dict[str, object]]
+) -> None:
     """Write a minimal channels.yaml file for Settings to consume."""
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
