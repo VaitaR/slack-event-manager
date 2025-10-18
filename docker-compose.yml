@@ -32,25 +32,17 @@ services:
       DATABASE_TYPE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: slack_events
-      POSTGRES_USER: postgres
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-slack_events}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      - DATABASE_TYPE=postgres
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-slack_events}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./config:/app/config
     command: python scripts/run_pipeline.py --interval-seconds 3600
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "from src.config.settings import get_settings; get_settings(); print('OK')"]
       interval: 5m
@@ -71,31 +63,21 @@ services:
       DATABASE_TYPE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: slack_events
-      POSTGRES_USER: postgres
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-slack_events}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
       slack-bot:
         condition: service_started
-    environment:
-      - DATABASE_TYPE=postgres
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-slack_events}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
     ports:
       - "8501:8501"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs:ro
+      - ./config:/app/config
     command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
-    depends_on:
-      slack-bot:
-        condition: service_started
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s
@@ -107,10 +89,6 @@ services:
 
 volumes:
   postgres_data:
-
-networks:
-  slack_network:
-    driver: bridge
 
 networks:
   slack_network:
