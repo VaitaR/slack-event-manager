@@ -141,7 +141,10 @@ class TestLLMClientPrompts:
 
         assert client.system_prompt == custom_prompt
         assert client.prompt_version is None
-        assert client.prompt_checksum == hashlib.sha256(custom_prompt.encode("utf-8")).hexdigest()
+        assert (
+            client.prompt_checksum
+            == hashlib.sha256(custom_prompt.encode("utf-8")).hexdigest()
+        )
 
     def test_llm_client_loads_yaml_prompt_metadata(self, tmp_path: Path) -> None:
         """Prompt metadata from YAML should populate client fields."""
@@ -182,9 +185,10 @@ system: |
             )
 
         assert client.system_prompt
-        assert client.prompt_checksum == hashlib.sha256(
-            client.system_prompt.encode("utf-8")
-        ).hexdigest()
+        assert (
+            client.prompt_checksum
+            == hashlib.sha256(client.system_prompt.encode("utf-8")).hexdigest()
+        )
 
     def test_llm_call_metadata_uses_system_prompt_hash(self, tmp_path: Path) -> None:
         """LLM call metadata should use the system prompt hash."""

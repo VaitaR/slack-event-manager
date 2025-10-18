@@ -37,6 +37,8 @@ PREVIEW_LENGTH_PROMPT: Final[int] = 800
 
 PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
+
+
 @dataclass(frozen=True)
 class PromptCacheEntry:
     """Cached prompt metadata with filesystem timestamps."""
@@ -108,9 +110,7 @@ def load_prompt_from_file(file_path: str) -> tuple[PromptCacheEntry, bool]:
         description_value = payload.get("description")
 
         version = str(version_value) if version_value is not None else None
-        description = (
-            str(description_value) if description_value is not None else None
-        )
+        description = str(description_value) if description_value is not None else None
         content = str(system_prompt)
     else:
         content = raw_text
