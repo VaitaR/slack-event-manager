@@ -4,6 +4,7 @@ Tests loading message_sources from YAML, auto-migration, and backward compatibil
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -78,7 +79,7 @@ class TestBackwardCompatibility:
     def test_no_message_sources_defaults_to_slack(self) -> None:
         """Test that missing message_sources creates default Slack source."""
         # When no message_sources in config, should auto-create from slack_channels
-        config = {}
+        config: dict[str, Any] = {}
 
         # This test documents expected behavior - implementation will
         # auto-migrate slack_channels to message_sources format
@@ -119,12 +120,12 @@ class TestPerSourceLLMSettings:
 
     def test_per_source_llm_temperature(self) -> None:
         """Test different temperature settings per source."""
-        slack_config = {
+        slack_config: dict[str, Any] = {
             "source_id": "slack",
             "llm_settings": {"temperature": 1.0},
         }
 
-        telegram_config = {
+        telegram_config: dict[str, Any] = {
             "source_id": "telegram",
             "llm_settings": {"temperature": 0.7},
         }

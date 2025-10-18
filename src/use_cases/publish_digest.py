@@ -286,7 +286,7 @@ def publish_digest_use_case(
 
     Args:
         slack_client: Slack client
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         lookback_hours: Hours to look back (defaults to settings.digest_lookback_hours)
         target_channel: Override digest channel

@@ -4,8 +4,9 @@ from datetime import datetime
 
 import pytz
 
-from src.domain.models import Event
+from src.domain.models import Event, MessageSource
 from src.services import deduplicator
+from src.services.title_renderer import TitleRenderer
 from tests.conftest import create_test_event
 
 
@@ -162,6 +163,98 @@ def test_should_merge_events_with_anchor_overlap() -> None:
     )
 
     assert deduplicator.should_merge_events(event1, event2) is True
+
+
+def test_should_merge_events_meets_similarity_threshold() -> None:
+    """Events should merge when similarity meets the threshold."""
+    renderer = TitleRenderer()
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Payments Dashboard",
+        qualifiers=["beta"],
+        anchors=["PROJ-123"],
+        links=["https://example.com/a"],
+    )
+
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Payments Dashboard",
+        qualifiers=["beta release"],
+        anchors=["PROJ-123"],
+        links=["https://example.com/a"],
+    )
+
+    assert (
+        deduplicator.should_merge_events(
+            event1,
+            event2,
+            title_similarity_threshold=0.89,
+            title_renderer=renderer,
+        )
+        is True
+    )
+
+
+def test_should_not_merge_events_below_similarity_threshold() -> None:
+    """Events should not merge when similarity falls below the threshold."""
+    renderer = TitleRenderer()
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Payments Dashboard",
+        qualifiers=["beta"],
+        anchors=["PROJ-123"],
+        links=["https://example.com/a"],
+    )
+
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Payments Dashboard",
+        qualifiers=["beta release"],
+        anchors=["PROJ-123"],
+        links=["https://example.com/a"],
+    )
+
+    assert (
+        deduplicator.should_merge_events(
+            event1,
+            event2,
+            title_similarity_threshold=0.9,
+            title_renderer=renderer,
+        )
+        is False
+    )
+
+
+def test_should_not_merge_events_from_different_sources() -> None:
+    """Events from different sources must never merge."""
+    renderer = TitleRenderer()
+    event1 = create_test_event(
+        message_id="msg1",
+        object_name="Release v1.0",
+        dedup_key="key1",
+        links=["https://example.com/release"],
+        anchors=["PROJ-999"],
+        source_id=MessageSource.SLACK,
+    )
+
+    event2 = create_test_event(
+        message_id="msg2",
+        object_name="Release v1.0",
+        dedup_key="key2",
+        links=["https://example.com/release"],
+        anchors=["PROJ-999"],
+        source_id=MessageSource.TELEGRAM,
+    )
+
+    assert (
+        deduplicator.should_merge_events(
+            event1,
+            event2,
+            title_similarity_threshold=0.5,
+            title_renderer=renderer,
+        )
+        is False
+    )
 
 
 def test_merge_events_combines_fields() -> None:

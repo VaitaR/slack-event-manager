@@ -235,6 +235,22 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def query_candidates(
+        self, criteria: "CandidateQueryCriteria"
+    ) -> list[EventCandidate]:
+        """Query event candidates using structured criteria.
+
+        Args:
+            criteria: Query builder criteria object
+
+        Returns:
+            List of event candidates matching criteria
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
     def update_candidate_status(self, message_id: str, status: str) -> None:
         """Update candidate processing status.
 
@@ -280,11 +296,37 @@ class RepositoryProtocol(Protocol):
         self,
         start_dt: datetime,
         end_dt: datetime,
-        min_confidence: float,
+        min_confidence: float = 0.0,
         max_events: int | None = None,
-        category_filter: list[str] | None = None,
     ) -> list[Event]:
-        """Get events within window applying additional filters."""
+        """Get filtered events within date window.
+
+        Args:
+            start_dt: Start datetime (UTC)
+            end_dt: End datetime (UTC)
+            min_confidence: Minimum confidence threshold
+            max_events: Optional maximum number of events
+
+        Returns:
+            List of filtered events
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        ...
+
+    def query_events(self, criteria: "EventQueryCriteria") -> list[Event]:
+        """Query events using structured criteria.
+
+        Args:
+            criteria: Query builder criteria object
+
+        Returns:
+            List of events matching criteria
+
+        Raises:
+            RepositoryError: On storage errors
+        """
         ...
 
     def save_llm_call(self, metadata: LLMCallMetadata) -> None:

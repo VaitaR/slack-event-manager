@@ -3,7 +3,7 @@
 Scores messages and selects candidates for LLM extraction.
 """
 
-from typing import Sequence
+from typing import cast
 
 from src.config.settings import Settings
 from src.domain.models import (
@@ -30,7 +30,7 @@ def build_candidates_use_case(
     5. Insert into event_candidates
 
     Args:
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         source_id: Optional message source filter (SLACK, TELEGRAM, etc.)
                   If None, processes Slack messages (backward compatibility)
@@ -49,10 +49,12 @@ def build_candidates_use_case(
         8
     """
     # Get messages not yet scored
-    new_messages: Sequence[MessageRecord]
+    new_messages: list[MessageRecord]
     if source_id is None:
         # Backward compatibility: default to Slack
-        new_messages = repository.get_new_messages_for_candidates()
+        new_messages = cast(
+            list[MessageRecord], repository.get_new_messages_for_candidates()
+        )
     else:
         # Use source-agnostic method
         new_messages = repository.get_new_messages_for_candidates_by_source(source_id)
@@ -76,7 +78,7 @@ def build_candidates_use_case(
             # Channel not in whitelist, skip
             continue
 
-        # Score message - works for both SlackMessage and TelegramMessage
+        # Score message - works for any MessageRecord implementation
         score, features = scoring_engine.score_message(message, channel_config)  # type: ignore[arg-type]
         scores.append(score)
 

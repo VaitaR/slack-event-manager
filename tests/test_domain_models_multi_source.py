@@ -31,8 +31,8 @@ class TestMessageSource:
 
     def test_message_source_enum_values(self) -> None:
         """Test MessageSource has correct values."""
-        assert MessageSource.SLACK == "slack"
-        assert MessageSource.TELEGRAM == "telegram"
+        assert MessageSource.SLACK.value == "slack"
+        assert MessageSource.TELEGRAM.value == "telegram"
 
     def test_message_source_enum_from_string(self) -> None:
         """Test MessageSource can be created from string."""

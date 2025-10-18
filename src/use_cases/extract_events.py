@@ -238,7 +238,7 @@ def extract_events_use_case(
 
     Args:
         llm_client: LLM client
-        repository: Data repository
+        repository: Repository protocol implementation
         settings: Application settings
         batch_size: Max candidates to process
         check_budget: Whether to enforce budget limits

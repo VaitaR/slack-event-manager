@@ -36,4 +36,3 @@ alembic revision -m "description"
 
 Database connection details are loaded from Settings (config.yaml + .env).
 See alembic/env.py for configuration logic.
-

@@ -209,6 +209,8 @@ class TestLLMSettingsPerSource:
             slack_config = settings.get_source_config(MessageSource.SLACK)
             telegram_config = settings.get_source_config(MessageSource.TELEGRAM)
 
+            assert slack_config is not None
+            assert telegram_config is not None
             assert slack_config.llm_settings["temperature"] == 1.0
             assert telegram_config.llm_settings["temperature"] == 0.7
 
@@ -247,6 +249,8 @@ class TestLLMSettingsPerSource:
             slack_config = settings.get_source_config(MessageSource.SLACK)
             telegram_config = settings.get_source_config(MessageSource.TELEGRAM)
 
+            assert slack_config is not None
+            assert telegram_config is not None
             assert "slack.txt" in slack_config.prompt_file
             assert "telegram.txt" in telegram_config.prompt_file
 
