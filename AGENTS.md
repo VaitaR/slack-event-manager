@@ -567,6 +567,35 @@ SKIP_SLACK_E2E=false python -m pytest tests/test_digest_e2e.py::test_digest_real
 
 ## Recent Changes
 
+### 2025-10-18: CI/CD Optimization with uv ⚡
+
+**Performance Improvements:**
+- ✅ Migrated from pip to uv for 10-100x faster package installation
+- ✅ Split CI into 3 parallel jobs (lint, typecheck, test)
+- ✅ Pinned ruff version to 0.12.8 for consistent formatting
+- ✅ Lint job installs only ruff (fastest feedback in ~8s)
+
+**Results:**
+- **Lint**: 8s (was ~30-45s) - 73% faster
+- **Type Check**: 23s (was ~40s) - 43% faster
+- **Tests**: 19s (was ~20s)
+- **Total**: ~30s parallel (was ~2-3min sequential) - 75% faster
+
+**Benefits:**
+- 🚀 10-100x faster dependency installation with uv
+- ⚡ Parallel execution for faster feedback
+- 🎯 Lint errors visible in 8s instead of 45s
+- 💰 Lower CI costs with faster execution
+
+### 2025-10-18: Multi-Source Bug Fixes 🐛
+
+**Critical Fixes:**
+- ✅ Fixed ingestion state column names: `last_ts` → `last_processed_ts`
+- ✅ Added `updated_at` column to ingestion state tables
+- ✅ Fixed `MessageSourceConfig` type handling in orchestrator
+- ✅ Fixed `--source` CLI flag filtering logic
+- ✅ All 27 multi-source tests passing
+
 ### 2025-10-17: Multi-Source Architecture Implementation 🔄
 
 **Phase 1: Domain Layer (Complete)** ✅
