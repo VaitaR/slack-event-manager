@@ -149,7 +149,7 @@ def deduplicate_events_use_case(
         repository.save_events(deduplicated_events)
 
     return DeduplicationResult(
-        new_events=final_count - merged_count,
+        new_events=final_count,
         merged_events=merged_count,
         total_events=final_count,
     )
