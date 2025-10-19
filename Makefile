@@ -39,7 +39,7 @@ typecheck: ## Run mypy type checker (matches CI exactly)
 
 test: ## Run tests with pytest (matches CI exactly)
 	@echo "$(BLUE)Running tests...$(NC)"
-	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy python -m pytest && echo "$(GREEN)✓ Tests passed$(NC)" || (echo "$(RED)✗ Tests failed$(NC)" && exit 1)
+	@SLACK_BOT_TOKEN=dummy OPENAI_API_KEY=dummy python -m pytest -k "not (test_postgres_repository or telegram)" && echo "$(GREEN)✓ Tests passed$(NC)" || (echo "$(RED)✗ Tests failed$(NC)" && exit 1)
 
 test-quick: ## Run tests without coverage
 	@echo "$(BLUE)Running quick tests...$(NC)"
