@@ -10,19 +10,23 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import psycopg2
-import psycopg2.extras
-from psycopg2 import pool
-from psycopg2.extensions import connection as Connection
 
 from src.domain.exceptions import RepositoryError
-from src.domain.models import Event, EventCandidate, LLMCallMetadata, SlackMessage
+from src.domain.models import (
+    Event,
+    EventCandidate,
+    LLMCallMetadata,
+    MessageSource,
+    SlackMessage,
+    TelegramMessage,
+)
 
 if TYPE_CHECKING:
     from src.adapters.query_builders import CandidateQueryCriteria, EventQueryCriteria
 
 
 class PostgresRepository:
-    """PostgreSQL repository with connection pooling."""
+    """PostgreSQL repository with direct connections."""
 
     def __init__(
         self,
@@ -31,10 +35,8 @@ class PostgresRepository:
         database: str,
         user: str,
         password: str,
-        minconn: int = 1,
-        maxconn: int = 10,
     ):
-        """Initialize PostgreSQL connection pool.
+        """Initialize PostgreSQL repository.
 
         Args:
             host: PostgreSQL host
@@ -42,31 +44,33 @@ class PostgresRepository:
             database: Database name
             user: Database user
             password: Database password
-            minconn: Minimum connections in pool
-            maxconn: Maximum connections in pool
 
         Raises:
-            RepositoryError: On connection pool creation failure
+            RepositoryError: On connection errors
         """
+        self._host = host
+        self._port = port
+        self._database = database
+        self._user = user
+        self._password = password
+
+        # Test connection on initialization
         try:
-            self._pool = pool.SimpleConnectionPool(
-                minconn,
-                maxconn,
+            conn = psycopg2.connect(
                 host=host,
                 port=port,
                 database=database,
                 user=user,
                 password=password,
             )
-            print(
-                f"🔧 PostgreSQL connection pool created: {user}@{host}:{port}/{database}"
-            )
+            conn.close()
+            print(f"🔧 PostgreSQL connected: {user}@{host}:{port}/{database}")
         except psycopg2.Error as e:
-            raise RepositoryError(f"Failed to create connection pool: {e}") from e
+            raise RepositoryError(f"Failed to connect to PostgreSQL: {e}") from e
 
     @contextmanager
-    def _get_connection(self) -> Iterator[Connection]:
-        """Get connection from pool (context manager).
+    def _get_connection(self) -> Iterator[Any]:
+        """Get database connection (context manager).
 
         Yields:
             Database connection
@@ -76,15 +80,19 @@ class PostgresRepository:
         """
         conn = None
         try:
-            conn = self._pool.getconn()
+            conn = psycopg2.connect(
+                host=self._host,
+                port=self._port,
+                database=self._database,
+                user=self._user,
+                password=self._password,
+            )
             yield conn
         except psycopg2.Error as e:
-            if conn:
-                conn.rollback()
-            raise RepositoryError(f"Database error: {e}") from e
+            raise RepositoryError(f"Failed to get database connection: {e}") from e
         finally:
             if conn:
-                self._pool.putconn(conn)
+                conn.close()
 
     def _row_to_message(self, row: dict[str, Any]) -> SlackMessage:
         """Convert database row to SlackMessage.
@@ -307,7 +315,7 @@ class PostgresRepository:
             RepositoryError: On storage errors
         """
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                 cur.execute(
                     "SELECT ts FROM channel_watermarks WHERE channel_id = %s",
                     (channel,),
@@ -349,7 +357,7 @@ class PostgresRepository:
             RepositoryError: On storage errors
         """
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                 cur.execute(
                     """
                     SELECT m.*
@@ -360,7 +368,9 @@ class PostgresRepository:
                     """
                 )
                 rows = cur.fetchall()
-                return [self._row_to_message(dict(row)) for row in rows]
+                # Get column names from cursor description
+                columns = [desc[0] for desc in cur.description]
+                return [self._row_to_message(dict(zip(columns, row))) for row in rows]
 
     def save_candidates(self, candidates: list[EventCandidate]) -> int:
         """Save event candidates (upsert).
@@ -424,7 +434,7 @@ class PostgresRepository:
             RepositoryError: On storage errors
         """
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                 query = """
                     SELECT * FROM event_candidates
                     WHERE status = 'new'
@@ -443,7 +453,9 @@ class PostgresRepository:
 
                 cur.execute(query, params)
                 rows = cur.fetchall()
-                return [self._row_to_candidate(dict(row)) for row in rows]
+                # Get column names from cursor description
+                columns = [desc[0] for desc in cur.description]
+                return [self._row_to_candidate(dict(zip(columns, row))) for row in rows]
 
     def update_candidate_status(self, message_id: str, status: str) -> None:
         """Update candidate processing status.
@@ -626,7 +638,7 @@ class PostgresRepository:
             RepositoryError: On storage errors
         """
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                 cur.execute(
                     """
                     SELECT * FROM events
@@ -637,7 +649,9 @@ class PostgresRepository:
                     (start_dt, end_dt),
                 )
                 rows = cur.fetchall()
-                return [self._row_to_event(dict(row)) for row in rows]
+                # Get column names from cursor description
+                columns = [desc[0] for desc in cur.description]
+                return [self._row_to_event(dict(zip(columns, row))) for row in rows]
 
     def save_llm_call(self, metadata: LLMCallMetadata) -> None:
         """Save LLM call metadata.
@@ -722,11 +736,14 @@ class PostgresRepository:
         # Not implemented yet - would need separate cache table
         return None
 
-    def get_last_processed_ts(self, channel_id: str) -> str | None:
+    def get_last_processed_ts(
+        self, channel: str, source_id: MessageSource | None = None
+    ) -> float | None:
         """Get last processed timestamp for a channel from ingestion_state.
 
         Args:
-            channel_id: Channel ID
+            channel: Channel ID
+            source_id: Message source (optional for backward compatibility)
 
         Returns:
             Last processed timestamp or None
@@ -734,36 +751,45 @@ class PostgresRepository:
         Raises:
             RepositoryError: On storage errors
         """
+        # For Telegram, use telegram-specific state table if source_id is provided
+        table_name = "ingestion_state_telegram" if source_id else "ingestion_state"
+
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                 cur.execute(
-                    "SELECT last_processed_ts FROM ingestion_state WHERE channel_id = %s",
-                    (channel_id,),
+                    f"SELECT last_processed_ts FROM {table_name} WHERE channel_id = %s",
+                    (channel,),
                 )
                 row = cur.fetchone()
-                return row["last_processed_ts"] if row else None
+                return float(row["last_processed_ts"]) if row else None
 
-    def update_last_processed_ts(self, channel_id: str, ts: str) -> None:
+    def update_last_processed_ts(
+        self, channel: str, ts: float, source_id: MessageSource | None = None
+    ) -> None:
         """Update last processed timestamp for a channel in ingestion_state.
 
         Args:
-            channel_id: Channel ID
+            channel: Channel ID
             ts: New timestamp
+            source_id: Message source (optional for backward compatibility)
 
         Raises:
             RepositoryError: On storage errors
         """
+        # For Telegram, use telegram-specific state table if source_id is provided
+        table_name = "ingestion_state_telegram" if source_id else "ingestion_state"
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    INSERT INTO ingestion_state (channel_id, last_processed_ts, updated_at)
+                    f"""
+                    INSERT INTO {table_name} (channel_id, last_processed_ts, updated_at)
                     VALUES (%s, %s, NOW())
                     ON CONFLICT (channel_id) DO UPDATE SET
                         last_processed_ts = EXCLUDED.last_processed_ts,
                         updated_at = EXCLUDED.updated_at
                     """,
-                    (channel_id, ts),
+                    (channel, ts),
                 )
                 conn.commit()
 
@@ -781,7 +807,7 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                     # Build query parts
                     where_clause, where_params = criteria.to_where_clause()
                     order_clause = criteria.to_order_clause()
@@ -821,7 +847,7 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
                     # Build query parts
                     where_clause, where_params = criteria.to_where_clause()
                     order_clause = criteria.to_order_clause()
@@ -845,8 +871,158 @@ class PostgresRepository:
         except psycopg2.Error as e:
             raise RepositoryError(f"Failed to query candidates: {e}") from e
 
+    def save_telegram_messages(self, messages: list[TelegramMessage]) -> int:
+        """Save Telegram messages to storage (idempotent upsert).
+
+        Args:
+            messages: List of Telegram messages
+
+        Returns:
+            Number of messages saved
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        if not messages:
+            return 0
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    for msg in messages:
+                        cur.execute(
+                            """
+                            INSERT INTO raw_telegram_messages (
+                                message_id, channel, message_date, sender_id, sender_name,
+                                text, text_norm, forward_from_channel, forward_from_message_id,
+                                media_type, links_raw, links_norm, anchors, views, reply_count,
+                                reactions, post_url, ingested_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (message_id) DO UPDATE SET
+                                channel = EXCLUDED.channel,
+                                message_date = EXCLUDED.message_date,
+                                sender_id = EXCLUDED.sender_id,
+                                sender_name = EXCLUDED.sender_name,
+                                text = EXCLUDED.text,
+                                text_norm = EXCLUDED.text_norm,
+                                forward_from_channel = EXCLUDED.forward_from_channel,
+                                forward_from_message_id = EXCLUDED.forward_from_message_id,
+                                media_type = EXCLUDED.media_type,
+                                links_raw = EXCLUDED.links_raw,
+                                links_norm = EXCLUDED.links_norm,
+                                anchors = EXCLUDED.anchors,
+                                views = EXCLUDED.views,
+                                reply_count = EXCLUDED.reply_count,
+                                reactions = EXCLUDED.reactions,
+                                post_url = EXCLUDED.post_url,
+                                ingested_at = EXCLUDED.ingested_at
+                            """,
+                            (
+                                msg.message_id,
+                                msg.channel,
+                                msg.message_date,
+                                msg.sender_id,
+                                msg.sender_name,
+                                msg.text,
+                                msg.text_norm,
+                                msg.forward_from_channel,
+                                msg.forward_from_message_id,
+                                msg.media_type,
+                                json.dumps(msg.links_raw),
+                                json.dumps(msg.links_norm),
+                                json.dumps(msg.anchors),
+                                msg.views,
+                                msg.reply_count,
+                                json.dumps(msg.reactions),
+                                msg.post_url,
+                                msg.ingested_at,
+                            ),
+                        )
+
+                    conn.commit()
+                    count = len(messages)
+
+            return count
+
+        except psycopg2.Error as e:
+            raise RepositoryError(f"Failed to save Telegram messages: {e}") from e
+
+    def get_telegram_messages(
+        self, channel: str, limit: int = 100
+    ) -> list[TelegramMessage]:
+        """Get Telegram messages from storage.
+
+        Args:
+            channel: Channel username or ID (optional filter)
+            limit: Maximum messages to return
+
+        Returns:
+            List of Telegram messages ordered by date DESC
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
+                    if channel:
+                        cur.execute(
+                            """
+                            SELECT * FROM raw_telegram_messages
+                            WHERE channel = %s
+                            ORDER BY message_date DESC
+                            LIMIT %s
+                            """,
+                            (channel, limit),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT * FROM raw_telegram_messages
+                            ORDER BY message_date DESC
+                            LIMIT %s
+                            """,
+                            (limit,),
+                        )
+
+                    rows = cur.fetchall()
+                    # Get column names from cursor description
+                    columns = [desc[0] for desc in cur.description]
+                    return [
+                        self._row_to_telegram_message(dict(zip(columns, row)))
+                        for row in rows
+                    ]
+
+        except psycopg2.Error as e:
+            raise RepositoryError(f"Failed to get Telegram messages: {e}") from e
+
+    def _row_to_telegram_message(self, row: dict[str, Any]) -> TelegramMessage:
+        """Convert database row to TelegramMessage.
+
+        Args:
+            row: Database row
+
+        Returns:
+            TelegramMessage instance
+        """
+        return TelegramMessage(
+            message_id=row["message_id"],
+            channel=row["channel"],
+            message_date=row["message_date"],
+            sender_id=row["sender_id"],
+            sender_name=row["sender_name"],
+            text=row["text"] or "",
+            text_norm=row["text_norm"] or "",
+            forward_from_channel=row["forward_from_channel"],
+            forward_from_message_id=row["forward_from_message_id"],
+            media_type=row["media_type"],
+            links_raw=row["links_raw"] if row["links_raw"] else [],
+            links_norm=row["links_norm"] if row["links_norm"] else [],
+            anchors=row["anchors"] if row["anchors"] else [],
+            views=row["views"] or 0,
+            reply_count=row["reply_count"] or 0,
+            reactions=row["reactions"] if row["reactions"] else {},
+            post_url=row["post_url"],
+            ingested_at=row["ingested_at"],
+        )
+
     def close(self) -> None:
-        """Close all connections in pool."""
-        if self._pool:
-            self._pool.closeall()
-            print("🔌 PostgreSQL connection pool closed")
+        """Close repository (no-op for direct connections)."""
+        print("🔌 PostgreSQL repository closed")
