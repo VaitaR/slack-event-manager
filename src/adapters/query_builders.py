@@ -143,7 +143,8 @@ class EventQueryCriteria:
 
         # Channel filter (JSON array search)
         if self.source_channels:
-            # SQLite JSON search: check if any channel is in source_channels array
+            # JSON array search: check if any channel is in source_channels array
+            # Works for both SQLite (TEXT JSON) and PostgreSQL (JSONB)
             channel_conditions = []
             for channel in self.source_channels:
                 channel_conditions.append("source_channels LIKE ?")

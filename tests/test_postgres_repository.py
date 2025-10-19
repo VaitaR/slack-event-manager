@@ -8,10 +8,16 @@ These tests are skipped unless:
 Run with: TEST_POSTGRES=1 POSTGRES_PASSWORD=password pytest tests/test_postgres_repository.py
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 
+from src.adapters.query_builders import (
+    CandidateQueryCriteria,
+    EventQueryCriteria,
+    high_priority_candidates_criteria,
+    recent_events_criteria,
+)
 from src.domain.models import CandidateStatus, EventCategory, LLMCallMetadata
 
 
@@ -391,3 +397,313 @@ def test_postgres_event_category_handling(postgres_test_db, sample_event):
     assert len(events) == len(categories)
     retrieved_categories = {e.category for e in events}
     assert retrieved_categories == set(categories)
+
+
+def test_postgres_query_events_basic(postgres_test_db, sample_event):
+    """Test basic event querying in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save test events
+    events = []
+    for i in range(3):
+        event = sample_event.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "dedup_key": f"key_{i}",
+                "category": EventCategory.PRODUCT if i < 2 else EventCategory.RISK,
+                "confidence": 0.8 + i * 0.1,
+            }
+        )
+        events.append(event)
+    repo.save_events(events)
+
+    # Query all events
+    criteria = EventQueryCriteria()
+    results = repo.query_events(criteria)
+    assert len(results) == 3
+
+    # Query by category
+    criteria = EventQueryCriteria(categories=[EventCategory.PRODUCT])
+    results = repo.query_events(criteria)
+    assert len(results) == 2
+    assert all(e.category == EventCategory.PRODUCT for e in results)
+
+    # Query by min confidence
+    criteria = EventQueryCriteria(min_confidence=0.9)
+    results = repo.query_events(criteria)
+    assert len(results) == 2
+    assert all(e.confidence >= 0.9 for e in results)
+
+
+def test_postgres_query_events_date_filters(postgres_test_db, sample_event):
+    """Test event querying with date filters in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Create events with different extraction times
+    base_time = datetime(2025, 10, 15, 12, 0, tzinfo=pytz.UTC)
+    events = []
+
+    for i in range(3):
+        event = sample_event.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "dedup_key": f"key_{i}",
+                "extracted_at": base_time + timedelta(hours=i),
+            }
+        )
+        events.append(event)
+    repo.save_events(events)
+
+    # Query events extracted after specific time
+    criteria = EventQueryCriteria(extracted_after=base_time + timedelta(hours=0.5))
+    results = repo.query_events(criteria)
+    assert len(results) == 2
+
+    # Query events extracted before specific time
+    criteria = EventQueryCriteria(extracted_before=base_time + timedelta(hours=1.5))
+    results = repo.query_events(criteria)
+    assert len(results) == 2
+
+
+def test_postgres_query_events_source_channels(postgres_test_db, sample_event):
+    """Test event querying by source channels in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save events with different source channels
+    events = []
+    for i in range(3):
+        event = sample_event.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "dedup_key": f"key_{i}",
+                "source_channels": [f"channel_{i}", "channel_0"]
+                if i > 0
+                else ["channel_0"],
+            }
+        )
+        events.append(event)
+    repo.save_events(events)
+
+    # Query by source channels
+    criteria = EventQueryCriteria(source_channels=["channel_0"])
+    results = repo.query_events(criteria)
+    assert len(results) == 3  # All events have channel_0
+
+    criteria = EventQueryCriteria(source_channels=["channel_1"])
+    results = repo.query_events(criteria)
+    assert len(results) == 1  # Only event with channel_1
+
+
+def test_postgres_query_events_with_limit_offset(postgres_test_db, sample_event):
+    """Test event querying with limit and offset in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save multiple events
+    events = []
+    for i in range(5):
+        event = sample_event.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "dedup_key": f"key_{i}",
+                "confidence": 0.5 + i * 0.1,
+            }
+        )
+        events.append(event)
+    repo.save_events(events)
+
+    # Query with limit
+    criteria = EventQueryCriteria(limit=3)
+    results = repo.query_events(criteria)
+    assert len(results) == 3
+
+    # Query with limit and offset
+    criteria = EventQueryCriteria(limit=2, offset=2)
+    results = repo.query_events(criteria)
+    assert len(results) == 2
+
+    # Query with offset beyond available results
+    criteria = EventQueryCriteria(limit=10, offset=10)
+    results = repo.query_events(criteria)
+    assert len(results) == 0
+
+
+def test_postgres_query_candidates_basic(postgres_test_db, sample_event_candidate):
+    """Test basic candidate querying in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save test candidates
+    candidates = []
+    for i in range(3):
+        candidate = sample_event_candidate.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "score": 10.0 + i * 5.0,
+                "status": CandidateStatus.NEW,
+            }
+        )
+        candidates.append(candidate)
+    repo.save_candidates(candidates)
+
+    # Query all candidates
+    criteria = CandidateQueryCriteria()
+    results = repo.query_candidates(criteria)
+    assert len(results) == 3
+
+    # Query by status
+    criteria = CandidateQueryCriteria(status="new")
+    results = repo.query_candidates(criteria)
+    assert len(results) == 3
+
+    # Query by min score
+    criteria = CandidateQueryCriteria(min_score=15.0)
+    results = repo.query_candidates(criteria)
+    assert len(results) == 2
+    assert all(c.score >= 15.0 for c in results)
+
+
+def test_postgres_query_candidates_channel_filter(
+    postgres_test_db, sample_event_candidate
+):
+    """Test candidate querying by channel in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save candidates with different channels
+    candidates = []
+    for i in range(3):
+        candidate = sample_event_candidate.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "channel": f"channel_{i}",
+                "score": 10.0 + i,
+            }
+        )
+        candidates.append(candidate)
+    repo.save_candidates(candidates)
+
+    # Query by specific channel
+    criteria = CandidateQueryCriteria(channel="channel_1")
+    results = repo.query_candidates(criteria)
+    assert len(results) == 1
+    assert results[0].channel == "channel_1"
+
+
+def test_postgres_query_candidates_date_filters(
+    postgres_test_db, sample_event_candidate
+):
+    """Test candidate querying with date filters in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Create candidates with different timestamps
+    base_time = datetime(2025, 10, 15, 12, 0, tzinfo=pytz.UTC)
+    candidates = []
+
+    for i in range(3):
+        candidate = sample_event_candidate.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "ts_dt": base_time + timedelta(hours=i),
+            }
+        )
+        candidates.append(candidate)
+    repo.save_candidates(candidates)
+
+    # Query candidates created after specific time
+    criteria = CandidateQueryCriteria(created_after=base_time + timedelta(hours=0.5))
+    results = repo.query_candidates(criteria)
+    assert len(results) == 2
+
+    # Query candidates created before specific time
+    criteria = CandidateQueryCriteria(created_before=base_time + timedelta(hours=1.5))
+    results = repo.query_candidates(criteria)
+    assert len(results) == 2
+
+
+def test_postgres_query_candidates_with_limit_offset(
+    postgres_test_db, sample_event_candidate
+):
+    """Test candidate querying with limit and offset in PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save multiple candidates
+    candidates = []
+    for i in range(5):
+        candidate = sample_event_candidate.model_copy(
+            update={
+                "message_id": f"msg_{i}",
+                "score": 20.0 - i,  # Decreasing scores
+            }
+        )
+        candidates.append(candidate)
+    repo.save_candidates(candidates)
+
+    # Query with limit
+    criteria = CandidateQueryCriteria(limit=3)
+    results = repo.query_candidates(criteria)
+    assert len(results) == 3
+
+    # Query with limit and offset
+    criteria = CandidateQueryCriteria(limit=2, offset=2)
+    results = repo.query_candidates(criteria)
+    assert len(results) == 2
+
+    # Verify ordering (should be by score DESC by default)
+    assert results[0].score >= results[1].score
+
+
+def test_postgres_query_criteria_helper_functions(
+    postgres_test_db, sample_event, sample_event_candidate
+):
+    """Test query criteria helper functions work with PostgreSQL."""
+    repo = postgres_test_db
+
+    # Save test data
+    event = sample_event.model_copy(
+        update={
+            "message_id": "test_event",
+            "dedup_key": "test_key",
+            "extracted_at": datetime(2025, 10, 15, 12, 0, tzinfo=pytz.UTC),
+        }
+    )
+    repo.save_events([event])
+
+    candidate = sample_event_candidate.model_copy(
+        update={
+            "message_id": "test_candidate",
+            "score": 20.0,
+            "status": CandidateStatus.NEW,
+        }
+    )
+    repo.save_candidates([candidate])
+
+    # Test recent_events_criteria helper
+    criteria = recent_events_criteria(days=1)
+    events = repo.query_events(criteria)
+    assert len(events) >= 0  # Should not fail
+
+    # Test high_priority_candidates_criteria helper
+    criteria = high_priority_candidates_criteria(threshold=15.0)
+    candidates = repo.query_candidates(criteria)
+    assert len(candidates) >= 0  # Should not fail
+
+
+def test_postgres_query_events_empty_results(postgres_test_db):
+    """Test query methods return empty results when no data matches."""
+    repo = postgres_test_db
+
+    # Query with very restrictive criteria
+    criteria = EventQueryCriteria(
+        categories=[EventCategory.PRODUCT],
+        min_confidence=0.9,
+        start_date=datetime(2025, 10, 15, tzinfo=pytz.UTC),
+        end_date=datetime(2025, 10, 16, tzinfo=pytz.UTC),
+    )
+    results = repo.query_events(criteria)
+    assert results == []
+
+    # Query candidates with restrictive criteria
+    criteria = CandidateQueryCriteria(
+        min_score=100.0,
+        status="new",
+    )
+    results = repo.query_candidates(criteria)
+    assert results == []

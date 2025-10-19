@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psycopg2
 import psycopg2.extras
@@ -16,6 +16,9 @@ from psycopg2.extensions import connection as Connection
 
 from src.domain.exceptions import RepositoryError
 from src.domain.models import Event, EventCandidate, LLMCallMetadata, SlackMessage
+
+if TYPE_CHECKING:
+    from src.adapters.query_builders import CandidateQueryCriteria, EventQueryCriteria
 
 
 class PostgresRepository:
@@ -763,6 +766,84 @@ class PostgresRepository:
                     (channel_id, ts),
                 )
                 conn.commit()
+
+    def query_events(self, criteria: "EventQueryCriteria") -> list[Event]:
+        """Query events using structured criteria.
+
+        Args:
+            criteria: Query builder criteria object
+
+        Returns:
+            List of events matching criteria
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Build query parts
+                    where_clause, where_params = criteria.to_where_clause()
+                    order_clause = criteria.to_order_clause()
+                    limit_clause, limit_params = criteria.to_limit_clause()
+
+                    # Combine into full query (PostgreSQL uses %s placeholders)
+                    query = f"""
+                        SELECT * FROM events
+                        WHERE {where_clause}
+                        ORDER BY {order_clause}
+                        {limit_clause}
+                    """
+
+                    # Execute with all parameters
+                    all_params = where_params + limit_params
+                    cur.execute(query, all_params)
+
+                    rows = cur.fetchall()
+                    return [self._row_to_event(dict(row)) for row in rows]
+
+        except psycopg2.Error as e:
+            raise RepositoryError(f"Failed to query events: {e}") from e
+
+    def query_candidates(
+        self, criteria: "CandidateQueryCriteria"
+    ) -> list[EventCandidate]:
+        """Query event candidates using structured criteria.
+
+        Args:
+            criteria: Query builder criteria object
+
+        Returns:
+            List of event candidates matching criteria
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Build query parts
+                    where_clause, where_params = criteria.to_where_clause()
+                    order_clause = criteria.to_order_clause()
+                    limit_clause, limit_params = criteria.to_limit_clause()
+
+                    # Combine into full query (PostgreSQL uses %s placeholders)
+                    query = f"""
+                        SELECT * FROM event_candidates
+                        WHERE {where_clause}
+                        ORDER BY {order_clause}
+                        {limit_clause}
+                    """
+
+                    # Execute with all parameters
+                    all_params = where_params + limit_params
+                    cur.execute(query, all_params)
+
+                    rows = cur.fetchall()
+                    return [self._row_to_candidate(dict(row)) for row in rows]
+
+        except psycopg2.Error as e:
+            raise RepositoryError(f"Failed to query candidates: {e}") from e
 
     def close(self) -> None:
         """Close all connections in pool."""
