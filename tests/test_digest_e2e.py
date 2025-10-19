@@ -54,6 +54,8 @@ def create_e2e_event(
         change_type=ChangeType.LAUNCH,
         environment=Environment.PROD,
         actual_start=event_date,
+        actual_end=event_date
+        + timedelta(hours=1),  # Add actual_end for completed status
         time_source=TimeSource.EXPLICIT,
         time_confidence=0.9,
         summary=f"Test event for digest E2E validation - {category.value}",
