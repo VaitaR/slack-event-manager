@@ -182,6 +182,61 @@ class EventValidator:
         errors.extend(self.validate_event_semantics(event))
         return errors
 
+    def get_critical_errors(self, event: Event) -> list[str]:
+        """Get only critical validation errors that block saving.
+
+        Critical errors are issues that violate domain invariants and
+        make the event unsuitable for downstream processing.
+
+        Args:
+            event: Event to validate
+
+        Returns:
+            List of critical errors (empty if event is valid for saving)
+
+        Example:
+            >>> validator = EventValidator()
+            >>> errors = validator.get_critical_errors(event)
+            >>> if errors:
+            ...     print(f"Event blocked: {errors}")
+        """
+        all_issues = self.validate_all(event)
+        return [issue for issue in all_issues if not issue.startswith("WARNING:")]
+
+    def get_validation_summary(self, event: Event) -> dict[str, list[str]]:
+        """Get comprehensive validation summary for audit logging.
+
+        Args:
+            event: Event to validate
+
+        Returns:
+            Dict with 'critical', 'warnings', and 'info' categories
+
+        Example:
+            >>> validator = EventValidator()
+            >>> summary = validator.get_validation_summary(event)
+            >>> print(f"Critical: {summary['critical']}")
+        """
+        all_issues = self.validate_all(event)
+
+        critical = []
+        warnings = []
+        info = []
+
+        for issue in all_issues:
+            if issue.startswith("WARNING:"):
+                warnings.append(issue.replace("WARNING: ", ""))
+            elif issue.startswith("INFO:"):
+                info.append(issue.replace("INFO: ", ""))
+            else:
+                critical.append(issue)
+
+        return {
+            "critical": critical,
+            "warnings": warnings,
+            "info": info,
+        }
+
     def should_publish(
         self,
         event: Event,
