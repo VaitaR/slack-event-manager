@@ -22,7 +22,12 @@ from src.domain.models import (
 )
 
 if TYPE_CHECKING:
-    from src.adapters.query_builders import CandidateQueryCriteria, EventQueryCriteria
+    from src.adapters.query_builders import (
+        CandidateQueryCriteria,
+        EventQueryCriteria,
+        PostgresCandidateQueryCriteria,
+        PostgresEventQueryCriteria,
+    )
 
 
 class PostgresRepository:
@@ -807,13 +812,32 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
-                    # Build query parts
-                    where_clause, where_params = criteria.to_where_clause()
-                    order_clause = criteria.to_order_clause()
-                    limit_clause, limit_params = criteria.to_limit_clause()
+                # Use RealDictCursor for proper dictionary handling
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Convert generic criteria to PostgreSQL-specific criteria
+                    postgres_criteria = PostgresEventQueryCriteria(
+                        start_date=criteria.start_date,
+                        end_date=criteria.end_date,
+                        extracted_after=criteria.extracted_after,
+                        extracted_before=criteria.extracted_before,
+                        categories=criteria.categories,
+                        min_confidence=criteria.min_confidence,
+                        max_confidence=criteria.max_confidence,
+                        source_channels=criteria.source_channels,
+                        source_id=criteria.source_id,
+                        message_ids=criteria.message_ids,
+                        limit=criteria.limit,
+                        offset=criteria.offset,
+                        order_by=criteria.order_by,
+                        order_desc=criteria.order_desc,
+                    )
 
-                    # Combine into full query (PostgreSQL uses %s placeholders)
+                    # Build query parts using PostgreSQL-specific criteria
+                    where_clause, where_params = postgres_criteria.to_where_clause()
+                    order_clause = postgres_criteria.to_order_clause()
+                    limit_clause, limit_params = postgres_criteria.to_limit_clause()
+
+                    # Combine into full query
                     query = f"""
                         SELECT * FROM events
                         WHERE {where_clause}
@@ -847,13 +871,30 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
-                    # Build query parts
-                    where_clause, where_params = criteria.to_where_clause()
-                    order_clause = criteria.to_order_clause()
-                    limit_clause, limit_params = criteria.to_limit_clause()
+                # Use RealDictCursor for proper dictionary handling
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Convert generic criteria to PostgreSQL-specific criteria
+                    postgres_criteria = PostgresCandidateQueryCriteria(
+                        min_score=criteria.min_score,
+                        max_score=criteria.max_score,
+                        status=criteria.status,
+                        channel=criteria.channel,
+                        created_after=criteria.created_after,
+                        created_before=criteria.created_before,
+                        has_links=criteria.has_links,
+                        has_anchors=criteria.has_anchors,
+                        limit=criteria.limit,
+                        offset=criteria.offset,
+                        order_by=criteria.order_by,
+                        order_desc=criteria.order_desc,
+                    )
 
-                    # Combine into full query (PostgreSQL uses %s placeholders)
+                    # Build query parts using PostgreSQL-specific criteria
+                    where_clause, where_params = postgres_criteria.to_where_clause()
+                    order_clause = postgres_criteria.to_order_clause()
+                    limit_clause, limit_params = postgres_criteria.to_limit_clause()
+
+                    # Combine into full query
                     query = f"""
                         SELECT * FROM event_candidates
                         WHERE {where_clause}

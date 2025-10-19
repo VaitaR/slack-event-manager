@@ -313,8 +313,6 @@ def postgres_test_db():
         database=test_db_name,
         user=os.environ.get("POSTGRES_USER", "postgres"),
         password=password,
-        minconn=1,
-        maxconn=2,
     )
 
     # Clean up: drop all tables before test
