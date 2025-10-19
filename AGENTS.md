@@ -10,6 +10,7 @@ This is a **Slack Event Manager** that processes messages from Slack channels to
 **Key Components:**
 - **Slack API Integration**: Fetches messages from specified Slack channels (✅ with rate limit handling)
 - **LLM Processing**: Uses OpenAI GPT-5-nano to extract structured data (✅ with comprehensive logging)
+- **Event Validation**: Validates event structure, semantics, and quality before publishing (✅ integrated in all use cases)
 - **Scoring Engine**: Intelligent candidate selection with configurable weights
 - **Dual Database Support**: PostgreSQL (production) or SQLite (development) with seamless switching
 - **Deduplication**: Merges similar events across messages using fuzzy matching
@@ -18,7 +19,8 @@ This is a **Slack Event Manager** that processes messages from Slack channels to
 **Data Flow:**
 ```
 Slack Channel → Message Fetching → Text Normalization → Scoring →
-Candidate Building → LLM Extraction → Deduplication → Storage → Digest Publishing
+Candidate Building → LLM Extraction → Event Validation → Deduplication →
+Storage → Event Validation → Digest Publishing → Event Validation
 ```
 
 **Production Validation:**
@@ -342,6 +344,79 @@ logging:
 ```
 
 See **[CONFIG_REFACTORING.md](CONFIG_REFACTORING.md)** for migration guide.
+
+## Event Validation System
+
+### Overview
+
+The system includes comprehensive event validation to ensure data quality and consistency before publishing to Slack. Events are validated at multiple stages of the pipeline:
+
+1. **Post-LLM Extraction**: Events validated immediately after LLM processing
+2. **Post-Deduplication**: Events validated after merging similar events
+3. **Pre-Publishing**: Events validated before sending to Slack channels
+
+### Validation Rules
+
+**Title Structure Validation (Lint Rules):**
+- Maximum 2 qualifiers per event
+- Maximum 1 stroke and 1 anchor
+- No URLs, dates, or emojis in title slots
+- Action type must be valid enum value
+
+**Semantic Validation:**
+- Summary must be present and within length limits (320 chars)
+- Status ↔ time consistency (completed events need actual_end)
+- Links must be valid HTTP/HTTPS URLs (max 3 per event)
+- Impact areas limited to 3 per event
+- Category warnings for UNKNOWN categories
+
+**Publishing Quality Gates:**
+- Minimum confidence threshold (default: 0.6)
+- Minimum importance threshold (default: 60)
+- No critical validation errors (warnings allowed)
+
+### Configuration
+
+Validation behavior is configurable in `config.yaml`:
+
+```yaml
+validation:
+  min_confidence: 0.7      # Minimum confidence for publishing
+  max_qualifiers: 2        # Maximum qualifiers per event
+  max_summary_length: 320  # Maximum summary length
+  allow_warnings: true     # Allow events with warnings to publish
+```
+
+### Quality Assurance Features
+
+**EventValidator Service:**
+- `validate_title_lint()`: Validates title structure and content
+- `validate_event_semantics()`: Validates semantic consistency
+- `validate_all()`: Runs complete validation suite
+- `should_publish()`: Determines if event meets quality thresholds
+- `get_quality_issues()`: Returns detailed quality breakdown
+
+**Integration Points:**
+- Extract Events: Validates events before database storage
+- Deduplicate Events: Validates events after merging
+- Publish Digest: Validates events before Slack publishing
+
+**Error Handling:**
+- Critical errors block publishing (empty summary, invalid links, etc.)
+- Warnings allow publishing but are logged (unknown categories, low confidence)
+- Validation failures logged with detailed issue descriptions
+
+### Testing
+
+Comprehensive validation tests ensure reliability:
+
+```bash
+# Run validation-specific tests
+python -m pytest tests/test_event_validator_integration.py -v
+
+# Test with real data to verify validation works end-to-end
+python scripts/test_with_real_data.py
+```
 
 **LLM Configuration Notes:**
 - **gpt-5-nano**: Recommended for production use due to lower costs while maintaining high quality ✅
