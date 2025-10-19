@@ -18,7 +18,6 @@ from src.domain.models import (
     LLMCallMetadata,
     MessageRecord,
     MessageSource,
-    MessageSourceConfig,
     SlackMessage,
     TelegramMessage,
 )
