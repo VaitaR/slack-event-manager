@@ -376,32 +376,64 @@ def extract_events_use_case(
                         mention_count=mention_count,
                     )
 
-                    # Validate event before saving
-                    validation_issues = validator.validate_all(domain_event)
+                    # Validate event before saving - check for critical errors
+                    critical_errors = validator.get_critical_errors(domain_event)
+                    validation_summary = validator.get_validation_summary(domain_event)
 
-                    if validation_issues:
-                        # Log validation issues but don't fail extraction
+                    if critical_errors:
+                        # Critical errors block saving - log for audit and skip
                         validation_errors.extend(
                             [
-                                f"Event {llm_event.object_name_raw}: {issue}"
-                                for issue in validation_issues
+                                f"Event {llm_event.object_name_raw}: {error}"
+                                for error in critical_errors
                             ]
                         )
-                        print(f"   ⚠️  Validation issues: {validation_issues}")
+                        print(f"   🚫 Critical validation errors: {critical_errors}")
+                        print(
+                            "      Event blocked from saving due to domain rule violations"
+                        )
                         sys.stdout.flush()
 
-                    # Save even if there are validation warnings (only critical errors should block)
+                        # Log detailed validation summary for audit trail
+                        if validation_summary["warnings"] or validation_summary["info"]:
+                            print(
+                                f"      Additional issues: warnings={len(validation_summary['warnings'])}, info={len(validation_summary['info'])}"
+                            )
+                            sys.stdout.flush()
+
+                        # Skip this event - don't save events with critical errors
+                        continue
+
+                    # Event passed critical validation - save it
                     events_to_save.append(domain_event)
+
+                    # Log warnings if present (non-blocking)
+                    if validation_summary["warnings"]:
+                        print(
+                            f"   ⚠️  Validation warnings: {validation_summary['warnings']}"
+                        )
+                        sys.stdout.flush()
 
                 # Save events (without deduplication yet)
                 if events_to_save:
                     repository.save_events(events_to_save)
                     events_extracted += len(events_to_save)
 
-                # Log validation summary
+                # Log validation summary with audit trail
+                total_events_processed = (
+                    len(llm_response.events) if llm_response.events else 0
+                )
+                blocked_events = total_events_processed - len(events_to_save)
+                saved_events = len(events_to_save)
+
+                print(
+                    f"   📊 Validation audit: {saved_events} saved, {blocked_events} blocked, {len(validation_errors)} total issues"
+                )
+                sys.stdout.flush()
+
                 if validation_errors:
                     print(
-                        f"   📊 Validation summary: {len(validation_errors)} issues found"
+                        f"      Blocked events: {blocked_events}, Critical issues: {len([e for e in validation_errors if 'critical' in e.lower() or 'required' in e.lower() or 'missing' in e.lower()])}"
                     )
                     sys.stdout.flush()
 
