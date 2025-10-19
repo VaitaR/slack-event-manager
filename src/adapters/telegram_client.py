@@ -9,12 +9,22 @@ import logging
 from typing import Any
 
 import pytz
-from telethon import TelegramClient as TelegramClientLib  # type: ignore[import-untyped]
-from telethon.errors import FloodWaitError  # type: ignore[import-untyped]
-from telethon.tl.types import (  # type: ignore[import-untyped]
-    MessageEntityTextUrl,
-    MessageEntityUrl,
-)
+
+try:
+    from telethon import (  # type: ignore[import-untyped]
+        TelegramClient as TelegramClientLib,
+    )
+    from telethon.errors import FloodWaitError  # type: ignore[import-untyped]
+    from telethon.tl.types import (  # type: ignore[import-untyped]
+        MessageEntityTextUrl,
+        MessageEntityUrl,
+    )
+except ImportError:
+    # Fallback for when telethon is not available (e.g., in CI)
+    TelegramClientLib = None
+    FloodWaitError = Exception
+    MessageEntityTextUrl = None
+    MessageEntityUrl = None
 
 from src.domain.exceptions import RateLimitError
 
@@ -48,7 +58,13 @@ class TelegramClient:
             api_id: Telegram API ID
             api_hash: Telegram API hash
             session_name: Path to session file
+
+        Raises:
+            ImportError: If telethon is not available
         """
+        if TelegramClientLib is None:
+            raise ImportError("TelegramClient requires telethon to be installed")
+
         self.api_id = api_id
         self.api_hash = api_hash
         self.session_name = session_name
@@ -225,6 +241,35 @@ class TelegramClient:
             "post_url": post_url,
         }
 
+    async def fetch_messages_async(
+        self,
+        channel_id: str,
+        oldest_ts: str | None = None,
+        latest_ts: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Fetch messages from Telegram channel (async version).
+
+        Args:
+            channel_id: Channel username (@channel) or numeric ID
+            oldest_ts: Oldest message ID (not used, kept for protocol compatibility)
+            latest_ts: Latest message ID (not used, kept for protocol compatibility)
+            limit: Maximum messages to fetch
+
+        Returns:
+            List of message dictionaries
+
+        Raises:
+            RateLimitError: On FloodWait after max retries
+
+        Example:
+            >>> client = TelegramClient(12345, "hash", "session")
+            >>> messages = await client.fetch_messages_async("@channel", limit=10)
+            >>> len(messages)
+            10
+        """
+        return await self._fetch_messages_async(channel_id, oldest_ts, latest_ts, limit)
+
     def fetch_messages(
         self,
         channel_id: str,
@@ -252,10 +297,37 @@ class TelegramClient:
             >>> len(messages)
             10
         """
-        # Run async function in event loop
-        return asyncio.run(
-            self._fetch_messages_async(channel_id, oldest_ts, latest_ts, limit)
-        )
+        # Check if we're already in an event loop
+        try:
+            # Try to get current event loop
+            asyncio.get_running_loop()
+            # If we're in a running loop, we need to handle this differently
+            # For now, we'll use asyncio.run() but this should be avoided in async contexts
+            # TODO: Consider refactoring to use async client factory pattern
+            import concurrent.futures
+
+            # Use ThreadPoolExecutor to run in separate thread with its own event loop
+            def _run_async() -> list[dict[str, Any]]:
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        self._fetch_messages_async(
+                            channel_id, oldest_ts, latest_ts, limit
+                        )
+                    )
+                finally:
+                    new_loop.close()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(_run_async)
+                return future.result()
+
+        except RuntimeError:
+            # No running event loop, safe to use asyncio.run()
+            return asyncio.run(
+                self._fetch_messages_async(channel_id, oldest_ts, latest_ts, limit)
+            )
 
     def get_user_info(self, user_id: str) -> dict[str, Any]:
         """Get Telegram user information (stub for protocol compatibility).
