@@ -56,6 +56,7 @@ def create_repository(settings: Settings) -> RepositoryProtocol:
                 database=settings.postgres_database,
                 user=settings.postgres_user,
                 password=settings.postgres_password.get_secret_value(),
+                settings=settings,
             ),
         )
 

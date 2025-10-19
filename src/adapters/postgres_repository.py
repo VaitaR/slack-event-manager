@@ -16,7 +16,9 @@ from src.domain.models import (
     Event,
     EventCandidate,
     LLMCallMetadata,
+    MessageRecord,
     MessageSource,
+    MessageSourceConfig,
     SlackMessage,
     TelegramMessage,
 )
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
         PostgresCandidateQueryCriteria,
         PostgresEventQueryCriteria,
     )
+    from src.config.settings import Settings
 
 
 class PostgresRepository:
@@ -40,6 +43,7 @@ class PostgresRepository:
         database: str,
         user: str,
         password: str,
+        settings: Settings | None = None,
     ):
         """Initialize PostgreSQL repository.
 
@@ -49,6 +53,7 @@ class PostgresRepository:
             database: Database name
             user: Database user
             password: Database password
+            settings: Optional settings for source configuration (for backward compatibility)
 
         Raises:
             RepositoryError: On connection errors
@@ -58,6 +63,7 @@ class PostgresRepository:
         self._database = database
         self._user = user
         self._password = password
+        self._settings = settings
 
         # Test connection on initialization
         try:
@@ -72,6 +78,27 @@ class PostgresRepository:
             print(f"🔧 PostgreSQL connected: {user}@{host}:{port}/{database}")
         except psycopg2.Error as e:
             raise RepositoryError(f"Failed to connect to PostgreSQL: {e}") from e
+
+    def _get_state_table_name(self, source_id: MessageSource | None) -> str:
+        """Get state table name for the given source.
+
+        Args:
+            source_id: Message source identifier
+
+        Returns:
+            State table name from source configuration or fallback to defaults
+        """
+        # If no settings available, use backward compatible defaults
+        if not self._settings or not source_id:
+            return "ingestion_state_telegram" if source_id else "ingestion_state"
+
+        # Try to get source configuration
+        source_config = self._settings.get_source_config(source_id)
+        if source_config and source_config.state_table:
+            return source_config.state_table
+
+        # Fallback to backward compatible defaults
+        return "ingestion_state_telegram" if source_id else "ingestion_state"
 
     @contextmanager
     def _get_connection(self) -> Iterator[Any]:
@@ -376,6 +403,66 @@ class PostgresRepository:
                 # Get column names from cursor description
                 columns = [desc[0] for desc in cur.description]
                 return [self._row_to_message(dict(zip(columns, row))) for row in rows]
+
+    def get_new_messages_for_candidates_by_source(
+        self, source_id: MessageSource
+    ) -> list[MessageRecord]:
+        """Get messages not yet in candidates table for a specific source.
+
+        This method is source-agnostic and returns messages that implement
+        the MessageRecord protocol, allowing scoring logic to work with any source.
+
+        Args:
+            source_id: Message source (SLACK, TELEGRAM, etc.)
+
+        Returns:
+            List of messages implementing MessageRecord protocol
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
+                if source_id == MessageSource.SLACK:
+                    # Query Slack messages
+                    cur.execute(
+                        """
+                        SELECT m.*
+                        FROM raw_slack_messages m
+                        LEFT JOIN event_candidates c ON m.message_id = c.message_id
+                        WHERE c.message_id IS NULL
+                        ORDER BY m.ts_dt DESC
+                        """
+                    )
+                    rows = cur.fetchall()
+                    columns = [desc[0] for desc in cur.description]
+                    return [
+                        self._row_to_message(dict(zip(columns, row))) for row in rows
+                    ]
+
+                elif source_id == MessageSource.TELEGRAM:
+                    # Query Telegram messages
+                    cur.execute(
+                        """
+                        SELECT m.*
+                        FROM raw_telegram_messages m
+                        LEFT JOIN event_candidates c ON m.message_id = c.message_id
+                        WHERE c.message_id IS NULL
+                        ORDER BY m.message_date DESC
+                        """
+                    )
+                    rows = cur.fetchall()
+                    columns = [desc[0] for desc in cur.description]
+                    return [
+                        self._row_to_telegram_message(dict(zip(columns, row)))
+                        for row in rows
+                    ]
+
+                else:
+                    raise RepositoryError(
+                        f"Unsupported message source: {source_id}. "
+                        f"Supported sources: {[s.value for s in MessageSource]}"
+                    )
 
     def save_candidates(self, candidates: list[EventCandidate]) -> int:
         """Save event candidates (upsert).
@@ -756,17 +843,24 @@ class PostgresRepository:
         Raises:
             RepositoryError: On storage errors
         """
-        # For Telegram, use telegram-specific state table if source_id is provided
-        table_name = "ingestion_state_telegram" if source_id else "ingestion_state"
+        # Use source-specific state table name from configuration
+        table_name = self._get_state_table_name(source_id)
 
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
-                cur.execute(
-                    f"SELECT last_processed_ts FROM {table_name} WHERE channel_id = %s",
-                    (channel,),
-                )
-                row = cur.fetchone()
-                return float(row["last_processed_ts"]) if row else None
+            # Use transaction for atomic read
+            conn.autocommit = False
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
+                    cur.execute(
+                        f"SELECT last_processed_ts FROM {table_name} WHERE channel_id = %s",
+                        (channel,),
+                    )
+                    row = cur.fetchone()
+                    conn.commit()
+                    return float(row["last_processed_ts"]) if row else None
+            except Exception:
+                conn.rollback()
+                raise
 
     def update_last_processed_ts(
         self, channel: str, ts: float, source_id: MessageSource | None = None
@@ -781,22 +875,28 @@ class PostgresRepository:
         Raises:
             RepositoryError: On storage errors
         """
-        # For Telegram, use telegram-specific state table if source_id is provided
-        table_name = "ingestion_state_telegram" if source_id else "ingestion_state"
+        # Use source-specific state table name from configuration
+        table_name = self._get_state_table_name(source_id)
 
         with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    INSERT INTO {table_name} (channel_id, last_processed_ts, updated_at)
-                    VALUES (%s, %s, NOW())
-                    ON CONFLICT (channel_id) DO UPDATE SET
-                        last_processed_ts = EXCLUDED.last_processed_ts,
-                        updated_at = EXCLUDED.updated_at
-                    """,
-                    (channel, ts),
-                )
-                conn.commit()
+            # Use transaction for atomic write
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {table_name} (channel_id, last_processed_ts, updated_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (channel_id) DO UPDATE SET
+                            last_processed_ts = EXCLUDED.last_processed_ts,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (channel, ts),
+                    )
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def query_events(self, criteria: "EventQueryCriteria") -> list[Event]:
         """Query events using structured criteria.
@@ -812,32 +912,13 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                # Use RealDictCursor for proper dictionary handling
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # Convert generic criteria to PostgreSQL-specific criteria
-                    postgres_criteria = PostgresEventQueryCriteria(
-                        start_date=criteria.start_date,
-                        end_date=criteria.end_date,
-                        extracted_after=criteria.extracted_after,
-                        extracted_before=criteria.extracted_before,
-                        categories=criteria.categories,
-                        min_confidence=criteria.min_confidence,
-                        max_confidence=criteria.max_confidence,
-                        source_channels=criteria.source_channels,
-                        source_id=criteria.source_id,
-                        message_ids=criteria.message_ids,
-                        limit=criteria.limit,
-                        offset=criteria.offset,
-                        order_by=criteria.order_by,
-                        order_desc=criteria.order_desc,
-                    )
+                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
+                    # Build query parts
+                    where_clause, where_params = criteria.to_where_clause()
+                    order_clause = criteria.to_order_clause()
+                    limit_clause, limit_params = criteria.to_limit_clause()
 
-                    # Build query parts using PostgreSQL-specific criteria
-                    where_clause, where_params = postgres_criteria.to_where_clause()
-                    order_clause = postgres_criteria.to_order_clause()
-                    limit_clause, limit_params = postgres_criteria.to_limit_clause()
-
-                    # Combine into full query
+                    # Combine into full query (PostgreSQL uses %s placeholders)
                     query = f"""
                         SELECT * FROM events
                         WHERE {where_clause}
@@ -871,30 +952,13 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                # Use RealDictCursor for proper dictionary handling
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # Convert generic criteria to PostgreSQL-specific criteria
-                    postgres_criteria = PostgresCandidateQueryCriteria(
-                        min_score=criteria.min_score,
-                        max_score=criteria.max_score,
-                        status=criteria.status,
-                        channel=criteria.channel,
-                        created_after=criteria.created_after,
-                        created_before=criteria.created_before,
-                        has_links=criteria.has_links,
-                        has_anchors=criteria.has_anchors,
-                        limit=criteria.limit,
-                        offset=criteria.offset,
-                        order_by=criteria.order_by,
-                        order_desc=criteria.order_desc,
-                    )
+                with conn.cursor(cursor_factory=psycopg2.extensions.cursor) as cur:
+                    # Build query parts
+                    where_clause, where_params = criteria.to_where_clause()
+                    order_clause = criteria.to_order_clause()
+                    limit_clause, limit_params = criteria.to_limit_clause()
 
-                    # Build query parts using PostgreSQL-specific criteria
-                    where_clause, where_params = postgres_criteria.to_where_clause()
-                    order_clause = postgres_criteria.to_order_clause()
-                    limit_clause, limit_params = postgres_criteria.to_limit_clause()
-
-                    # Combine into full query
+                    # Combine into full query (PostgreSQL uses %s placeholders)
                     query = f"""
                         SELECT * FROM event_candidates
                         WHERE {where_clause}
