@@ -280,3 +280,37 @@ def test_load_all_configs_with_object_registry(tmp_path: Path) -> None:
         assert config["objects"]["test.system"] == ["Test System", "Test API"]
     finally:
         os.chdir(original_cwd)
+
+
+def test_load_all_configs_no_config_directory(tmp_path: Path) -> None:
+    """Test loading configs when config directory doesn't exist (env-only scenario)."""
+    import os
+
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        # Ensure config directory doesn't exist
+        assert not Path("config").exists()
+
+        # Should not raise UnboundLocalError, should return empty config
+        config = load_all_configs()
+        assert config == {}
+    finally:
+        os.chdir(original_cwd)
+
+
+def test_load_all_configs_empty_config_directory(tmp_path: Path) -> None:
+    """Test loading configs when config directory exists but is empty."""
+    # Create empty config directory
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+
+    import os
+
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        config = load_all_configs()
+        assert config == {}
+    finally:
+        os.chdir(original_cwd)

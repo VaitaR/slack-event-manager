@@ -126,6 +126,7 @@ def load_all_configs() -> dict[str, Any]:
 
     # 2. Load config directory files
     config_dir = Path("config")
+    yaml_files: list[Path] = []
     if config_dir.exists() and config_dir.is_dir():
         # Get all YAML files, excluding already loaded main.yaml
         yaml_files = sorted(
