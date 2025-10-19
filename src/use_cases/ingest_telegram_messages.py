@@ -6,17 +6,22 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 
 import hashlib
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytz
 
 from src.adapters.sqlite_repository import SQLiteRepository
 
-if TYPE_CHECKING:
+# Import Telegram types conditionally to avoid runtime errors
+try:
     from telethon.tl.types import (  # type: ignore[import-untyped]
         MessageEntityTextUrl,
         MessageEntityUrl,
     )
+except ImportError:
+    # Fallback for type checking or when telethon is not available
+    MessageEntityTextUrl = Any
+    MessageEntityUrl = Any
 from src.adapters.telegram_client import TelegramClient
 from src.config.settings import Settings
 from src.domain.models import IngestResult, MessageSource, TelegramMessage
@@ -129,7 +134,9 @@ def process_telegram_message(
     text_norm = text_normalizer.normalize_text(text)
 
     # Build post URL
-    raw_msg.get("post_url") or build_telegram_post_url(channel_id, message_id)
+    post_url = raw_msg.get("post_url") or build_telegram_post_url(
+        channel_id, message_id
+    )
 
     # Extract other fields
     forward_from_channel = raw_msg.get("forward_from_channel")
@@ -160,6 +167,7 @@ def process_telegram_message(
         views=views,
         reply_count=reply_count,
         reactions={},  # Not extracted yet
+        post_url=post_url,
         ingested_at=datetime.utcnow().replace(tzinfo=pytz.UTC),
     )
 

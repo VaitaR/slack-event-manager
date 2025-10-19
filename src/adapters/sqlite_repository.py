@@ -114,6 +114,9 @@ class SQLiteRepository:
                 links_norm TEXT,
                 anchors TEXT,
                 views INTEGER DEFAULT 0,
+                reply_count INTEGER DEFAULT 0,
+                reactions TEXT,
+                post_url TEXT,
                 ingested_at TEXT
             )
         """
@@ -417,8 +420,9 @@ class SQLiteRepository:
                     INSERT OR REPLACE INTO raw_telegram_messages (
                         message_id, channel, message_date, sender_id, sender_name,
                         text, text_norm, forward_from_channel, forward_from_message_id,
-                        media_type, links_raw, links_norm, anchors, views, ingested_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        media_type, links_raw, links_norm, anchors, views, reply_count,
+                        reactions, post_url, ingested_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         msg.message_id,
@@ -435,6 +439,9 @@ class SQLiteRepository:
                         json.dumps(msg.links_norm),
                         json.dumps(msg.anchors),
                         msg.views,
+                        msg.reply_count,
+                        json.dumps(msg.reactions),
+                        msg.post_url,
                         msg.ingested_at.isoformat(),
                     ),
                 )
@@ -504,7 +511,10 @@ class SQLiteRepository:
             links_raw=json.loads(row["links_raw"]) if row["links_raw"] else [],
             links_norm=json.loads(row["links_norm"]) if row["links_norm"] else [],
             anchors=json.loads(row["anchors"]) if row["anchors"] else [],
-            views=row["views"],
+            views=row["views"] or 0,
+            reply_count=row["reply_count"] or 0,
+            reactions=json.loads(row["reactions"]) if row["reactions"] else {},
+            post_url=row["post_url"],
             ingested_at=datetime.fromisoformat(row["ingested_at"]),
         )
 
