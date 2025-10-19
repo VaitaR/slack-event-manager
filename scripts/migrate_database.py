@@ -1,7 +1,7 @@
-"""Database migration script for adding enhanced Slack message fields.
+"""Database migration script for adding enhanced message fields.
 
 This script adds new columns to existing databases to support enhanced
-Slack message data extraction.
+Slack and Telegram message data extraction.
 
 Usage:
     python scripts/migrate_database.py [database_path]
@@ -36,21 +36,22 @@ def migrate_database(db_path: str) -> bool:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # Check if table exists
+        # Check if tables exist
         cursor.execute(
             """
             SELECT name FROM sqlite_master
-            WHERE type='table' AND name='raw_slack_messages'
+            WHERE type='table' AND name IN ('raw_slack_messages', 'raw_telegram_messages')
         """
         )
 
-        if not cursor.fetchone():
-            print("⚠️  Table 'raw_slack_messages' not found. Skipping migration.")
+        tables_found = cursor.fetchall()
+        if not tables_found:
+            print("⚠️  No message tables found. Skipping migration.")
             conn.close()
             return False
 
-        # List of new columns to add
-        new_columns = [
+        # Slack columns to add
+        slack_columns = [
             ("user_real_name", "TEXT"),
             ("user_display_name", "TEXT"),
             ("user_email", "TEXT"),
@@ -63,39 +64,59 @@ def migrate_database(db_path: str) -> bool:
             ("edited_user", "TEXT"),
         ]
 
+        # Telegram columns to add
+        telegram_columns = [
+            ("reply_count", "INTEGER DEFAULT 0"),
+            ("reactions", "TEXT"),
+            ("post_url", "TEXT"),
+        ]
+
         columns_added = 0
         columns_skipped = 0
 
-        for column_name, column_type in new_columns:
-            try:
-                # Check if column already exists
-                cursor.execute("PRAGMA table_info(raw_slack_messages)")
-                existing_columns = [row[1] for row in cursor.fetchall()]
+        # Migrate Slack table
+        for table_name, columns in [
+            ("raw_slack_messages", slack_columns),
+            ("raw_telegram_messages", telegram_columns),
+        ]:
+            for column_name, column_type in columns:
+                try:
+                    # Check if column already exists
+                    cursor.execute(f"PRAGMA table_info({table_name})")
+                    existing_columns = [row[1] for row in cursor.fetchall()]
 
-                if column_name in existing_columns:
-                    print(f"  ⏭️  Column '{column_name}' already exists, skipping")
-                    columns_skipped += 1
-                    continue
+                    if column_name in existing_columns:
+                        print(
+                            f"  ⏭️  Column '{column_name}' already exists in {table_name}, skipping"
+                        )
+                        columns_skipped += 1
+                        continue
 
-                # Add column
-                cursor.execute(
-                    f"""
-                    ALTER TABLE raw_slack_messages
-                    ADD COLUMN {column_name} {column_type}
-                """
-                )
-                print(f"  ✅ Added column: {column_name} ({column_type})")
-                columns_added += 1
+                    # Add column
+                    cursor.execute(
+                        f"""
+                        ALTER TABLE {table_name}
+                        ADD COLUMN {column_name} {column_type}
+                    """
+                    )
+                    print(
+                        f"  ✅ Added column: {column_name} ({column_type}) to {table_name}"
+                    )
+                    columns_added += 1
 
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" in str(e).lower():
-                    print(f"  ⏭️  Column '{column_name}' already exists, skipping")
-                    columns_skipped += 1
-                else:
-                    print(f"  ❌ Error adding column '{column_name}': {e}")
-                    conn.rollback()
-                    conn.close()
-                    return False
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" in str(e).lower():
+                        print(
+                            f"  ⏭️  Column '{column_name}' already exists in {table_name}, skipping"
+                        )
+                        columns_skipped += 1
+                    else:
+                        print(
+                            f"  ❌ Error adding column '{column_name}' to {table_name}: {e}"
+                        )
+                        conn.rollback()
+                        conn.close()
+                        return False
 
         # Commit changes
         conn.commit()
@@ -132,7 +153,7 @@ def find_databases(data_dir: str = "data") -> list[str]:
 def main():
     """Main migration function."""
     print("=" * 80)
-    print("Database Migration Tool - Enhanced Slack Fields")
+    print("Database Migration Tool - Enhanced Message Fields")
     print("=" * 80)
 
     # Get database path from command line or find all databases

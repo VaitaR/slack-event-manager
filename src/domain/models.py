@@ -253,6 +253,7 @@ class TelegramMessage(BaseModel):
     views: int = Field(default=0, description="View count")
     reply_count: int = Field(default=0, description="Reply/comment count")
     reactions: dict[str, int] = Field(default_factory=dict, description="Reactions")
+    post_url: str | None = Field(default=None, description="Direct link to the post")
     attachments_count: int = Field(default=0, description="Number of attachments")
     files_count: int = Field(default=0, description="Number of files")
     ingested_at: datetime = Field(
