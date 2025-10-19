@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 import pytz
 
@@ -31,6 +32,7 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
+from src.adapters.sqlite_repository import SQLiteRepository
 from src.adapters.telegram_client import TelegramClient
 from src.config.settings import Settings, get_settings
 from src.domain.models import MessageSource
@@ -44,6 +46,20 @@ from src.use_cases.publish_digest import publish_digest_use_case
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
+
+
+class PipelineStats(TypedDict):
+    """Pipeline statistics structure."""
+
+    messages_fetched: int
+    messages_saved: int
+    candidates_created: int
+    events_extracted: int
+    events_merged: int
+    llm_calls: int
+    total_cost_usd: float
+    channels_processed: list[str]
+    errors: list[str]
 
 
 def signal_handler(signum: int, frame: object) -> None:
@@ -76,7 +92,7 @@ def run_source_pipeline(
     settings: Settings,
     args: argparse.Namespace,
     backfill_from_date: datetime | None = None,
-) -> dict[str, int | float]:
+) -> PipelineStats:
     """Run pipeline for a single message source.
 
     Args:
@@ -90,7 +106,7 @@ def run_source_pipeline(
         Dictionary with pipeline statistics
     """
     logger = logging.getLogger(__name__)
-    stats: dict[str, int | float] = {
+    stats: PipelineStats = {
         "messages_fetched": 0,
         "messages_saved": 0,
         "candidates_created": 0,
@@ -98,6 +114,8 @@ def run_source_pipeline(
         "events_merged": 0,
         "llm_calls": 0,
         "total_cost_usd": 0.0,
+        "channels_processed": [],
+        "errors": [],
     }
 
     # Get source configuration
@@ -148,16 +166,14 @@ def run_source_pipeline(
         try:
             llm_settings = source_config.llm_settings or {}
             llm_temperature = llm_settings.get("temperature", settings.llm_temperature)
-            llm_timeout = llm_settings.get(
-                "timeout_seconds", settings.llm_timeout_seconds
-            )
+            llm_timeout = llm_settings.get("timeout", settings.llm_timeout_seconds)
             prompt_file = source_config.prompt_file
 
             llm_client = LLMClient(
                 api_key=settings.openai_api_key.get_secret_value(),
                 model=settings.llm_model,
                 temperature=llm_temperature,
-                timeout_seconds=llm_timeout,
+                timeout=llm_timeout,
                 prompt_file=prompt_file,
             )
             logger.info("✓ Created Telegram LLM client")
@@ -167,17 +183,26 @@ def run_source_pipeline(
 
         # Run Telegram ingestion
         try:
+            # Telegram use case expects SQLiteRepository specifically
+            sqlite_repo = (
+                repository if isinstance(repository, SQLiteRepository) else None
+            )
+            if sqlite_repo is None:
+                logger.error("❌ Telegram ingestion requires SQLiteRepository")
+                stats["errors"].append("Telegram ingestion requires SQLiteRepository")
+                return stats
+
             result = ingest_telegram_messages_use_case(
                 telegram_client=telegram_client,
-                repository=repository,
+                repository=sqlite_repo,
                 settings=settings,
-                source_config=source_config,
+                backfill_from_date=backfill_from_date,
             )
 
-            stats.messages_fetched += result.messages_fetched
-            stats.messages_saved += result.messages_saved
-            stats.channels_processed.extend(result.channels_processed)
-            stats.errors.extend(result.errors)
+            stats["messages_fetched"] += result.messages_fetched
+            stats["messages_saved"] += result.messages_saved
+            stats["channels_processed"].extend(result.channels_processed)
+            stats["errors"].extend(result.errors)
 
             logger.info(
                 f"✅ Telegram ingestion completed: {result.messages_saved} messages saved"
@@ -185,7 +210,7 @@ def run_source_pipeline(
 
         except Exception as e:
             logger.error(f"❌ Telegram ingestion failed: {e}")
-            stats.errors.append(f"Telegram ingestion error: {str(e)}")
+            stats["errors"].append(f"Telegram ingestion error: {str(e)}")
 
         return stats
 
@@ -199,7 +224,7 @@ def run_source_pipeline(
     try:
         llm_settings = source_config.llm_settings or {}
         llm_temperature = llm_settings.get("temperature", settings.llm_temperature)
-        llm_timeout = llm_settings.get("timeout_seconds", settings.llm_timeout_seconds)
+        llm_timeout = llm_settings.get("timeout", settings.llm_timeout_seconds)
         prompt_file = source_config.prompt_file
 
         llm_client = LLMClient(
@@ -367,7 +392,7 @@ def run_single_iteration(
     )
 
     # Aggregate statistics across all sources
-    total_stats: dict[str, int | float] = {
+    total_stats: PipelineStats = {
         "messages_fetched": 0,
         "messages_saved": 0,
         "candidates_created": 0,
@@ -375,6 +400,8 @@ def run_single_iteration(
         "events_merged": 0,
         "llm_calls": 0,
         "total_cost_usd": 0.0,
+        "channels_processed": [],
+        "errors": [],
     }
 
     # Process each source independently
@@ -392,8 +419,15 @@ def run_single_iteration(
         )
 
         # Aggregate statistics
-        for key, value in source_stats.items():
-            total_stats[key] += value
+        total_stats["messages_fetched"] += source_stats["messages_fetched"]
+        total_stats["messages_saved"] += source_stats["messages_saved"]
+        total_stats["candidates_created"] += source_stats["candidates_created"]
+        total_stats["events_extracted"] += source_stats["events_extracted"]
+        total_stats["events_merged"] += source_stats["events_merged"]
+        total_stats["llm_calls"] += source_stats["llm_calls"]
+        total_stats["total_cost_usd"] += source_stats["total_cost_usd"]
+        total_stats["channels_processed"].extend(source_stats["channels_processed"])
+        total_stats["errors"].extend(source_stats["errors"])
 
     # Print aggregate statistics
     print("\n" + "=" * 80)
