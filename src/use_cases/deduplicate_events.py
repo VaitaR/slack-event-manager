@@ -10,12 +10,14 @@ import pytz
 
 from src.adapters.query_builders import EventQueryCriteria
 from src.config.settings import Settings
-from src.domain.models import DeduplicationResult, MessageSource
+from src.domain.models import DeduplicationResult, Event, MessageSource
 from src.domain.protocols import RepositoryProtocol
 from src.services import deduplicator
 from src.services.title_renderer import TitleRenderer
+from src.services.validators import EventValidator
 
 _TITLE_RENDERER = TitleRenderer()
+_EVENT_VALIDATOR = EventValidator()
 
 
 def deduplicate_events_use_case(
@@ -144,9 +146,34 @@ def deduplicate_events_use_case(
         print("")
     sys.stdout.flush()
 
-    # Save deduplicated events (they will be upserted)
+    # Validate events after deduplication
     if deduplicated_events:
-        repository.save_events(deduplicated_events)
+        print("   🔍 Validating events after deduplication...")
+        sys.stdout.flush()
+
+        validated_events: list[Event] = []
+        validation_issues: list[str] = []
+
+        for event in deduplicated_events:
+            issues = _EVENT_VALIDATOR.validate_all(event)
+
+            if issues:
+                # Log validation issues but don't fail deduplication
+                validation_issues.extend(
+                    [f"Event {event.object_name_raw}: {issue}" for issue in issues]
+                )
+                print(f"   ⚠️  Validation issues for {event.object_name_raw}: {issues}")
+                sys.stdout.flush()
+
+            # Include event even with validation warnings
+            validated_events.append(event)
+
+        # Save validated events (they will be upserted)
+        repository.save_events(validated_events)
+
+        if validation_issues:
+            print(f"   📊 Validation summary: {len(validation_issues)} issues found")
+            sys.stdout.flush()
 
     return DeduplicationResult(
         new_events=final_count,

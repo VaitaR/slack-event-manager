@@ -13,9 +13,11 @@ from src.config.settings import Settings
 from src.domain.models import DigestResult, Event, EventCategory
 from src.domain.protocols import RepositoryProtocol
 from src.services.title_renderer import TitleRenderer
+from src.services.validators import EventValidator
 
-# Initialize title renderer
+# Initialize services
 _title_renderer = TitleRenderer()
+_event_validator = EventValidator()
 
 
 def format_event_date(event_date: datetime, tz_name: str = "Europe/Amsterdam") -> str:
@@ -337,9 +339,68 @@ def publish_digest_use_case(
     if max_events is not None and len(sorted_events) > max_events:
         sorted_events = sorted_events[:max_events]
 
-    # Build blocks
+    # Validate events before publishing to Slack
+    print(f"🔍 Validating {len(sorted_events)} events before publishing...")
+    import sys
+
+    sys.stdout.flush()
+
+    valid_events: list[Event] = []
+    invalid_events: list[Event] = []
+    validation_issues: list[str] = []
+
+    for event in sorted_events:
+        issues = _event_validator.validate_all(event)
+
+        if issues:
+            # Check if issues are only warnings (not critical errors)
+            critical_errors = [
+                issue for issue in issues if not issue.startswith("WARNING:")
+            ]
+
+            if critical_errors:
+                # Skip events with critical errors
+                invalid_events.append(event)
+                validation_issues.extend(
+                    [
+                        f"Event {event.object_name_raw}: {issue}"
+                        for issue in critical_errors
+                    ]
+                )
+                print(
+                    f"   ❌ Critical validation errors for {event.object_name_raw}: {critical_errors}"
+                )
+                sys.stdout.flush()
+            else:
+                # Include events with only warnings
+                valid_events.append(event)
+                validation_issues.extend(
+                    [f"Event {event.object_name_raw}: {issue}" for issue in issues]
+                )
+        else:
+            # Event is fully valid
+            valid_events.append(event)
+
+    if validation_issues:
+        print(
+            f"   📊 Validation summary: {len(validation_issues)} issues found ({len(invalid_events)} events skipped)"
+        )
+        sys.stdout.flush()
+
+    if not valid_events:
+        print("   ⚠️  No valid events to publish after validation")
+        sys.stdout.flush()
+        # Use default channel if no events to publish
+        channel = target_channel or settings.slack_digest_channel_id
+        return DigestResult(
+            messages_posted=0,
+            events_included=0,
+            channel=channel,
+        )
+
+    # Build blocks with validated events
     date_str = now.astimezone(pytz.timezone(settings.tz_default)).strftime("%d.%m.%Y")
-    blocks = build_digest_blocks(sorted_events, date_str, settings.tz_default)
+    blocks = build_digest_blocks(valid_events, date_str, settings.tz_default)
 
     # Chunk blocks
     block_chunks = chunk_blocks(blocks, max_blocks=50)

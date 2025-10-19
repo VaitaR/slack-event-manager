@@ -28,10 +28,12 @@ from src.domain.protocols import RepositoryProtocol
 from src.services import deduplicator
 from src.services.importance_scorer import ImportanceScorer
 from src.services.object_registry import ObjectRegistry
+from src.services.validators import EventValidator
 
 # Initialize services (singleton-style)
 _object_registry: ObjectRegistry | None = None
 _importance_scorer: ImportanceScorer | None = None
+_event_validator: EventValidator | None = None
 
 
 def _get_object_registry() -> ObjectRegistry:
@@ -70,6 +72,14 @@ def _get_importance_scorer() -> ImportanceScorer:
     if _importance_scorer is None:
         _importance_scorer = ImportanceScorer()
     return _importance_scorer
+
+
+def _get_event_validator() -> EventValidator:
+    """Get or create EventValidator instance."""
+    global _event_validator
+    if _event_validator is None:
+        _event_validator = EventValidator()
+    return _event_validator
 
 
 def _parse_datetime(
@@ -347,10 +357,14 @@ def extract_events_use_case(
             # Process events
             if llm_response.is_event and llm_response.events:
                 events_to_save: list[Event] = []
+                validation_errors: list[str] = []
 
                 # Get reaction and mention counts from candidate features
                 reaction_count = candidate.features.reaction_count
                 mention_count = 1 if candidate.features.has_mention else 0
+
+                # Get validator for event validation
+                validator = _get_event_validator()
 
                 for llm_event in llm_response.events:
                     domain_event = convert_llm_event_to_domain(
@@ -361,12 +375,35 @@ def extract_events_use_case(
                         reaction_count=reaction_count,
                         mention_count=mention_count,
                     )
+
+                    # Validate event before saving
+                    validation_issues = validator.validate_all(domain_event)
+
+                    if validation_issues:
+                        # Log validation issues but don't fail extraction
+                        validation_errors.extend(
+                            [
+                                f"Event {llm_event.object_name_raw}: {issue}"
+                                for issue in validation_issues
+                            ]
+                        )
+                        print(f"   ⚠️  Validation issues: {validation_issues}")
+                        sys.stdout.flush()
+
+                    # Save even if there are validation warnings (only critical errors should block)
                     events_to_save.append(domain_event)
 
                 # Save events (without deduplication yet)
                 if events_to_save:
                     repository.save_events(events_to_save)
                     events_extracted += len(events_to_save)
+
+                # Log validation summary
+                if validation_errors:
+                    print(
+                        f"   📊 Validation summary: {len(validation_errors)} issues found"
+                    )
+                    sys.stdout.flush()
 
             # Update candidate status
             repository.update_candidate_status(
