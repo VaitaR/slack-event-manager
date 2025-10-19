@@ -10,7 +10,7 @@ from typing import Any
 
 import pytz
 
-from src.adapters.sqlite_repository import SQLiteRepository
+from src.domain.protocols import RepositoryProtocol
 
 # Import Telegram types conditionally to avoid runtime errors
 try:
@@ -174,7 +174,7 @@ def process_telegram_message(
 
 def ingest_telegram_messages_use_case(
     telegram_client: TelegramClient,
-    repository: SQLiteRepository,
+    repository: RepositoryProtocol,
     settings: Settings,
     backfill_from_date: datetime | None = None,
 ) -> IngestResult:
