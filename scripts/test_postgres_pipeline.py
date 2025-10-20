@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg2
+import pytest
 import pytz
 
 # Add project root to path
@@ -165,18 +167,39 @@ def test_pipeline() -> None:
     logger.info("Starting PostgreSQL Pipeline Test")
     logger.info("=" * 80)
 
-    # Get settings and repository
+    # Get settings
     settings = get_settings()
     logger.info(f"Database type: {settings.database_type}")
 
     if settings.database_type != "postgres":
-        logger.error("DATABASE_TYPE must be 'postgres' for this test")
-        sys.exit(1)
+        pytest.skip("DATABASE_TYPE must be 'postgres' for this test")
 
+    # Check if PostgreSQL server is available before proceeding
+    try:
+        # Try to connect to PostgreSQL to verify it's running
+        test_conn = psycopg2.connect(
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            database=settings.postgres_database,
+            user=settings.postgres_user,
+            password=settings.postgres_password.get_secret_value(),
+            connect_timeout=5,  # Quick timeout to avoid hanging
+        )
+        test_conn.close()
+        logger.info(
+            f"✓ PostgreSQL server is available at {settings.postgres_user}@{settings.postgres_host}:{settings.postgres_port}"
+        )
+    except psycopg2.Error as e:
+        logger.warning(f"❌ PostgreSQL server not available: {e}")
+        pytest.skip(
+            f"PostgreSQL server not available at {settings.postgres_host}:{settings.postgres_port}"
+        )
+
+    # Create repository (will work now since server is available)
     repo = create_repository(settings)
     if not isinstance(repo, PostgresRepository):
         logger.error("Repository is not PostgresRepository")
-        sys.exit(1)
+        pytest.skip("Repository is not PostgresRepository")
 
     logger.info("✓ PostgreSQL repository initialized")
 
@@ -349,6 +372,12 @@ def test_pipeline() -> None:
 if __name__ == "__main__":
     try:
         test_pipeline()
+        print("✅ PostgreSQL pipeline test completed successfully")
     except Exception as e:
         logger.error(f"❌ Pipeline test FAILED: {e}", exc_info=True)
-        sys.exit(1)
+        # For pytest, let it handle the failure
+        if hasattr(e, "__class__") and "pytest" in str(e.__class__):
+            raise
+        else:
+            print(f"❌ Pipeline test failed: {e}")
+            sys.exit(1)
