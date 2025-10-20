@@ -17,9 +17,11 @@ select = [
     "W",      # pycodestyle warnings
     "UP",     # pyupgrade
     "PLR",    # pylint refactor (includes PLR2004 for magic numbers)
+    "PLC",    # pylint convention (includes PLC0415)
 ]
 ignore = [
     "E501",    # Line too long (handled by formatter)
+    "PLC0415", # Import should be at the top (too strict, local imports needed for circular deps)
     "PLR0911", # Too many return statements (classification.py)
     "PLR0912", # Too many branches (llm_client.py extract_events)
     "PLR0913", # Too many arguments (sometimes needed for protocols)
