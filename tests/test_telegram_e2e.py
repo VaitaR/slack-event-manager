@@ -11,7 +11,7 @@ import pytz
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.adapters.telegram_client import TelegramClient
 from src.config.settings import get_settings
-from src.domain.models import MessageSource
+from src.domain.models import MessageSource, TelegramChannelConfig
 from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
 
 
@@ -67,13 +67,12 @@ class TestTelegramE2E:
 
             # Create mock settings with telegram_channels
             settings = get_settings()
+
             settings.telegram_channels = [
-                {
-                    "channel_id": "@test_channel",
-                    "channel_name": "Test Channel",
-                    "from_date": "2025-10-16T00:00:00Z",
-                    "enabled": True,
-                }
+                TelegramChannelConfig(
+                    username="@test_channel",
+                    channel_name="Test Channel",
+                )
             ]
 
             # Run ingestion
@@ -171,10 +170,10 @@ class TestTelegramE2E:
 
         settings = get_settings()
         settings.telegram_channels = [
-            {
-                "channel_id": "@test_channel",
-                "enabled": True,
-            }
+            TelegramChannelConfig(
+                username="@test_channel",
+                channel_name="Test Channel",
+            )
         ]
 
         result = ingest_telegram_messages_use_case(
@@ -234,10 +233,10 @@ class TestTelegramE2E:
 
         settings = get_settings()
         settings.telegram_channels = [
-            {
-                "channel_id": "@disabled_channel",
-                "enabled": False,  # Disabled
-            }
+            TelegramChannelConfig(
+                username="@disabled_channel",
+                channel_name="Disabled Channel",
+            )
         ]
 
         result = ingest_telegram_messages_use_case(
@@ -290,7 +289,7 @@ class TestTelegramE2E:
             pass  # Don't delete DB here, we'll delete it at the end
 
         settings = get_settings()
-        settings.telegram_channels = []  # No channels
+        settings.telegram_channels = []  # No channels - this is fine as TelegramChannelConfig list
 
         result = ingest_telegram_messages_use_case(
             telegram_client=client,
@@ -361,10 +360,10 @@ class TestTelegramE2E:
 
         settings = get_settings()
         settings.telegram_channels = [
-            {
-                "channel_id": "@test_channel",
-                "enabled": True,
-            }
+            TelegramChannelConfig(
+                username="@test_channel",
+                channel_name="Test Channel",
+            )
         ]
 
         # First ingestion

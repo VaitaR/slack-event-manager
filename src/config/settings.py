@@ -21,7 +21,12 @@ from src.domain.deduplication_constants import (
     DEFAULT_MESSAGE_LOOKBACK_DAYS,
     DEFAULT_TITLE_SIMILARITY,
 )
-from src.domain.models import ChannelConfig, MessageSource, MessageSourceConfig
+from src.domain.models import (
+    ChannelConfig,
+    MessageSource,
+    MessageSourceConfig,
+    TelegramChannelConfig,
+)
 from src.domain.scoring_constants import DEFAULT_THRESHOLD_SCORE
 
 logger = logging.getLogger(__name__)
@@ -288,9 +293,17 @@ class Settings(BaseSettings):
                         channel_id=ch["channel_id"],
                         channel_name=ch["channel_name"],
                         threshold_score=ch.get("threshold_score", 0.0),
-                        keyword_weight=ch.get("keyword_weight", 0.0),
+                        keyword_weight=ch.get("keyword_weight", 10.0),
+                        mention_weight=ch.get("mention_weight", 8.0),
+                        reply_weight=ch.get("reply_weight", 5.0),
+                        reaction_weight=ch.get("reaction_weight", 3.0),
+                        anchor_weight=ch.get("anchor_weight", 4.0),
+                        link_weight=ch.get("link_weight", 2.0),
+                        file_weight=ch.get("file_weight", 3.0),
+                        bot_penalty=ch.get("bot_penalty", -15.0),
                         whitelist_keywords=ch.get("whitelist_keywords", []),
                         trusted_bots=ch.get("trusted_bots", []),
+                        prompt_file=ch.get("prompt_file", ""),
                     )
                 )
             data.setdefault("slack_channels", channels)
@@ -414,13 +427,30 @@ class Settings(BaseSettings):
         if "telegram_channels" in config:
             telegram_channels = []
             for ch in config["telegram_channels"]:
+                # Handle both new format (username) and legacy format (channel_id)
+                username = ch.get("username") or ch.get("channel_id", "")
+                if not username:
+                    logger.warning(
+                        f"Telegram channel missing username/channel_id: {ch}"
+                    )
+                    continue
+
                 telegram_channels.append(
-                    {
-                        "channel_id": ch.get("channel_id", ""),
-                        "channel_name": ch.get("channel_name", ""),
-                        "from_date": ch.get("from_date"),
-                        "enabled": ch.get("enabled", True),
-                    }
+                    TelegramChannelConfig(
+                        username=username,
+                        channel_name=ch["channel_name"],
+                        threshold_score=ch.get("threshold_score", 0.0),
+                        keyword_weight=ch.get("keyword_weight", 10.0),
+                        mention_weight=ch.get("mention_weight", 8.0),
+                        reply_weight=ch.get("reply_weight", 5.0),
+                        reaction_weight=ch.get("reaction_weight", 3.0),
+                        anchor_weight=ch.get("anchor_weight", 4.0),
+                        link_weight=ch.get("link_weight", 2.0),
+                        file_weight=ch.get("file_weight", 3.0),
+                        bot_penalty=ch.get("bot_penalty", -15.0),
+                        whitelist_keywords=ch.get("whitelist_keywords", []),
+                        prompt_file=ch.get("prompt_file", ""),
+                    )
                 )
             data.setdefault("telegram_channels", telegram_channels)
 
@@ -574,7 +604,7 @@ class Settings(BaseSettings):
     )
 
     # Telegram configuration
-    telegram_channels: list[dict[str, Any]] = Field(
+    telegram_channels: list[TelegramChannelConfig] = Field(
         default_factory=list,
         description="List of Telegram channels to monitor (loaded from config.yaml)",
     )
