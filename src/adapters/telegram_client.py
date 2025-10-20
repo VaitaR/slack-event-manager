@@ -6,6 +6,7 @@ Uses async Telethon library wrapped in synchronous interface for compatibility.
 
 import asyncio
 import logging
+import types
 from typing import Any
 
 import pytz
@@ -140,7 +141,12 @@ class TelegramClient:
         """Context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
         """Context manager exit with cleanup."""
         await self.close()
 
