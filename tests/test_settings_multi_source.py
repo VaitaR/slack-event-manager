@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from src.domain.models import MessageSource
+from src.domain.models import ChannelConfig, MessageSource
 
 
 class TestMessageSourceConfigLoading:
@@ -150,7 +150,6 @@ class TestPerSourceLLMSettings:
 
     def test_per_channel_prompt_files(self) -> None:
         """Test prompt file propagation from channels to ChannelConfig."""
-        from src.domain.models import ChannelConfig
 
         # Test direct ChannelConfig creation with prompt_file
         config1 = ChannelConfig(
