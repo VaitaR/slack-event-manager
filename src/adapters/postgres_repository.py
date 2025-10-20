@@ -16,18 +16,16 @@ from src.domain.models import (
     Event,
     EventCandidate,
     LLMCallMetadata,
-    MessageRecord,
     MessageSource,
     SlackMessage,
     TelegramMessage,
 )
+from src.domain.protocols import MessageRecord
 
 if TYPE_CHECKING:
     from src.adapters.query_builders import (
         CandidateQueryCriteria,
         EventQueryCriteria,
-        PostgresCandidateQueryCriteria,
-        PostgresEventQueryCriteria,
     )
     from src.config.settings import Settings
 
@@ -42,7 +40,7 @@ class PostgresRepository:
         database: str,
         user: str,
         password: str,
-        settings: Settings | None = None,
+        settings: "Settings | None" = None,
     ):
         """Initialize PostgreSQL repository.
 
@@ -92,7 +90,9 @@ class PostgresRepository:
             return "ingestion_state_telegram" if source_id else "ingestion_state"
 
         # Try to get source configuration
-        source_config = self._settings.get_source_config(source_id)
+
+        settings = self._settings
+        source_config = settings.get_source_config(source_id)
         if source_config and source_config.state_table:
             return source_config.state_table
 
@@ -452,10 +452,17 @@ class PostgresRepository:
                     )
                     rows = cur.fetchall()
                     columns = [desc[0] for desc in cur.description]
-                    return [
-                        self._row_to_telegram_message(dict(zip(columns, row)))
-                        for row in rows
-                    ]
+                    from typing import cast
+
+                    from src.domain.protocols import MessageRecord
+
+                    return cast(
+                        list[MessageRecord],
+                        [
+                            self._row_to_telegram_message(dict(zip(columns, row)))
+                            for row in rows
+                        ],
+                    )
 
                 else:
                     raise RepositoryError(

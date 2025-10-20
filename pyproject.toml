@@ -1,41 +1,29 @@
-[project]
-name = "slack-event-manager"
-version = "0.1.0"
-description = "AI-powered Slack event extraction and digest system"
-requires-python = ">=3.11"
-
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+# (если используете ruff как форматтер)
+# [tool.ruff.format]
+# quote-style = "double"
 
 [tool.ruff.lint]
 select = [
-    "E",      # pycodestyle errors
-    "F",      # pyflakes
-    "I",      # isort
-    "N",      # pep8-naming
-    "W",      # pycodestyle warnings
-    "UP",     # pyupgrade
-    "PLR",    # pylint refactor (includes PLR2004 for magic numbers)
+    "E","F","I","N","W","UP","PLR","PLC",
 ]
 ignore = [
-    "E501",    # Line too long (handled by formatter)
-    "PLR0911", # Too many return statements (classification.py)
-    "PLR0912", # Too many branches (llm_client.py extract_events)
-    "PLR0913", # Too many arguments (sometimes needed for protocols)
-    "PLR0915", # Too many statements (llm_client.py extract_events)
+    "E501",    # длина строки форматтером
+    "PLC0415", # Локальные импорты нужны для избежания циклических зависимостей
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]  # Unused imports in __init__
-"tests/*.py" = ["PLR2004"]  # Allow magic numbers in tests
-"src/use_cases/*.py" = ["PLR2004"]  # Business logic numbers are self-documenting in context
-"scripts/*.py" = ["E402", "E722", "PLR2004"]  # Scripts and demos: relaxed rules
-"src/adapters/postgres_repository.py" = ["N812"]  # Allow lowercase Connection/Cursor type aliases
-"alembic/env.py" = ["E402"]  # Alembic: path setup before imports
+"__init__.py" = ["F401"]
+"tests/*.py" = ["PLR2004"]
+"src/use_cases/*.py" = ["PLR2004"]
+"scripts/*.py" = ["E402", "E722", "PLR2004"]
+"src/adapters/postgres_repository.py" = ["N812"]
+"alembic/env.py" = ["E402"]
 
 [tool.mypy]
-# Matches Makefile and CI exactly: mypy src --config-file pyproject.toml
 python_version = "3.11"
 strict = true
 warn_return_any = true
@@ -47,7 +35,7 @@ disallow_any_decorated = false
 disallow_any_explicit = false
 disallow_subclassing_any = false
 
-# Relax strict mode for tests (but still check them)
+# Свести overrides для tests в один блок
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
@@ -67,11 +55,6 @@ module = [
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-
-[[tool.mypy.overrides]]
 module = ["src.adapters.slack_client", "src.config.settings"]
 warn_return_any = false
 warn_unused_ignores = false
@@ -81,32 +64,12 @@ module = ["app", "scripts.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-    "-v",
-    "--strict-markers",
-    "--cov=src",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-]
-markers = [
-    "postgres: Tests that require a PostgreSQL backend",
-]
-
-[tool.coverage.run]
-source = ["src"]
-omit = ["tests/*", "scripts/*"]
-
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
     "raise AssertionError",
     "raise NotImplementedError",
-    "if __name__ == .__main__.:",
+    "if __name__ == \"__main__\":",
     "if TYPE_CHECKING:",
 ]

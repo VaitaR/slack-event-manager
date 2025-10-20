@@ -161,66 +161,13 @@ def run_source_pipeline(
         # Process Telegram source
         logger.info(f"📥 Processing Telegram source: {source_id.value}")
         telegram_client = message_client
-
-        # Create Telegram-specific LLM client
-        try:
-            llm_settings = source_config.llm_settings or {}
-            llm_temperature = llm_settings.get("temperature", settings.llm_temperature)
-            llm_timeout = llm_settings.get("timeout", settings.llm_timeout_seconds)
-            prompt_file = source_config.prompt_file
-
-            llm_client = LLMClient(
-                api_key=settings.openai_api_key.get_secret_value(),
-                model=settings.llm_model,
-                temperature=llm_temperature,
-                timeout=llm_timeout,
-                prompt_file=prompt_file,
-            )
-            logger.info("✓ Created Telegram LLM client")
-        except Exception as e:
-            logger.error(f"❌ Failed to create LLM client for Telegram: {e}")
-            return stats
-
-        # Run Telegram ingestion
-        try:
-            # Telegram use case expects SQLiteRepository specifically
-            sqlite_repo = (
-                repository if isinstance(repository, SQLiteRepository) else None
-            )
-            if sqlite_repo is None:
-                logger.error("❌ Telegram ingestion requires SQLiteRepository")
-                stats["errors"].append("Telegram ingestion requires SQLiteRepository")
-                return stats
-
-            result = ingest_telegram_messages_use_case(
-                telegram_client=telegram_client,
-                repository=sqlite_repo,
-                settings=settings,
-                backfill_from_date=backfill_from_date,
-            )
-
-            stats["messages_fetched"] += result.messages_fetched
-            stats["messages_saved"] += result.messages_saved
-            stats["channels_processed"].extend(result.channels_processed)
-            stats["errors"].extend(result.errors)
-
-            logger.info(
-                f"✅ Telegram ingestion completed: {result.messages_saved} messages saved"
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Telegram ingestion failed: {e}")
-            stats["errors"].append(f"Telegram ingestion error: {str(e)}")
-
-        return stats
-
     else:
         logger.warning(
             f"⚠️  Message client type {type(message_client)} not supported yet; skipping source"
         )
         return stats
 
-    # Create source-specific LLM client for Slack
+    # Create source-specific LLM client
     try:
         llm_settings = source_config.llm_settings or {}
         llm_temperature = llm_settings.get("temperature", settings.llm_temperature)
@@ -246,13 +193,34 @@ def run_source_pipeline(
     print(f"STEP 1: Ingesting messages from {source_id.value}")
     print("=" * 60)
     try:
-        ingest_result = ingest_messages_use_case(
-            slack_client=slack_client,
-            repository=repository,
-            settings=settings,
-            lookback_hours=args.lookback_hours,
-            backfill_from_date=backfill_from_date,
-        )
+        if isinstance(message_client, SlackClient):
+            # Slack ingestion
+            ingest_result = ingest_messages_use_case(
+                slack_client=slack_client,
+                repository=repository,
+                settings=settings,
+                lookback_hours=args.lookback_hours,
+                backfill_from_date=backfill_from_date,
+            )
+        elif isinstance(message_client, TelegramClient):
+            # Telegram ingestion - requires SQLiteRepository
+            sqlite_repo = (
+                repository if isinstance(repository, SQLiteRepository) else None
+            )
+            if sqlite_repo is None:
+                logger.error("❌ Telegram ingestion requires SQLiteRepository")
+                stats["errors"].append("Telegram ingestion requires SQLiteRepository")
+                return stats
+
+            ingest_result = ingest_telegram_messages_use_case(
+                telegram_client=telegram_client,
+                repository=sqlite_repo,
+                settings=settings,
+                backfill_from_date=backfill_from_date,
+            )
+        else:
+            raise ValueError(f"Unsupported message client type: {type(message_client)}")
+
         stats["messages_fetched"] = ingest_result.messages_fetched
         stats["messages_saved"] = ingest_result.messages_saved
         print(f"✓ Fetched: {ingest_result.messages_fetched} messages")
