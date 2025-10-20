@@ -10,10 +10,13 @@ from typing import Any
 import pytz
 
 from src.adapters.slack_client import SlackClient
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.models import IngestResult, SlackMessage
 from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
+
+logger = get_logger(__name__)
 
 
 def generate_message_id(channel: str, ts: str) -> str:
@@ -218,19 +221,30 @@ def ingest_messages_use_case(
             if last_ts is not None:
                 # Incremental: use last processed timestamp
                 oldest_ts = str(last_ts)
-                print(f"📈 Channel {channel_id}: Incremental from {oldest_ts}")
+                logger.info(
+                    "slack_ingestion_incremental",
+                    channel_id=channel_id,
+                    oldest_ts=oldest_ts,
+                    strategy="incremental",
+                )
             elif backfill_from_date:
                 # First run with explicit backfill date
                 oldest_ts = str(backfill_from_date.timestamp())
-                print(
-                    f"📅 Channel {channel_id}: Backfill from {backfill_from_date.isoformat()}"
+                logger.info(
+                    "slack_ingestion_backfill",
+                    channel_id=channel_id,
+                    backfill_date=backfill_from_date.isoformat(),
+                    strategy="explicit_backfill",
                 )
             else:
                 # First run: default 30 days
                 oldest_dt = now - timedelta(days=default_backfill_days)
                 oldest_ts = str(oldest_dt.timestamp())
-                print(
-                    f"🔄 Channel {channel_id}: First run, backfill {default_backfill_days} days"
+                logger.info(
+                    "slack_ingestion_first_run",
+                    channel_id=channel_id,
+                    backfill_days=default_backfill_days,
+                    strategy="default_backfill",
                 )
 
             # Fetch messages from Slack
@@ -286,11 +300,20 @@ def ingest_messages_use_case(
                 repository.update_last_processed_ts(
                     channel_id, latest_ts_float + 0.000001
                 )
-                print(f"✅ Updated ingestion_state for {channel_id} to {latest_ts_str}")
+                logger.info(
+                    "slack_ingestion_state_updated",
+                    channel_id=channel_id,
+                    latest_ts=latest_ts_str,
+                    messages_saved=saved_count,
+                )
             elif last_ts is None:
                 # First run but no messages: still mark as processed up to now
                 repository.update_last_processed_ts(channel_id, now_ts)
-                print(f"✅ Initialized ingestion_state for {channel_id} (no messages)")
+                logger.info(
+                    "slack_ingestion_state_initialized",
+                    channel_id=channel_id,
+                    reason="no_messages",
+                )
 
             channels_processed.append(channel_id)
 

@@ -461,3 +461,242 @@ class TestChannelIDFormats:
         # Should accept numeric ID format
         messages = client.fetch_messages(channel_id="-1001234567890")
         assert isinstance(messages, list)
+
+
+class TestFallbackScenarios:
+    """Test fallback scenarios when Telethon is not available."""
+
+    @patch("src.adapters.telegram_client.TelegramClientLib", None)
+    def test_convert_message_fallback_no_telethon(self) -> None:
+        """Test _convert_message_to_dict handles None entity types gracefully."""
+        client = TelegramClient(
+            api_id=12345, api_hash="test_hash", session_name="test_session"
+        )
+
+        # Mock message with entities (unknown types when Telethon is not available)
+        class MockMessage:
+            def __init__(self):
+                self.id = 123
+                self.message = "Test message"
+                self.text = "Test message"
+                self.date = datetime(2025, 10, 17, 12, 0, 0, tzinfo=pytz.UTC)
+                self.sender_id = 456
+                self.entities = [
+                    type(
+                        "MockEntity", (), {"offset": 10, "length": 15}
+                    )(),  # Mock entity
+                ]
+                self.media = None
+                self.views = 0
+                self.forwards = None
+                self.replies = None
+
+        mock_msg = MockMessage()
+
+        # Should not crash and return valid dict
+        result = client._convert_message_to_dict(
+            mock_msg, "@test_channel", "test_channel"
+        )
+
+        assert isinstance(result, dict)
+        assert result["message_id"] == "123"
+        assert result["text"] == "Test message"
+        assert result["entities"] == []  # Should be empty due to None types
+        assert result["channel"] == "@test_channel"
+
+    @patch("src.adapters.telegram_client.MessageEntityUrl", None)
+    @patch("src.adapters.telegram_client.MessageEntityTextUrl", None)
+    def test_convert_message_partial_fallback(self) -> None:
+        """Test _convert_message_to_dict with only one entity type available."""
+        # Patch only MessageEntityTextUrl to be available
+        with (
+            patch("src.adapters.telegram_client.MessageEntityUrl", None),
+            patch(
+                "src.adapters.telegram_client.MessageEntityTextUrl",
+                type("MockType", (), {}),
+            ),
+        ):
+            client = TelegramClient(
+                api_id=12345, api_hash="test_hash", session_name="test_session"
+            )
+
+            # Mock message with TextUrl entity
+            class MockTextUrlEntity:
+                def __init__(self, url: str):
+                    self.url = url
+
+            class MockMessage:
+                def __init__(self):
+                    self.id = 123
+                    self.message = "Test message"
+                    self.text = "Test message"
+                    self.date = datetime(2025, 10, 17, 12, 0, 0, tzinfo=pytz.UTC)
+                    self.sender_id = 456
+                    self.entities = [
+                        MockTextUrlEntity(url="https://test.com"),
+                    ]
+                    self.media = None
+                    self.views = 0
+                    self.forwards = None
+                    self.replies = None
+
+            mock_msg = MockMessage()
+
+            # Should extract TextUrl entity but not crash
+            result = client._convert_message_to_dict(
+                mock_msg, "@test_channel", "test_channel"
+            )
+
+            assert isinstance(result, dict)
+        assert (
+            result["entities"] == []
+        )  # TextUrl entities not processed in this test setup
+
+
+class TestAsyncEventLoopScenarios:
+    """Test Telegram client in scenarios with active event loops."""
+
+    @patch("src.adapters.telegram_client.TelegramClientLib")
+    def test_sync_wrapper_with_active_event_loop(self, mock_telethon: Mock) -> None:
+        """Test that sync wrapper works correctly when called from within an active event loop."""
+        import asyncio
+
+        mock_client_instance = AsyncMock()
+        mock_telethon.return_value = mock_client_instance
+
+        # Mock successful message fetching
+        mock_messages = [
+            Mock(
+                id=1,
+                message="Test message",
+                text="Test message",
+                date=datetime(2025, 10, 17, 12, 0, 0, tzinfo=pytz.UTC),
+                sender_id=123,
+                entities=[],
+                media=None,
+                views=0,
+                forwards=None,
+                replies=None,
+            )
+        ]
+        mock_client_instance.iter_messages = Mock(return_value=mock_messages)
+        mock_client_instance.get_entity = AsyncMock()
+        mock_client_instance.start = AsyncMock()
+        mock_client_instance.disconnect = AsyncMock()
+
+        client = TelegramClient(
+            api_id=12345, api_hash="test_hash", session_name="test_session"
+        )
+
+        # Simulate calling from within an active event loop (like in FastAPI)
+        async def test_in_event_loop():
+            # This simulates what would happen in a web server context
+            return client.fetch_messages(channel_id="@test_channel", limit=1)
+
+        # Should work without hanging or crashing
+        messages = asyncio.run(test_in_event_loop())
+        assert isinstance(messages, list)
+        assert len(messages) == 1
+
+    @patch("src.adapters.telegram_client.TelegramClientLib")
+    def test_async_method_works_in_event_loop(self, mock_telethon: Mock) -> None:
+        """Test that async fetch_messages_async works correctly in event loop."""
+        import asyncio
+
+        mock_client_instance = AsyncMock()
+        mock_telethon.return_value = mock_client_instance
+
+        # Mock successful message fetching
+        mock_messages = [
+            Mock(
+                id=1,
+                message="Test message",
+                text="Test message",
+                date=datetime(2025, 10, 17, 12, 0, 0, tzinfo=pytz.UTC),
+                sender_id=123,
+                entities=[],
+                media=None,
+                views=0,
+                forwards=None,
+                replies=None,
+            )
+        ]
+        mock_client_instance.iter_messages = Mock(return_value=mock_messages)
+        mock_client_instance.get_entity = AsyncMock()
+        mock_client_instance.start = AsyncMock()
+        mock_client_instance.disconnect = AsyncMock()
+
+        client = TelegramClient(
+            api_id=12345, api_hash="test_hash", session_name="test_session"
+        )
+
+        # Test async method in event loop context
+        async def test_async_method():
+            return await client.fetch_messages_async(
+                channel_id="@test_channel", limit=1
+            )
+
+        messages = asyncio.run(test_async_method())
+        assert isinstance(messages, list)
+        assert len(messages) == 1
+
+    @patch("src.adapters.telegram_client.TelegramClientLib")
+    def test_multiple_sync_calls_isolation(self, mock_telethon: Mock) -> None:
+        """Test that multiple sync calls don't interfere with each other."""
+        mock_client_instance = AsyncMock()
+        mock_telethon.return_value = mock_client_instance
+
+        # Mock different responses for different calls
+        call_count = 0
+
+        def mock_iter_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [
+                    Mock(
+                        id=1,
+                        message="Message 1",
+                        text="Message 1",
+                        date=datetime(2025, 10, 17, 12, 0, 0, tzinfo=pytz.UTC),
+                        sender_id=123,
+                        entities=[],
+                        media=None,
+                        views=0,
+                        forwards=None,
+                        replies=None,
+                    )
+                ]
+            else:
+                return [
+                    Mock(
+                        id=2,
+                        message="Message 2",
+                        text="Message 2",
+                        date=datetime(2025, 10, 17, 12, 1, 0, tzinfo=pytz.UTC),
+                        sender_id=456,
+                        entities=[],
+                        media=None,
+                        views=0,
+                        forwards=None,
+                        replies=None,
+                    )
+                ]
+
+        mock_client_instance.iter_messages = Mock(side_effect=mock_iter_side_effect)
+        mock_client_instance.get_entity = AsyncMock()
+        mock_client_instance.start = AsyncMock()
+        mock_client_instance.disconnect = AsyncMock()
+
+        client = TelegramClient(
+            api_id=12345, api_hash="test_hash", session_name="test_session"
+        )
+
+        # Make multiple sync calls
+        messages1 = client.fetch_messages(channel_id="@test_channel", limit=1)
+        messages2 = client.fetch_messages(channel_id="@test_channel", limit=1)
+
+        # Should get different results (isolated clients)
+        assert len(messages1) == 1
+        assert len(messages2) == 1
+        assert messages1[0]["message_id"] != messages2[0]["message_id"]

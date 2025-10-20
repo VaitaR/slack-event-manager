@@ -5,19 +5,19 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 """
 
 import hashlib
-import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 import pytz
 
 from src.adapters.telegram_client import TelegramClient
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.models import IngestResult, MessageSource, TelegramMessage
 from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Import Telegram types conditionally to avoid runtime errors
 try:
@@ -62,11 +62,15 @@ def extract_urls_from_entities(entities: list[Any], text: str) -> list[str]:
     urls: list[str] = []
 
     for entity in entities:
-        if isinstance(entity, MessageEntityUrl):
+        # Check if entity is MessageEntityUrl (handle None fallbacks)
+        if MessageEntityUrl is not None and isinstance(entity, MessageEntityUrl):
             # Extract URL from text using offset and length
             url = text[entity.offset : entity.offset + entity.length]
             urls.append(url)
-        elif isinstance(entity, MessageEntityTextUrl):
+        # Check if entity is MessageEntityTextUrl (handle None fallbacks)
+        elif MessageEntityTextUrl is not None and isinstance(
+            entity, MessageEntityTextUrl
+        ):
             # URL is stored in entity.url
             urls.append(entity.url)
 
@@ -175,7 +179,7 @@ def process_telegram_message(
     )
 
 
-def ingest_telegram_messages_use_case(
+async def ingest_telegram_messages_use_case_async(
     telegram_client: TelegramClient,
     repository: RepositoryProtocol,
     settings: Settings,
@@ -224,7 +228,10 @@ def ingest_telegram_messages_use_case(
     telegram_channels = getattr(settings, "telegram_channels", [])
 
     if not telegram_channels:
-        print("⚠️  No Telegram channels configured")
+        logger.warning(
+            "telegram_ingestion_no_channels",
+            reason="no_channels_configured",
+        )
         return IngestResult(
             messages_fetched=0,
             messages_saved=0,
@@ -308,9 +315,9 @@ def ingest_telegram_messages_use_case(
                     },
                 )
 
-            # Fetch messages from Telegram
+            # Fetch messages from Telegram (async version for production use)
             # Note: Telegram returns newest first, we'll filter by date
-            raw_messages = telegram_client.fetch_messages(
+            raw_messages = await telegram_client.fetch_messages_async(
                 channel_id=channel_id,
                 limit=100,  # Fetch up to 100 messages
             )
@@ -402,3 +409,45 @@ def ingest_telegram_messages_use_case(
         channels_processed=channels_processed,
         errors=errors,
     )
+
+
+def ingest_telegram_messages_use_case(
+    telegram_client: TelegramClient,
+    repository: RepositoryProtocol,
+    settings: Settings,
+    backfill_from_date: datetime | None = None,
+) -> IngestResult:
+    """Synchronous wrapper for Telegram ingestion use case.
+
+    This is a compatibility wrapper that runs the async version using the sync Telegram client.
+    For production use in async contexts, use ingest_telegram_messages_use_case_async() directly.
+
+    Args:
+        telegram_client: Telegram client instance
+        repository: Data repository
+        settings: Application settings
+        backfill_from_date: Optional backfill start date
+
+    Returns:
+        IngestResult with ingestion statistics
+    """
+    # Use sync client wrapper for backward compatibility with existing tests
+    # This avoids asyncio.run() issues in test environments
+    import asyncio
+
+    # Create a new event loop for this specific call
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        # Run the async version in this isolated loop
+        result = loop.run_until_complete(
+            ingest_telegram_messages_use_case_async(
+                telegram_client=telegram_client,
+                repository=repository,
+                settings=settings,
+                backfill_from_date=backfill_from_date,
+            )
+        )
+        return result
+    finally:
+        loop.close()
