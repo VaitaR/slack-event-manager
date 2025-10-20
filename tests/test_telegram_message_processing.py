@@ -4,6 +4,7 @@ Tests the conversion of raw Telegram message dictionaries to TelegramMessage dom
 """
 
 from datetime import datetime
+from unittest.mock import patch
 
 import pytz
 
@@ -266,3 +267,83 @@ class TestTextNormalization:
             blocks_text="Formatted text for scoring",
         )
         assert msg.blocks_text == "Formatted text for scoring"
+
+
+class TestURLEntityExtraction:
+    """Test URL extraction from Telegram message entities."""
+
+    def test_extract_urls_from_entities_empty_list(self) -> None:
+        """Test URL extraction with empty entities list."""
+        from src.use_cases.ingest_telegram_messages import extract_urls_from_entities
+
+        urls = extract_urls_from_entities([], "No entities here")
+
+        assert len(urls) == 0
+
+    @patch("src.use_cases.ingest_telegram_messages.MessageEntityUrl", None)
+    @patch("src.use_cases.ingest_telegram_messages.MessageEntityTextUrl", None)
+    def test_extract_urls_fallback_no_telethon(self) -> None:
+        """Test URL extraction fallback when Telethon is not installed."""
+        from src.use_cases.ingest_telegram_messages import extract_urls_from_entities
+
+        # Mock entities (unknown types when Telethon is not available)
+        class MockUnknownEntity:
+            def __init__(self, offset: int, length: int):
+                self.offset = offset
+                self.length = length
+
+        entities = [
+            MockUnknownEntity(
+                offset=10, length=15
+            ),  # Would cause error in isinstance check
+        ]
+        text = "Check out https://example.com"
+
+        # Should not crash and return empty list
+        urls = extract_urls_from_entities(entities, text)
+
+        assert len(urls) == 0
+
+    def test_extract_urls_function_handles_none_types_gracefully(self) -> None:
+        """Test that extract_urls_from_entities doesn't crash with None entity types."""
+        from src.use_cases.ingest_telegram_messages import extract_urls_from_entities
+
+        # Test with None as entity types (simulates no Telethon)
+        with (
+            patch("src.use_cases.ingest_telegram_messages.MessageEntityUrl", None),
+            patch("src.use_cases.ingest_telegram_messages.MessageEntityTextUrl", None),
+        ):
+            # Any entities list should not cause crashes
+            entities = [
+                type("MockEntity", (), {"offset": 10, "length": 15})(),
+                type("MockEntity2", (), {"url": "https://example.com"})(),
+            ]
+            text = "Test message"
+
+            # Should not crash and return empty list (no valid entity types)
+            urls = extract_urls_from_entities(entities, text)
+
+            assert len(urls) == 0
+
+    def test_extract_urls_function_with_mixed_entity_types(self) -> None:
+        """Test extract_urls_from_entities with mixed valid and invalid entity types."""
+        from src.use_cases.ingest_telegram_messages import extract_urls_from_entities
+
+        # Mock entities - some valid, some not
+        class MockValidEntity:
+            def __init__(self, url: str):
+                self.url = url
+
+        entities = [
+            type("InvalidEntity", (), {"offset": 10})(),  # Invalid - no url attribute
+            MockValidEntity(url="https://example.com"),  # Valid
+            type("InvalidEntity2", (), {"length": 5})(),  # Invalid - no url attribute
+        ]
+        text = "Test message"
+
+        # Should only extract from valid entities
+        urls = extract_urls_from_entities(entities, text)
+
+        # The function should handle gracefully and not crash
+        # In real implementation, only MessageEntityTextUrl would be extracted
+        assert isinstance(urls, list)

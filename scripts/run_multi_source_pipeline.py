@@ -41,7 +41,9 @@ from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
-from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
+from src.use_cases.ingest_telegram_messages import (
+    ingest_telegram_messages_use_case_async,
+)
 from src.use_cases.publish_digest import publish_digest_use_case
 
 # Global flag for graceful shutdown
@@ -212,11 +214,16 @@ def run_source_pipeline(
                 stats["errors"].append("Telegram ingestion requires SQLiteRepository")
                 return stats
 
-            ingest_result = ingest_telegram_messages_use_case(
-                telegram_client=telegram_client,
-                repository=sqlite_repo,
-                settings=settings,
-                backfill_from_date=backfill_from_date,
+            # Use async version for production-ready async-first approach
+            import asyncio
+
+            ingest_result = asyncio.run(
+                ingest_telegram_messages_use_case_async(
+                    telegram_client=telegram_client,
+                    repository=sqlite_repo,
+                    settings=settings,
+                    backfill_from_date=backfill_from_date,
+                )
             )
         else:
             raise ValueError(f"Unsupported message client type: {type(message_client)}")
