@@ -62,8 +62,10 @@ class TelegramClient:
         Raises:
             ImportError: If telethon is not available
         """
+        # Allow initialization even if telethon is not available (for testing)
         if TelegramClientLib is None:
-            raise ImportError("TelegramClient requires telethon to be installed")
+            # For testing purposes, we'll allow initialization but methods will fail
+            pass
 
         self.api_id = api_id
         self.api_hash = api_hash
@@ -75,7 +77,13 @@ class TelegramClient:
 
         Returns:
             Telethon client instance
+
+        Raises:
+            ImportError: If telethon is not available
         """
+        if TelegramClientLib is None:
+            raise ImportError("TelegramClient requires telethon to be installed")
+
         if self._client is None:
             self._client = TelegramClientLib(
                 self.session_name, self.api_id, self.api_hash

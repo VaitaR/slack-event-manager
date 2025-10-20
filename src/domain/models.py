@@ -183,6 +183,10 @@ class ChannelConfig(BaseModel):
         default="",
         description="Path to LLM prompt template file (empty = use source default)",
     )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this channel is enabled for processing",
+    )
 
 
 class TelegramChannelConfig(BaseModel):
@@ -212,6 +216,10 @@ class TelegramChannelConfig(BaseModel):
     prompt_file: str = Field(
         default="",
         description="Path to LLM prompt template file (empty = use source default)",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this channel is enabled for processing",
     )
 
     @field_validator("username")

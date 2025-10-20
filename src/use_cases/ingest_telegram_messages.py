@@ -236,7 +236,8 @@ def ingest_telegram_messages_use_case(
             enabled = channel_config.get("enabled", True)
             from_date_str = channel_config.get("from_date")
         else:
-            channel_id = getattr(channel_config, "channel_id", "")
+            # TelegramChannelConfig object
+            channel_id = getattr(channel_config, "username", "")
             enabled = getattr(channel_config, "enabled", True)
             from_date_str = getattr(channel_config, "from_date", None)
 

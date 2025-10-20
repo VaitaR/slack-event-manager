@@ -121,6 +121,7 @@ def sample_channel_config() -> ChannelConfig:
         file_weight=3.0,
         bot_penalty=-15.0,
         prompt_file="config/prompts/custom_releases.yaml",
+        enabled=True,
     )
 
 

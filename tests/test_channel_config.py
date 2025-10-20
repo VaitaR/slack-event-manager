@@ -53,6 +53,18 @@ class TestChannelConfig:
         assert config.keyword_weight == 12.0
         assert config.mention_weight == 10.0
         assert config.bot_penalty == -20.0
+        assert config.enabled
+
+    def test_channel_config_disabled(self) -> None:
+        """Test ChannelConfig with disabled state."""
+        config = ChannelConfig(
+            channel_id="C123456",
+            channel_name="disabled-channel",
+            enabled=False,
+        )
+
+        assert not config.enabled
+        assert config.channel_id == "C123456"
 
 
 class TestTelegramChannelConfig:
@@ -140,6 +152,7 @@ class TestTelegramChannelConfig:
         assert config.mention_weight == 12.0
         assert config.bot_penalty == -25.0
         assert len(config.whitelist_keywords) == 3
+        assert config.enabled
 
     def test_telegram_channel_config_defaults(self) -> None:
         """Test TelegramChannelConfig with default values."""
@@ -161,3 +174,4 @@ class TestTelegramChannelConfig:
         assert config.file_weight == 3.0
         assert config.bot_penalty == -15.0
         assert config.whitelist_keywords == []
+        assert config.enabled

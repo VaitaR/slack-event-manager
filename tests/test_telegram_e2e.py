@@ -236,6 +236,7 @@ class TestTelegramE2E:
             TelegramChannelConfig(
                 username="@disabled_channel",
                 channel_name="Disabled Channel",
+                enabled=False,  # Explicitly disable this channel
             )
         ]
 
