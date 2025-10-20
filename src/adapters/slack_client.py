@@ -9,7 +9,10 @@ from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+from src.config.logging_config import get_logger
 from src.domain.exceptions import RateLimitError, SlackAPIError
+
+logger = get_logger(__name__)
 
 
 class SlackClient:
@@ -100,12 +103,13 @@ class SlackClient:
             except SlackApiError as e:
                 if e.response.get("error") == "ratelimited":
                     retry_after = int(e.response.headers.get("Retry-After", 10))
-                    import sys
-
-                    print(
-                        f"⚠️ Rate limited. Waiting {retry_after}s before retry (attempt {retry_count + 1}/{max_retries})..."
+                    logger.warning(
+                        "slack_rate_limited",
+                        retry_after_seconds=retry_after,
+                        attempt=retry_count + 1,
+                        max_retries=max_retries,
+                        channel_id=channel_id,
                     )
-                    sys.stdout.flush()
                     time.sleep(retry_after)
                     retry_count += 1
                     if retry_count >= max_retries:
@@ -117,7 +121,16 @@ class SlackClient:
                     raise SlackAPIError(f"Failed after {max_retries} retries: {e}")
 
                 # Exponential backoff
-                time.sleep(2**retry_count)
+                backoff_seconds = 2**retry_count
+                logger.warning(
+                    "slack_api_retry",
+                    error=str(e),
+                    attempt=retry_count,
+                    max_retries=max_retries,
+                    backoff_seconds=backoff_seconds,
+                    channel_id=channel_id,
+                )
+                time.sleep(backoff_seconds)
 
         return all_messages
 

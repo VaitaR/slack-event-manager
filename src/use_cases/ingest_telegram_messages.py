@@ -5,19 +5,19 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 """
 
 import hashlib
-import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 import pytz
 
 from src.adapters.telegram_client import TelegramClient
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.models import IngestResult, MessageSource, TelegramMessage
 from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Import Telegram types conditionally to avoid runtime errors
 try:
@@ -228,7 +228,10 @@ async def ingest_telegram_messages_use_case_async(
     telegram_channels = getattr(settings, "telegram_channels", [])
 
     if not telegram_channels:
-        print("⚠️  No Telegram channels configured")
+        logger.warning(
+            "telegram_ingestion_no_channels",
+            reason="no_channels_configured",
+        )
         return IngestResult(
             messages_fetched=0,
             messages_saved=0,

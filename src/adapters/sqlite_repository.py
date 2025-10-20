@@ -16,6 +16,7 @@ from src.adapters.query_builders import (
     CandidateQueryCriteria,
     EventQueryCriteria,
 )
+from src.config.logging_config import get_logger
 from src.domain.exceptions import RepositoryError
 from src.domain.models import (
     CandidateStatus,
@@ -28,6 +29,8 @@ from src.domain.models import (
     SlackMessage,
     TelegramMessage,
 )
+
+logger = get_logger(__name__)
 
 
 class SQLiteRepository:
@@ -58,7 +61,7 @@ class SQLiteRepository:
 
     def _create_schema(self) -> None:
         """Create database schema if not exists."""
-        print(f"🔧 Creating schema for database: {self.db_path}")
+        logger.info("sqlite_schema_creation_started", db_path=str(self.db_path))
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -326,7 +329,7 @@ class SQLiteRepository:
 
         conn.commit()
         conn.close()
-        print("✅ Schema creation completed")
+        logger.info("sqlite_schema_creation_completed", db_path=str(self.db_path))
 
     def save_messages(self, messages: list[SlackMessage]) -> int:
         """Save messages to storage (idempotent upsert).
