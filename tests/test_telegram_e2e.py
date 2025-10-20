@@ -493,47 +493,48 @@ class TestTelegramE2E:
                 )
 
                 assert result1.messages_saved == 3
+
+                # Second run: 2 new messages (IDs 4, 5)
+                # Update mock to return new messages
+                mock_messages_second = [
+                    Mock(
+                        id=i + 1,
+                        message=f"Message {i}",
+                        text=f"Message {i}",
+                        date=datetime.now(pytz.UTC).replace(
+                            hour=12, minute=i, second=0, microsecond=0
+                        ),
+                        sender_id=f"12345{i}",
+                        entities=[],
+                        media=None,
+                        views=0,
+                        forwards=None,
+                        replies=None,
+                    )
+                    for i in range(3, 5)  # Messages 3, 4 (IDs 4, 5)
+                ]
+                mock_client_instance.iter_messages = Mock(
+                    return_value=mock_messages_second
+                )
+
+                # Second ingestion (incremental)
+                result2 = ingest_telegram_messages_use_case(
+                    telegram_client=client,
+                    repository=repository,
+                    settings=settings,
+                )
+
+                # Should save only new messages
+                assert result2.messages_saved == 2
+
+                # Total messages in DB
+                all_messages = repository.get_telegram_messages(
+                    channel="@test_channel", limit=10
+                )
+                assert len(all_messages) == 5
             finally:
                 # Clean up database after test
                 import os
 
                 if os.path.exists(db_path):
                     os.unlink(db_path)
-
-        # Second run: 2 new messages (IDs 4, 5)
-        client.fetch_messages = Mock(
-            return_value=[
-                {
-                    "id": i + 1,
-                    "message_id": i + 1,
-                    "date": datetime.now(pytz.UTC).replace(
-                        hour=12, minute=i, second=0, microsecond=0
-                    ),
-                    "text": f"Message {i}",
-                    "sender_id": f"12345{i}",
-                    "channel": "@test_channel",
-                }
-                for i in range(3, 5)  # Messages 3, 4 (IDs 4, 5)
-            ]
-        )
-
-        # Second ingestion (incremental)
-        result2 = ingest_telegram_messages_use_case(
-            telegram_client=client,
-            repository=repository,
-            settings=settings,
-        )
-
-        # Should save only new messages
-        assert result2.messages_saved == 2
-
-        # Total messages in DB
-        all_messages = repository.get_telegram_messages(
-            channel="@test_channel", limit=10
-        )
-        assert len(all_messages) == 5
-
-        # Clean up database after test
-
-        if os.path.exists(db_path):
-            os.unlink(db_path)
