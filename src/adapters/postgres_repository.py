@@ -904,6 +904,83 @@ class PostgresRepository:
                 conn.rollback()
                 raise
 
+    def get_last_processed_message_id(
+        self, channel: str, source_id: MessageSource | None = None
+    ) -> str | None:
+        """Get last processed message ID for a Telegram channel.
+
+        Args:
+            channel: Channel ID (Telegram username)
+            source_id: Message source (must be TELEGRAM for this method)
+
+        Returns:
+            Last processed message ID or None if first run
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        if source_id != MessageSource.TELEGRAM:
+            raise RepositoryError(
+                f"get_last_processed_message_id only supports TELEGRAM source, got {source_id}"
+            )
+
+        # Use source-specific state table name from configuration
+        table_name = self._get_state_table_name(source_id)
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT last_processed_message_id FROM {table_name} WHERE channel_id = %s",
+                        (channel,),
+                    )
+                    row = cur.fetchone()
+                    conn.commit()
+                    return row["last_processed_message_id"] if row else None
+        except Exception as e:
+            raise RepositoryError(f"Failed to get last processed message ID: {e}")
+
+    def update_last_processed_message_id(
+        self, channel: str, message_id: str, source_id: MessageSource | None = None
+    ) -> None:
+        """Update last processed message ID for a Telegram channel.
+
+        Args:
+            channel: Channel ID (Telegram username)
+            message_id: Message ID to set
+            source_id: Message source (must be TELEGRAM for this method)
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+        if source_id != MessageSource.TELEGRAM:
+            raise RepositoryError(
+                f"update_last_processed_message_id only supports TELEGRAM source, got {source_id}"
+            )
+
+        # Use source-specific state table name from configuration
+        table_name = self._get_state_table_name(source_id)
+
+        try:
+            with self._get_connection() as conn:
+                # Use transaction for atomic write
+                conn.autocommit = False
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {table_name} (channel_id, last_processed_ts, last_processed_message_id, updated_at)
+                        VALUES (%s, 0, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (channel_id) DO UPDATE SET
+                            last_processed_ts = 0,
+                            last_processed_message_id = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (channel, message_id, message_id),
+                    )
+                    conn.commit()
+        except Exception as e:
+            raise RepositoryError(f"Failed to update last processed message ID: {e}")
+
     def query_events(self, criteria: "EventQueryCriteria") -> list[Event]:
         """Query events using structured criteria.
 

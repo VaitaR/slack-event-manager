@@ -408,6 +408,36 @@ class RepositoryProtocol(Protocol):
         Raises:
             RepositoryError: On storage errors
         """
+
+    def get_last_processed_message_id(
+        self, channel: str, source_id: MessageSource | None = None
+    ) -> str | None:
+        """Get last processed message ID for Telegram channel.
+
+        Args:
+            channel: Channel ID (Telegram username)
+            source_id: Message source (must be TELEGRAM for this method)
+
+        Returns:
+            Last processed message ID or None if first run
+
+        Raises:
+            RepositoryError: On storage errors
+        """
+
+    def update_last_processed_message_id(
+        self, channel: str, message_id: str, source_id: MessageSource | None = None
+    ) -> None:
+        """Update last processed message ID for Telegram channel.
+
+        Args:
+            channel: Channel ID (Telegram username)
+            message_id: Message ID to set
+            source_id: Message source (must be TELEGRAM for this method)
+
+        Raises:
+            RepositoryError: On storage errors
+        """
         ...
 
     def update_last_processed_ts(
