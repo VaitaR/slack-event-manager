@@ -21,6 +21,7 @@ from src.domain.models import (
     Event,
     EventStatus,
     ExtractionResult,
+    MessageSource,
     Severity,
     TimeSource,
 )
@@ -228,6 +229,7 @@ def extract_events_use_case(
     llm_client: LLMClient,
     repository: RepositoryProtocol,
     settings: Settings,
+    source_id: MessageSource | None = None,
     batch_size: int | None = 50,
     check_budget: bool = True,
 ) -> ExtractionResult:
@@ -250,6 +252,7 @@ def extract_events_use_case(
         llm_client: LLM client
         repository: Repository protocol implementation
         settings: Application settings
+        source_id: Filter candidates by message source (None = all sources)
         batch_size: Max candidates to process
         check_budget: Whether to enforce budget limits
 
@@ -290,9 +293,9 @@ def extract_events_use_case(
                 p90_idx = int(len(scores) * 0.1)
                 min_score = scores[p90_idx]
 
-    # Fetch candidates using Criteria pattern
+    # Fetch candidates using Criteria pattern with source isolation
     candidates = repository.get_candidates_for_extraction(
-        batch_size=batch_size, min_score=min_score
+        batch_size=batch_size, min_score=min_score, source_id=source_id
     )
 
     if not candidates:

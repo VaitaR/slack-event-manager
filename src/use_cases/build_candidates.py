@@ -71,15 +71,15 @@ def build_candidates_use_case(
     for message in new_messages:
         messages_processed += 1
 
-        # Get channel config
-        channel_config = settings.get_channel_config(message.channel)
+        # Get channel config using unified interface
+        channel_config = settings.get_scoring_config(message.source_id, message.channel)
 
         if not channel_config:
             # Channel not in whitelist, skip
             continue
 
         # Score message - works for any MessageRecord implementation
-        score, features = scoring_engine.score_message(message, channel_config)  # type: ignore[arg-type]
+        score, features = scoring_engine.score_message(message, channel_config)
         scores.append(score)
 
         # Check if meets threshold (using Specification pattern for filtering)

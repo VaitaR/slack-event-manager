@@ -4,6 +4,7 @@
 from src.adapters.llm_client import LLMClient
 from src.adapters.repository_factory import create_repository
 from src.config.settings import Settings, get_settings
+from src.domain.models import MessageSource
 from src.domain.protocols import RepositoryProtocol
 from src.use_cases.extract_events import extract_events_use_case
 
@@ -18,7 +19,12 @@ if __name__ == "__main__":
 
     print("Extracting events from candidates (batch_size=5)...")
     result = extract_events_use_case(
-        llm_client, repository, settings, batch_size=5, check_budget=False
+        llm_client,
+        repository,
+        settings,
+        source_id=MessageSource.SLACK,
+        batch_size=5,
+        check_budget=False,
     )
     print(f"\n✅ Events extracted: {result.events_extracted}")
     print(f"✅ LLM calls: {result.llm_calls}")

@@ -24,7 +24,7 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
 from src.config.settings import Settings, get_settings
-from src.domain.models import EventCategory, LLMEvent, LLMResponse
+from src.domain.models import EventCategory, LLMEvent, LLMResponse, MessageSource
 from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.extract_events import extract_events_use_case
@@ -456,6 +456,7 @@ def run_e2e_demo(
             llm_client=llm_client,
             repository=repository,
             settings=settings,
+            source_id=MessageSource.SLACK,  # Demo script - Slack only
             batch_size=50,
             check_budget=False,  # Disable budget check for demo
         )

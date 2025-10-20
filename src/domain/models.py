@@ -213,6 +213,10 @@ class TelegramChannelConfig(BaseModel):
     link_weight: float = Field(default=2.0, description="Weight per link")
     file_weight: float = Field(default=3.0, description="Weight for attachments")
     bot_penalty: float = Field(default=-15.0, description="Penalty for bot messages")
+    trusted_bots: list[str] = Field(
+        default_factory=list,
+        description="List of bot user IDs that should be treated as trusted",
+    )
     prompt_file: str = Field(
         default="",
         description="Path to LLM prompt template file (empty = use source default)",

@@ -517,13 +517,17 @@ class PostgresRepository:
         return len(candidates)
 
     def get_candidates_for_extraction(
-        self, batch_size: int | None = 50, min_score: float | None = None
+        self,
+        batch_size: int | None = 50,
+        min_score: float | None = None,
+        source_id: MessageSource | None = None,
     ) -> list[EventCandidate]:
         """Get candidates ready for LLM extraction.
 
         Args:
             batch_size: Maximum candidates to return (None = all)
             min_score: Minimum score filter
+            source_id: Filter by message source (None = all sources)
 
         Returns:
             List of candidates ordered by score DESC
@@ -538,6 +542,10 @@ class PostgresRepository:
                     WHERE status = 'new'
                 """
                 params: list[Any] = []
+
+                if source_id is not None:
+                    query += " AND source_id = %s"
+                    params.append(source_id.value)
 
                 if min_score is not None:
                     query += " AND score >= %s"

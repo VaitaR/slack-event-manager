@@ -239,9 +239,11 @@ def run_source_pipeline(
     print("STEP 2: Building event candidates")
     print("=" * 60)
     try:
+        # Build candidates for the specific source
         candidate_result = build_candidates_use_case(
             repository=repository,
             settings=settings,
+            source_id=source_id,  # Explicitly pass source_id for source isolation
         )
         stats["candidates_created"] = candidate_result.candidates_created
         print(f"✓ Messages processed: {candidate_result.messages_processed}")
@@ -263,6 +265,7 @@ def run_source_pipeline(
                 llm_client=llm_client,  # Source-specific LLM client with custom prompt
                 repository=repository,
                 settings=settings,
+                source_id=source_id,  # Source isolation for LLM extraction
                 batch_size=50,
                 check_budget=True,
             )

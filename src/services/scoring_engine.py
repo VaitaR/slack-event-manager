@@ -14,7 +14,13 @@ Calculates score based on configurable features:
 import re
 from typing import Final
 
-from src.domain.models import ChannelConfig, ScoringFeatures, SlackMessage
+from src.domain.models import (
+    ChannelConfig,
+    ScoringFeatures,
+    SlackMessage,
+    TelegramChannelConfig,
+)
+from src.domain.protocols import MessageRecord as MessageRecordProtocol
 from src.domain.scoring_constants import (
     MAX_ANCHOR_SCORE,
     MAX_LINK_SCORE,
@@ -29,10 +35,10 @@ CHANNEL_MENTION_PATTERN: Final[re.Pattern[str]] = re.compile(
 """Pattern to match channel-wide mentions (@channel, @here)."""
 
 
-def extract_features(
+def extract_features_from_slack_message(
     message: SlackMessage, channel_config: ChannelConfig
 ) -> ScoringFeatures:
-    """Extract scoring features from message.
+    """Extract scoring features from Slack message.
 
     Args:
         message: Slack message
@@ -44,7 +50,7 @@ def extract_features(
     Example:
         >>> msg = SlackMessage(...)
         >>> config = ChannelConfig(...)
-        >>> features = extract_features(msg, config)
+        >>> features = extract_features_from_slack_message(msg, config)
         >>> features.has_keywords
         True
     """
@@ -91,7 +97,81 @@ def extract_features(
     )
 
 
-def calculate_score(features: ScoringFeatures, channel_config: ChannelConfig) -> float:
+def extract_features(
+    message: MessageRecordProtocol,
+    channel_config: ChannelConfig | TelegramChannelConfig,
+) -> ScoringFeatures:
+    """Extract scoring features from any message source.
+
+    This is the universal version that works with MessageRecord protocol
+    and any channel configuration type.
+
+    Args:
+        message: Message record from any source
+        channel_config: Channel configuration (Slack or Telegram)
+
+    Returns:
+        Feature vector for audit trail
+
+    Example:
+        >>> # Works with any message source
+        >>> msg = MessageRecord(...)
+        >>> config = ChannelConfig(...)  # or TelegramChannelConfig(...)
+        >>> features = extract_features(msg, config)
+        >>> features.has_keywords
+        True
+    """
+    text_lower = message.text_norm.lower()
+
+    # Check for whitelist keywords
+    has_keywords = False
+    keyword_count = 0
+    for keyword in channel_config.whitelist_keywords:
+        if keyword.lower() in text_lower:
+            has_keywords = True
+            keyword_count += text_lower.count(keyword.lower())
+
+    # Check for @channel/@here mentions (universal pattern)
+    has_mention = bool(CHANNEL_MENTION_PATTERN.search(message.text_norm))
+
+    # For MessageRecord protocol, we don't have reply/reaction data
+    # This is a limitation of the current protocol design
+    # In the future, we could extend MessageRecord to include these fields
+    reply_count = 0
+    reaction_count = 0
+
+    # Anchors and links from protocol
+    anchor_count = len(message.anchors)
+    link_count = len(message.links_norm)
+
+    # For file attachments, we don't have this info in MessageRecord
+    # This would need to be added to the protocol for full feature parity
+    has_files = False
+
+    # For bot detection, we also don't have this in MessageRecord
+    # This is another field that should be added to the protocol
+    is_bot = False
+    bot_id = None
+
+    return ScoringFeatures(
+        has_keywords=has_keywords,
+        keyword_count=keyword_count,
+        has_mention=has_mention,
+        reply_count=reply_count,
+        reaction_count=reaction_count,
+        anchor_count=anchor_count,
+        link_count=link_count,
+        has_files=has_files,
+        is_bot=is_bot,
+        channel_name=channel_config.channel_name,
+        author_id="",  # Not available in MessageRecord protocol
+        bot_id=bot_id,
+    )
+
+
+def calculate_score(
+    features: ScoringFeatures, channel_config: ChannelConfig | TelegramChannelConfig
+) -> float:
     """Calculate candidate score based on features and config.
 
     Args:
@@ -156,25 +236,38 @@ def calculate_score(features: ScoringFeatures, channel_config: ChannelConfig) ->
 
 
 def score_message(
-    message: SlackMessage, channel_config: ChannelConfig
+    message: SlackMessage | MessageRecordProtocol,
+    channel_config: ChannelConfig | TelegramChannelConfig,
 ) -> tuple[float, ScoringFeatures]:
     """Score a message for candidate selection.
 
+    Universal function that works with any message source and channel configuration.
+
     Args:
-        message: Slack message to score
-        channel_config: Channel configuration
+        message: Message to score (SlackMessage or MessageRecord)
+        channel_config: Channel configuration (ChannelConfig or TelegramChannelConfig)
 
     Returns:
         Tuple of (score, features)
 
     Example:
+        >>> # Works with SlackMessage
         >>> msg = SlackMessage(...)
         >>> config = ChannelConfig(threshold_score=15.0, ...)
         >>> score, features = score_message(msg, config)
-        >>> score >= config.threshold_score
-        True
+
+        >>> # Works with MessageRecord (Telegram, etc.)
+        >>> msg = MessageRecord(...)
+        >>> config = TelegramChannelConfig(threshold_score=15.0, ...)
+        >>> score, features = score_message(msg, config)
     """
-    features = extract_features(message, channel_config)
+    # Use appropriate feature extraction based on message type
+    if isinstance(message, SlackMessage):
+        features = extract_features_from_slack_message(message, channel_config)  # type: ignore[arg-type]
+    else:
+        # MessageRecord protocol
+        features = extract_features(message, channel_config)
+
     score = calculate_score(features, channel_config)
     return score, features
 

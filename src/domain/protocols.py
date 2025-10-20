@@ -227,13 +227,17 @@ class RepositoryProtocol(Protocol):
         ...
 
     def get_candidates_for_extraction(
-        self, batch_size: int | None = 50, min_score: float | None = None
+        self,
+        batch_size: int | None = 50,
+        min_score: float | None = None,
+        source_id: MessageSource | None = None,
     ) -> list[EventCandidate]:
         """Get candidates ready for LLM extraction.
 
         Args:
             batch_size: Maximum candidates to return
             min_score: Minimum score filter (for budget control)
+            source_id: Filter by message source (None = all sources)
 
         Returns:
             List of candidates ordered by score DESC
