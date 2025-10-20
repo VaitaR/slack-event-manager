@@ -91,7 +91,7 @@ class PostgresRepository:
 
         # Try to get source configuration
 
-        settings = self._settings  # type: ignore[assignment]
+        settings = self._settings
         source_config = settings.get_source_config(source_id)
         if source_config and source_config.state_table:
             return source_config.state_table
@@ -452,10 +452,17 @@ class PostgresRepository:
                     )
                     rows = cur.fetchall()
                     columns = [desc[0] for desc in cur.description]
-                    return [
-                        self._row_to_telegram_message(dict(zip(columns, row)))
-                        for row in rows
-                    ]
+                    from typing import cast
+
+                    from src.domain.protocols import MessageRecord
+
+                    return cast(
+                        list[MessageRecord],
+                        [
+                            self._row_to_telegram_message(dict(zip(columns, row)))
+                            for row in rows
+                        ],
+                    )
 
                 else:
                     raise RepositoryError(
