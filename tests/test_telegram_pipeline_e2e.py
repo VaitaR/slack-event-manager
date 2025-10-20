@@ -53,6 +53,14 @@ def mock_settings() -> object:
             if channel_id == "@test_channel":
                 return self.test_channel_config
 
+        def get_scoring_config(self, source_id, channel_id: str):
+            """Mock get_scoring_config method."""
+            from src.domain.models import MessageSource
+
+            if source_id == MessageSource.TELEGRAM and channel_id == "@test_channel":
+                return self.test_channel_config
+            return None
+
         # Add other required Settings methods/attributes
         @property
         def db_path(self) -> str:
@@ -474,6 +482,7 @@ def test_telegram_pipeline_early_return_fix(
         llm_client=mock_llm,
         repository=repository,
         settings=settings,  # type: ignore
+        source_id=MessageSource.TELEGRAM,  # Telegram pipeline test
         batch_size=10,
     )
 

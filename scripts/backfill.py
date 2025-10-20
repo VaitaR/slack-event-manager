@@ -17,6 +17,7 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
 from src.config.settings import get_settings
+from src.domain.models import MessageSource
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 from src.use_cases.extract_events import extract_events_use_case
@@ -125,6 +126,7 @@ def main() -> None:
             llm_client=llm_client,
             repository=repository,
             settings=settings,
+            source_id=MessageSource.SLACK,  # Backfill script - Slack only
             batch_size=50,
             check_budget=True,
         )

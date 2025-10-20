@@ -625,7 +625,7 @@ class Settings(BaseSettings):
         return v
 
     def get_channel_config(self, channel_id: str) -> ChannelConfig | None:
-        """Get configuration for specific channel.
+        """Get configuration for specific Slack channel.
 
         Args:
             channel_id: Slack channel ID
@@ -633,9 +633,57 @@ class Settings(BaseSettings):
         Returns:
             Channel config or None if not found
         """
-        from src.config.channels import get_channel_config as get_config
+        # Use instance state instead of global function
+        for config in self.slack_channels:
+            if config.channel_id == channel_id:
+                return config
+        return None
 
-        return get_config(channel_id)
+    def get_telegram_channel_config(
+        self, username: str
+    ) -> TelegramChannelConfig | None:
+        """Get configuration for specific Telegram channel.
+
+        Args:
+            username: Telegram channel username (including @)
+
+        Returns:
+            Telegram channel config or None if not found
+        """
+        for config in self.telegram_channels:
+            if config.username == username:
+                return config
+        return None
+
+    def get_scoring_config(
+        self, source_id: MessageSource, channel_id: str
+    ) -> ChannelConfig | TelegramChannelConfig | None:
+        """Get scoring configuration for any message source and channel.
+
+        This is the unified interface for getting channel configuration
+        regardless of message source (Slack or Telegram).
+
+        Args:
+            source_id: Message source identifier
+            channel_id: Channel identifier (Slack channel ID or Telegram username)
+
+        Returns:
+            Channel configuration for scoring or None if not found
+
+        Example:
+            >>> # For Slack
+            >>> config = settings.get_scoring_config(MessageSource.SLACK, "C1234567890")
+
+            >>> # For Telegram
+            >>> config = settings.get_scoring_config(MessageSource.TELEGRAM, "@mychannel")
+        """
+        if source_id == MessageSource.SLACK:
+            return self.get_channel_config(channel_id)
+        elif source_id == MessageSource.TELEGRAM:
+            return self.get_telegram_channel_config(channel_id)
+        else:
+            logger.warning(f"Unknown message source: {source_id}")
+            return None
 
     def get_source_config(self, source_id: MessageSource) -> MessageSourceConfig | None:
         """Get configuration for specific message source.

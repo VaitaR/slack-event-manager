@@ -704,13 +704,17 @@ class SQLiteRepository:
             raise RepositoryError(f"Failed to save candidates: {e}")
 
     def get_candidates_for_extraction(
-        self, batch_size: int | None = 50, min_score: float | None = None
+        self,
+        batch_size: int | None = 50,
+        min_score: float | None = None,
+        source_id: MessageSource | None = None,
     ) -> list[EventCandidate]:
         """Get candidates ready for LLM extraction.
 
         Args:
             batch_size: Maximum candidates to return (None = no limit)
             min_score: Minimum score filter
+            source_id: Filter by message source (None = all sources)
 
         Returns:
             List of candidates ordered by score DESC
@@ -719,43 +723,29 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            if min_score is not None and batch_size is not None:
-                cursor.execute(
-                    """
-                    SELECT * FROM event_candidates
-                    WHERE status = 'new' AND score >= ?
-                    ORDER BY score DESC
-                    LIMIT ?
-                    """,
-                    (min_score, batch_size),
-                )
-            elif min_score is not None:
-                cursor.execute(
-                    """
-                    SELECT * FROM event_candidates
-                    WHERE status = 'new' AND score >= ?
-                    ORDER BY score DESC
-                    """,
-                    (min_score,),
-                )
-            elif batch_size is not None:
-                cursor.execute(
-                    """
-                    SELECT * FROM event_candidates
-                    WHERE status = 'new'
-                    ORDER BY score DESC
-                    LIMIT ?
-                    """,
-                    (batch_size,),
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT * FROM event_candidates
-                    WHERE status = 'new'
-                    ORDER BY score DESC
-                    """
-                )
+            # Build query with source filter
+            where_conditions = ["status = 'new'"]
+            params: list[Any] = []
+
+            if source_id is not None:
+                where_conditions.append("source_id = ?")
+                params.append(source_id.value)
+
+            if min_score is not None:
+                where_conditions.append("score >= ?")
+                params.append(min_score)
+
+            query = f"""
+                SELECT * FROM event_candidates
+                WHERE {" AND ".join(where_conditions)}
+                ORDER BY score DESC
+            """
+
+            if batch_size is not None:
+                query += " LIMIT ?"
+                params.append(batch_size)
+
+            cursor.execute(query, params)
 
             rows = cursor.fetchall()
             conn.close()

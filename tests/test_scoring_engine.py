@@ -8,7 +8,7 @@ def test_extract_features_keywords(
     sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
 ) -> None:
     """Test feature extraction with keywords."""
-    features = scoring_engine.extract_features(
+    features = scoring_engine.extract_features_from_slack_message(
         sample_slack_message, sample_channel_config
     )
 
@@ -20,7 +20,7 @@ def test_extract_features_reactions(
     sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
 ) -> None:
     """Test feature extraction counts reactions."""
-    features = scoring_engine.extract_features(
+    features = scoring_engine.extract_features_from_slack_message(
         sample_slack_message, sample_channel_config
     )
 
@@ -31,7 +31,7 @@ def test_extract_features_replies(
     sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
 ) -> None:
     """Test feature extraction counts replies."""
-    features = scoring_engine.extract_features(
+    features = scoring_engine.extract_features_from_slack_message(
         sample_slack_message, sample_channel_config
     )
 
@@ -42,7 +42,7 @@ def test_extract_features_anchors(
     sample_slack_message: SlackMessage, sample_channel_config: ChannelConfig
 ) -> None:
     """Test feature extraction counts anchors."""
-    features = scoring_engine.extract_features(
+    features = scoring_engine.extract_features_from_slack_message(
         sample_slack_message, sample_channel_config
     )
 
@@ -57,7 +57,7 @@ def test_extract_features_sets_has_files_from_attachments(
         update={"attachments_count": 1}
     )
 
-    features = scoring_engine.extract_features(
+    features = scoring_engine.extract_features_from_slack_message(
         message_with_attachment, sample_channel_config
     )
 
@@ -70,7 +70,9 @@ def test_extract_features_sets_has_files_from_files(
     """Slack file uploads should set the has_files flag."""
     message_with_file = sample_slack_message.model_copy(update={"files_count": 2})
 
-    features = scoring_engine.extract_features(message_with_file, sample_channel_config)
+    features = scoring_engine.extract_features_from_slack_message(
+        message_with_file, sample_channel_config
+    )
 
     assert features.has_files is True
 

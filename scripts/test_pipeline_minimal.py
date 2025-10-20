@@ -19,6 +19,7 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
 from src.config.settings import Settings, get_settings
+from src.domain.models import MessageSource
 from src.domain.protocols import RepositoryProtocol
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
@@ -106,6 +107,7 @@ def main() -> bool:
             llm_client=llm_client,
             repository=repository,
             settings=settings,
+            source_id=MessageSource.SLACK,  # Minimal test - Slack only
             batch_size=10,
             check_budget=False,
         )

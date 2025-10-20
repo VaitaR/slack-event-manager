@@ -15,6 +15,7 @@ from src.domain.models import (
     Event,
     EventCategory,
     EventStatus,
+    MessageSource,
 )
 from src.services.validators import EventValidator
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
@@ -160,6 +161,7 @@ class TestEventValidatorIntegration:
             llm_client=llm_client,
             repository=repository,
             settings=mock_settings,
+            source_id=MessageSource.SLACK,  # Test integration - Slack only
             batch_size=10,
         )
 
@@ -362,12 +364,14 @@ class TestEventValidatorIntegration:
         channel_config = MagicMock()
         channel_config.channel_name = "#releases"
         mock_settings.get_channel_config.return_value = channel_config
+        mock_settings.get_scoring_config.return_value = channel_config
 
         # Run use case
         result = extract_events_use_case(
             llm_client=llm_client,
             repository=repository,
             settings=mock_settings,
+            source_id=MessageSource.SLACK,  # Test critical errors - Slack only
             batch_size=10,
         )
 

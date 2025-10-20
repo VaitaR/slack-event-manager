@@ -22,6 +22,7 @@ from adapters.llm_client import LLMClient
 from adapters.repository_factory import create_repository
 from adapters.slack_client import SlackClient
 from config.settings import get_settings
+from domain.models import MessageSource
 from use_cases.build_candidates import build_candidates_use_case
 from use_cases.deduplicate_events import deduplicate_events_use_case
 from use_cases.extract_events import extract_events_use_case
@@ -230,6 +231,7 @@ def run_full_pipeline(message_limit: int, channels: list):
                 llm_client=llm_client,
                 repository=repo,
                 settings=settings,
+                source_id=MessageSource.SLACK,  # Streamlit UI - Slack only
                 batch_size=None,  # Process all candidates
                 check_budget=False,
             )
