@@ -318,6 +318,7 @@ class SQLiteRepository:
             CREATE TABLE IF NOT EXISTS ingestion_state_telegram (
                 channel_id TEXT PRIMARY KEY,
                 last_processed_ts REAL NOT NULL,
+                last_processed_message_id TEXT,
                 updated_at TIMESTAMP NOT NULL
             )
         """
@@ -1505,6 +1506,83 @@ class SQLiteRepository:
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to update last processed ts: {e}")
+
+    def get_last_processed_message_id(
+        self, channel: str, source_id: MessageSource | None = None
+    ) -> str | None:
+        """Get last processed message ID for a Telegram channel.
+
+        Args:
+            channel: Channel ID (Telegram username)
+            source_id: Message source (must be TELEGRAM for this method)
+
+        Returns:
+            Last processed message ID or None if first run
+
+        Raises:
+            RepositoryError: On database errors
+        """
+        if source_id != MessageSource.TELEGRAM:
+            raise RepositoryError(
+                f"get_last_processed_message_id only supports TELEGRAM source, got {source_id}"
+            )
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT last_processed_message_id FROM ingestion_state_telegram
+                WHERE channel_id = ?
+                """,
+                (channel,),
+            )
+
+            row = cursor.fetchone()
+            conn.close()
+
+            return row[0] if row else None
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to get last processed message ID: {e}")
+
+    def update_last_processed_message_id(
+        self, channel: str, message_id: str, source_id: MessageSource | None = None
+    ) -> None:
+        """Update last processed message ID for a Telegram channel.
+
+        Args:
+            channel: Channel ID (Telegram username)
+            message_id: Message ID to set
+            source_id: Message source (must be TELEGRAM for this method)
+
+        Raises:
+            RepositoryError: On database errors
+        """
+        if source_id != MessageSource.TELEGRAM:
+            raise RepositoryError(
+                f"update_last_processed_message_id only supports TELEGRAM source, got {source_id}"
+            )
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO ingestion_state_telegram
+                (channel_id, last_processed_ts, last_processed_message_id, updated_at)
+                VALUES (?, 0, ?, datetime('now'))
+                """,
+                (channel, message_id),
+            )
+
+            conn.commit()
+            conn.close()
+
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to update last processed message ID: {e}")
 
     def get_candidates_by_source(
         self, source_id: MessageSource, limit: int = 100

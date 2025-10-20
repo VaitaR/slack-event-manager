@@ -5,12 +5,19 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 """
 
 import hashlib
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 import pytz
 
+from src.adapters.telegram_client import TelegramClient
+from src.config.settings import Settings
+from src.domain.models import IngestResult, MessageSource, TelegramMessage
 from src.domain.protocols import RepositoryProtocol
+from src.services import link_extractor, text_normalizer
+
+logger = logging.getLogger(__name__)
 
 # Import Telegram types conditionally to avoid runtime errors
 try:
@@ -22,10 +29,6 @@ except ImportError:
     # Fallback for type checking or when telethon is not available
     MessageEntityTextUrl = Any
     MessageEntityUrl = Any
-from src.adapters.telegram_client import TelegramClient
-from src.config.settings import Settings
-from src.domain.models import IngestResult, MessageSource, TelegramMessage
-from src.services import link_extractor, text_normalizer
 
 
 def generate_telegram_message_id(channel: str, message_id: str) -> str:
@@ -242,20 +245,28 @@ def ingest_telegram_messages_use_case(
             from_date_str = getattr(channel_config, "from_date", None)
 
         if not enabled:
-            print(f"⏭️  Channel {channel_id} is disabled, skipping")
+            logger.info(
+                "Telegram channel disabled, skipping",
+                extra={"channel_id": channel_id, "enabled": enabled},
+            )
             continue
 
         try:
             # Get ingestion state for Telegram
-            last_message_id = repository.get_last_processed_ts(
+            last_message_id = repository.get_last_processed_message_id(
                 channel_id, source_id=MessageSource.TELEGRAM
             )
 
             # Determine backfill strategy
             if last_message_id is not None:
                 # Incremental: fetch from last processed message
-                print(
-                    f"📈 Channel {channel_id}: Incremental from message_id {last_message_id}"
+                logger.info(
+                    "Telegram channel incremental ingestion",
+                    extra={
+                        "channel_id": channel_id,
+                        "last_message_id": last_message_id,
+                        "strategy": "incremental",
+                    },
                 )
                 # For Telegram, we'll fetch all and filter by message_id
                 # Telethon doesn't support min_id in iter_messages easily
@@ -263,22 +274,38 @@ def ingest_telegram_messages_use_case(
             elif backfill_from_date:
                 # First run with explicit backfill date
                 backfill_date = backfill_from_date
-                print(
-                    f"📅 Channel {channel_id}: Backfill from {backfill_date.isoformat()}"
+                logger.info(
+                    "Telegram channel backfill from date",
+                    extra={
+                        "channel_id": channel_id,
+                        "backfill_date": backfill_from_date.isoformat(),
+                        "strategy": "explicit_backfill",
+                    },
                 )
             elif from_date_str:
                 # Use from_date from config
                 backfill_date = datetime.fromisoformat(
                     from_date_str.replace("Z", "+00:00")
                 )
-                print(
-                    f"📅 Channel {channel_id}: Backfill from config {backfill_date.isoformat()}"
+                logger.info(
+                    "Telegram channel backfill from config",
+                    extra={
+                        "channel_id": channel_id,
+                        "backfill_date": backfill_date.isoformat(),
+                        "strategy": "config_backfill",
+                    },
                 )
             else:
                 # First run: default 1 day
                 backfill_date = now - timedelta(days=default_backfill_days)
-                print(
-                    f"🔄 Channel {channel_id}: First run, backfill {default_backfill_days} day(s)"
+                logger.info(
+                    "Telegram channel first run backfill",
+                    extra={
+                        "channel_id": channel_id,
+                        "backfill_date": backfill_date.isoformat(),
+                        "strategy": "default_backfill",
+                        "backfill_days": default_backfill_days,
+                    },
                 )
 
             # Fetch messages from Telegram
@@ -294,11 +321,12 @@ def ingest_telegram_messages_use_case(
                 channels_processed.append(channel_id)
                 # Initialize state even if no messages
                 if last_message_id is None:
-                    repository.update_last_processed_ts(
-                        channel_id, 0, source_id=MessageSource.TELEGRAM
+                    repository.update_last_processed_message_id(
+                        channel_id, "0", source_id=MessageSource.TELEGRAM
                     )
-                    print(
-                        f"✅ Initialized ingestion_state for {channel_id} (no messages)"
+                    logger.info(
+                        "Telegram channel state initialized",
+                        extra={"channel_id": channel_id, "reason": "no_messages"},
                     )
                 continue
 
@@ -321,7 +349,10 @@ def ingest_telegram_messages_use_case(
                 ]
 
             if not filtered_messages:
-                print(f"ℹ️  No new messages for {channel_id}")
+                logger.info(
+                    "No new messages for Telegram channel",
+                    extra={"channel_id": channel_id, "reason": "no_new_messages"},
+                )
                 channels_processed.append(channel_id)
                 continue
 
@@ -343,11 +374,16 @@ def ingest_telegram_messages_use_case(
                 ]
                 max_telegram_id = max(telegram_ids) if telegram_ids else 0
 
-                repository.update_last_processed_ts(
-                    channel_id, float(max_telegram_id), source_id=MessageSource.TELEGRAM
+                repository.update_last_processed_message_id(
+                    channel_id, str(max_telegram_id), source_id=MessageSource.TELEGRAM
                 )
-                print(
-                    f"✅ Updated ingestion_state for {channel_id} to message_id {max_telegram_id}"
+                logger.info(
+                    "Telegram channel state updated",
+                    extra={
+                        "channel_id": channel_id,
+                        "new_message_id": str(max_telegram_id),
+                        "messages_processed": len(processed_messages),
+                    },
                 )
 
             channels_processed.append(channel_id)
@@ -355,7 +391,10 @@ def ingest_telegram_messages_use_case(
         except Exception as e:
             error_msg = f"Channel {channel_id}: {str(e)}"
             errors.append(error_msg)
-            print(f"❌ {error_msg}")
+            logger.error(
+                "Telegram ingestion error",
+                extra={"channel_id": channel_id, "error": str(e)},
+            )
 
     return IngestResult(
         messages_fetched=total_fetched,
