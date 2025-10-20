@@ -71,6 +71,7 @@ class TelegramClient:
         self.api_hash = api_hash
         self.session_name = session_name
         self._client: TelegramClientLib | None = None
+        self._is_connected = False
 
     def _get_client(self) -> TelegramClientLib:
         """Get or create Telethon client instance.
@@ -89,6 +90,59 @@ class TelegramClient:
                 self.session_name, self.api_id, self.api_hash
             )
         return self._client
+
+    async def connect(self) -> None:
+        """Connect to Telegram API.
+
+        Raises:
+            ImportError: If telethon is not available
+            Exception: If connection fails
+        """
+        if TelegramClientLib is None:
+            raise ImportError("TelegramClient requires telethon to be installed")
+
+        if self._is_connected:
+            return
+
+        client = self._get_client()
+        await client.start()
+        self._is_connected = True
+        logger.info("Telegram client connected successfully")
+
+    async def disconnect(self) -> None:
+        """Disconnect from Telegram API."""
+        if not self._is_connected or self._client is None:
+            return
+
+        await self._client.disconnect()
+        self._is_connected = False
+        logger.info("Telegram client disconnected")
+
+    def is_connected(self) -> bool:
+        """Check if client is connected.
+
+        Returns:
+            True if connected, False otherwise
+        """
+        return self._is_connected
+
+    async def close(self) -> None:
+        """Close Telegram client connection and cleanup resources.
+
+        This method should be called when the client is no longer needed
+        to ensure proper cleanup of connections and resources.
+        """
+        await self.disconnect()
+        self._client = None
+        logger.info("Telegram client closed and resources cleaned up")
+
+    def __enter__(self) -> "TelegramClient":
+        """Context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit with cleanup."""
+        await self.close()
 
     async def _fetch_messages_async(
         self,
@@ -116,9 +170,10 @@ class TelegramClient:
         client = self._get_client()
         retry_count = 0
 
-        try:
-            await client.start()
+        # Ensure we're connected
+        await self.connect()
 
+        try:
             # Get channel entity to extract username
             channel_entity = await client.get_entity(channel_id)
             channel_username = None
@@ -163,21 +218,51 @@ class TelegramClient:
 
                 except FloodWaitError as e:
                     retry_count += 1
+                    wait_seconds = e.seconds
+
                     logger.warning(
-                        f"FloodWait error: must wait {e.seconds}s "
-                        f"(attempt {retry_count}/{max_retries})"
+                        "Telegram FloodWait triggered",
+                        extra={
+                            "wait_seconds": wait_seconds,
+                            "retry_count": retry_count,
+                            "max_retries": max_retries,
+                            "channel_id": channel_id,
+                            "attempt": f"{retry_count}/{max_retries}",
+                        },
                     )
 
                     if retry_count >= max_retries:
-                        raise RateLimitError(retry_after=e.seconds)
+                        logger.error(
+                            "Telegram FloodWait retries exhausted",
+                            extra={
+                                "wait_seconds": wait_seconds,
+                                "final_retry_count": retry_count,
+                                "channel_id": channel_id,
+                            },
+                        )
+                        raise RateLimitError(retry_after=wait_seconds)
 
                     # Wait as requested by Telegram
-                    await asyncio.sleep(e.seconds)
+                    logger.info(
+                        f"Waiting {wait_seconds}s due to Telegram FloodWait "
+                        f"(retry {retry_count}/{max_retries})"
+                    )
+                    await asyncio.sleep(wait_seconds)
 
-            return messages
+        except Exception as e:
+            # Handle other exceptions that might occur during message fetching
+            logger.error(
+                "Unexpected error during Telegram message fetching",
+                extra={
+                    "error": str(e),
+                    "channel_id": channel_id,
+                    "retry_count": retry_count,
+                },
+            )
+            # Re-raise the exception after logging
+            raise
 
-        finally:
-            await client.disconnect()
+        return messages
 
     def _convert_message_to_dict(
         self, message: Any, channel_id: str, channel_username: str | None
