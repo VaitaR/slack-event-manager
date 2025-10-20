@@ -1,0 +1,108 @@
+# Telegram Channels Configuration Example
+#
+# List of Telegram channels to monitor for events
+# Replace with your actual channel usernames and names
+
+telegram_channels:
+  # Example: Product releases channel
+  - username: "@productreleases"
+    channel_name: product-releases
+    threshold_score: 0.0
+    keyword_weight: 10.0
+    mention_weight: 8.0
+    reply_weight: 5.0
+    reaction_weight: 3.0
+    anchor_weight: 4.0
+    link_weight: 2.0
+    file_weight: 3.0
+    bot_penalty: -15.0
+    prompt_file: "config/prompts/telegram_product.yaml"
+    whitelist_keywords:
+      - release
+      - deploy
+      - launch
+      - update
+      - new
+      - announcement
+      - scheduled
+      - security
+      - metrics
+      - maintenance
+      - incident
+      - daily
+      - weekly
+      - monthly
+      - report
+      - summary
+      - alert
+
+  # Example: Product updates channel with custom prompt
+  - username: "@productupdates"
+    channel_name: product-updates
+    threshold_score: 0.0
+    keyword_weight: 10.0
+    mention_weight: 8.0
+    reply_weight: 5.0
+    reaction_weight: 3.0
+    anchor_weight: 4.0
+    link_weight: 2.0
+    file_weight: 3.0
+    bot_penalty: -15.0
+    prompt_file: "config/prompts/telegram_updates.yaml"
+    whitelist_keywords:
+      - release
+      - deploy
+      - launch
+      - update
+      - new
+      - announcement
+
+  # Example: Engineering team channel
+  - username: "@engineeringteam"
+    channel_name: engineering-team
+    threshold_score: 0.0
+    keyword_weight: 10.0
+    mention_weight: 8.0
+    reply_weight: 5.0
+    reaction_weight: 3.0
+    anchor_weight: 4.0
+    link_weight: 2.0
+    file_weight: 3.0
+    bot_penalty: -15.0
+    prompt_file: ""  # Use default Telegram prompt
+    whitelist_keywords:
+      - deployment
+      - release
+      - incident
+      - maintenance
+      - update
+
+# Field Descriptions:
+#
+# username: Telegram channel username (required, must start with @)
+#   Format: @ followed by 5-32 alphanumeric characters and underscores
+#   Examples: @productreleases, @engineering_team, @company_updates
+#
+# channel_name: Human-readable name for the channel (required)
+#   Used for logging and display purposes
+#
+# threshold_score: Minimum score for candidate selection (default: 0.0)
+#   Messages with scores below this threshold are filtered out
+#   0.0 = process all messages
+#
+# keyword_weight: Weight multiplier for whitelisted keywords (default: 10.0)
+# mention_weight: Weight for @mentions in messages (default: 8.0)
+# reply_weight: Weight for reply messages (default: 5.0)
+# reaction_weight: Weight for message reactions (default: 3.0)
+# anchor_weight: Weight per anchor link in message (default: 4.0)
+# link_weight: Weight per regular link in message (default: 2.0)
+# file_weight: Weight for file attachments (default: 3.0)
+# bot_penalty: Penalty for bot messages (default: -15.0)
+#
+# prompt_file: Path to custom LLM prompt template file (optional)
+#   Leave empty ("") to use the default Telegram prompt
+#   Example: "config/prompts/telegram_product.yaml"
+#
+# whitelist_keywords: List of keywords that boost message scoring (optional)
+#   Messages containing these keywords get bonus points
+#   Common keywords: release, deploy, launch, update, announcement, etc.

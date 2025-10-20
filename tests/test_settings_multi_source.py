@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from src.domain.models import MessageSource
+from src.domain.models import ChannelConfig, MessageSource
 
 
 class TestMessageSourceConfigLoading:
@@ -147,3 +147,50 @@ class TestPerSourceLLMSettings:
 
         assert "slack.yaml" in slack_config["prompt_file"]
         assert "telegram.yaml" in telegram_config["prompt_file"]
+
+    def test_per_channel_prompt_files(self) -> None:
+        """Test prompt file propagation from channels to ChannelConfig."""
+
+        # Test direct ChannelConfig creation with prompt_file
+        config1 = ChannelConfig(
+            channel_id="C123456",
+            channel_name="releases",
+            prompt_file="config/prompts/releases.yaml",
+        )
+
+        config2 = ChannelConfig(
+            channel_id="C789012",
+            channel_name="updates",
+            prompt_file="",  # Use default
+        )
+
+        assert config1.prompt_file == "config/prompts/releases.yaml"
+        assert config2.prompt_file == ""
+
+    def test_telegram_channel_prompt_files(self) -> None:
+        """Test prompt file propagation for Telegram channels."""
+        config = {
+            "telegram_channels": [
+                {
+                    "username": "@productreleases",
+                    "channel_name": "product-releases",
+                    "prompt_file": "config/prompts/telegram_product.yaml",
+                },
+                {
+                    "username": "@updates",
+                    "channel_name": "updates",
+                    "prompt_file": "",  # Use default
+                },
+            ]
+        }
+
+        from src.config.settings import Settings
+
+        settings = Settings(**config)
+
+        assert len(settings.telegram_channels) == 2
+        assert (
+            settings.telegram_channels[0].prompt_file
+            == "config/prompts/telegram_product.yaml"
+        )
+        assert settings.telegram_channels[1].prompt_file == ""

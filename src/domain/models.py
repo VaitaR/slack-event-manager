@@ -179,6 +179,64 @@ class ChannelConfig(BaseModel):
     link_weight: float = Field(default=2.0, description="Weight per link")
     file_weight: float = Field(default=3.0, description="Weight for attachments")
     bot_penalty: float = Field(default=-15.0, description="Penalty for bot messages")
+    prompt_file: str = Field(
+        default="",
+        description="Path to LLM prompt template file (empty = use source default)",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this channel is enabled for processing",
+    )
+
+
+class TelegramChannelConfig(BaseModel):
+    """Per-channel configuration for Telegram channels with Telegram-specific fields."""
+
+    username: str = Field(
+        ...,
+        description="Telegram channel username (must start with @)",
+        pattern=r"^@[a-zA-Z][a-zA-Z0-9_]{3,30}[a-zA-Z0-9]$",
+    )
+    channel_name: str = Field(..., description="Human-readable channel name")
+    threshold_score: float = Field(
+        default=0.0,
+        description="Minimum score for candidate selection (0.0 = process all)",
+    )
+    whitelist_keywords: list[str] = Field(
+        default_factory=list, description="Keywords that boost score"
+    )
+    keyword_weight: float = Field(default=10.0, description="Weight for keywords")
+    mention_weight: float = Field(default=8.0, description="Weight for @mentions")
+    reply_weight: float = Field(default=5.0, description="Weight for replies")
+    reaction_weight: float = Field(default=3.0, description="Weight for reactions")
+    anchor_weight: float = Field(default=4.0, description="Weight per anchor")
+    link_weight: float = Field(default=2.0, description="Weight per link")
+    file_weight: float = Field(default=3.0, description="Weight for attachments")
+    bot_penalty: float = Field(default=-15.0, description="Penalty for bot messages")
+    prompt_file: str = Field(
+        default="",
+        description="Path to LLM prompt template file (empty = use source default)",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this channel is enabled for processing",
+    )
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """Validate Telegram username format."""
+        # Telegram username constraints
+        min_length = 5
+        max_length = 32
+
+        if not v.startswith("@"):
+            raise ValueError("Telegram username must start with @")
+        if len(v) < min_length or len(v) > max_length:
+            raise ValueError(
+                f"Telegram username must be {min_length}-{max_length} characters long"
+            )
+        return v
 
 
 class SlackMessage(BaseModel):
