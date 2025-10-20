@@ -11,6 +11,7 @@ import pytz
 
 from src.adapters.llm_client import LLMClient
 from src.adapters.query_builders import CandidateQueryCriteria
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.exceptions import BudgetExceededError, LLMAPIError, ValidationError
 from src.domain.models import (
@@ -30,6 +31,8 @@ from src.services import deduplicator
 from src.services.importance_scorer import ImportanceScorer
 from src.services.object_registry import ObjectRegistry
 from src.services.validators import EventValidator
+
+logger = get_logger(__name__)
 
 # Initialize services (singleton-style)
 _object_registry: ObjectRegistry | None = None
@@ -318,24 +321,31 @@ def extract_events_use_case(
     for candidate in candidates:
         candidates_processed += 1
 
-        # Debug output
-        print(
-            f"🔄 Processing candidate {candidates_processed}/{len(candidates)}: {candidate.message_id[:8]}..."
+        # Get source-aware channel config using unified interface
+        candidate_source = getattr(candidate, "source_id", MessageSource.SLACK)
+        channel_config = settings.get_scoring_config(
+            candidate_source, candidate.channel
         )
-        import sys
+        channel_name = (
+            channel_config.channel_name if channel_config else candidate.channel
+        )
 
-        sys.stdout.flush()
+        logger.info(
+            "processing_candidate",
+            candidate_num=candidates_processed,
+            total_candidates=len(candidates),
+            message_id=candidate.message_id[:8],
+            source=candidate_source.value,
+            channel=channel_name,
+        )
 
         try:
-            # Get channel config for context
-            channel_config = settings.get_channel_config(candidate.channel)
-            channel_name = (
-                channel_config.channel_name if channel_config else candidate.channel
+            logger.debug(
+                "calling_llm_api",
+                message_id=candidate.message_id[:8],
+                text_length=len(candidate.text_norm),
+                links_count=len(candidate.links_norm[:3]),
             )
-
-            # Call LLM
-            print("   Calling LLM API...")
-            sys.stdout.flush()
 
             llm_response = llm_client.extract_events_with_retry(
                 text=candidate.text_norm,
@@ -344,8 +354,12 @@ def extract_events_use_case(
                 channel_name=channel_name,
             )
 
-            print("   ✅ LLM responded")
-            sys.stdout.flush()
+            logger.info(
+                "llm_response_received",
+                message_id=candidate.message_id[:8],
+                is_event=llm_response.is_event,
+                events_count=len(llm_response.events) if llm_response.events else 0,
+            )
 
             llm_calls += 1
 
@@ -391,18 +405,14 @@ def extract_events_use_case(
                                 for error in critical_errors
                             ]
                         )
-                        print(f"   🚫 Critical validation errors: {critical_errors}")
-                        print(
-                            "      Event blocked from saving due to domain rule violations"
+                        logger.warning(
+                            "event_validation_failed",
+                            event_object=llm_event.object_name_raw,
+                            critical_errors=critical_errors,
+                            warnings_count=len(validation_summary["warnings"]),
+                            info_count=len(validation_summary["info"]),
+                            reason="domain_rule_violations",
                         )
-                        sys.stdout.flush()
-
-                        # Log detailed validation summary for audit trail
-                        if validation_summary["warnings"] or validation_summary["info"]:
-                            print(
-                                f"      Additional issues: warnings={len(validation_summary['warnings'])}, info={len(validation_summary['info'])}"
-                            )
-                            sys.stdout.flush()
 
                         # Skip this event - don't save events with critical errors
                         continue
@@ -412,10 +422,11 @@ def extract_events_use_case(
 
                     # Log warnings if present (non-blocking)
                     if validation_summary["warnings"]:
-                        print(
-                            f"   ⚠️  Validation warnings: {validation_summary['warnings']}"
+                        logger.info(
+                            "event_validation_warnings",
+                            event_object=llm_event.object_name_raw,
+                            warnings=validation_summary["warnings"],
                         )
-                        sys.stdout.flush()
 
                 # Save events (without deduplication yet)
                 if events_to_save:
@@ -429,16 +440,31 @@ def extract_events_use_case(
                 blocked_events = total_events_processed - len(events_to_save)
                 saved_events = len(events_to_save)
 
-                print(
-                    f"   📊 Validation audit: {saved_events} saved, {blocked_events} blocked, {len(validation_errors)} total issues"
+                logger.info(
+                    "validation_audit",
+                    message_id=candidate.message_id[:8],
+                    saved_events=saved_events,
+                    blocked_events=blocked_events,
+                    total_issues=len(validation_errors),
                 )
-                sys.stdout.flush()
 
                 if validation_errors:
-                    print(
-                        f"      Blocked events: {blocked_events}, Critical issues: {len([e for e in validation_errors if 'critical' in e.lower() or 'required' in e.lower() or 'missing' in e.lower()])}"
+                    critical_issues = len(
+                        [
+                            e
+                            for e in validation_errors
+                            if "critical" in e.lower()
+                            or "required" in e.lower()
+                            or "missing" in e.lower()
+                        ]
                     )
-                    sys.stdout.flush()
+                    logger.warning(
+                        "validation_errors_detected",
+                        message_id=candidate.message_id[:8],
+                        blocked_events=blocked_events,
+                        critical_issues=critical_issues,
+                        errors=validation_errors[:5],  # Log first 5 errors
+                    )
 
             # Update candidate status
             repository.update_candidate_status(

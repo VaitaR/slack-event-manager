@@ -5,7 +5,6 @@ Implements LLMClientProtocol with OpenAI integration.
 
 import hashlib
 import json
-import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,8 +16,11 @@ import yaml
 from openai import APIError, OpenAI
 from openai import RateLimitError as OpenAIRateLimitError
 
+from src.config.logging_config import get_logger
 from src.domain.exceptions import LLMAPIError, ValidationError
 from src.domain.models import LLMCallMetadata, LLMResponse
+
+logger = get_logger(__name__)
 
 # Token cost per 1M tokens (as of 2025-10)
 TOKEN_COSTS: Final[dict[str, dict[str, float]]] = {
@@ -37,9 +39,6 @@ PREVIEW_LENGTH_PROMPT: Final[int] = 800
 
 PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
-
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -163,8 +162,11 @@ class LLMClient:
         else:
             # gpt-5-nano only supports temperature=1.0
             if model == "gpt-5-nano" and temperature != 1.0:
-                print(
-                    f"⚠️ Warning: gpt-5-nano only supports temperature=1.0, using {temperature} as requested"
+                logger.warning(
+                    "gpt5_nano_temperature_override",
+                    model=model,
+                    requested_temperature=temperature,
+                    note="gpt-5-nano only supports temperature=1.0",
                 )
             self.temperature = temperature
 
@@ -236,23 +238,22 @@ class LLMClient:
         prompt = self._build_prompt(text, links, message_ts_dt, channel_name)
 
         # Log request details
-        import sys
-
-        print("   📤 LLM Request:")
-        print(f"      Model: {self.model}")
-        print(f"      Temperature: {self.temperature}")
-        print(f"      Prompt length: {len(prompt)} chars")
-        print(f"      System prompt length: {len(self.system_prompt)} chars")
+        logger.info(
+            "llm_request_start",
+            model=self.model,
+            temperature=self.temperature,
+            prompt_length=len(prompt),
+            system_prompt_length=len(self.system_prompt),
+            channel=channel_name,
+        )
 
         if self.verbose:
-            print("\n   === SYSTEM PROMPT ===")
-            print(f"   {self.system_prompt[:500]}...")
-            print("\n   === USER PROMPT ===")
-            print(f"   {prompt[:PREVIEW_LENGTH_PROMPT]}...")
-            if len(prompt) > PREVIEW_LENGTH_PROMPT:
-                print(f"   ... ({len(prompt) - PREVIEW_LENGTH_PROMPT} more chars)")
-
-        sys.stdout.flush()
+            logger.debug(
+                "llm_request_verbose",
+                system_prompt_preview=self.system_prompt[:500],
+                user_prompt_preview=prompt[:PREVIEW_LENGTH_PROMPT],
+                prompt_truncated=len(prompt) > PREVIEW_LENGTH_PROMPT,
+            )
 
         try:
             # Call OpenAI with JSON mode
@@ -291,29 +292,36 @@ class LLMClient:
             cost_usd = self._calculate_cost(tokens_in, tokens_out)
 
             # Log response details
-            print("   📥 LLM Response:")
-            print(f"      Latency: {latency_ms}ms ({latency_ms / 1000:.2f}s)")
-            print(f"      Tokens IN: {tokens_in}")
-            print(f"      Tokens OUT: {tokens_out}")
-            print(f"      Total tokens: {tokens_in + tokens_out}")
-            print(f"      Cost: ${cost_usd:.6f}")
-            print(f"      Is event: {llm_response.is_event}")
-            print(f"      Events extracted: {len(llm_response.events)}")
+            event_summaries = []
             if llm_response.events:
-                for i, evt in enumerate(llm_response.events, 1):
-                    print(
-                        f"         {i}. {evt.action} {evt.object_name_raw} ({evt.category})"
-                    )
+                event_summaries = [
+                    {
+                        "action": evt.action,
+                        "object": evt.object_name_raw,
+                        "category": evt.category,
+                    }
+                    for evt in llm_response.events
+                ]
+
+            logger.info(
+                "llm_response_success",
+                latency_ms=latency_ms,
+                latency_s=round(latency_ms / 1000, 2),
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                total_tokens=tokens_in + tokens_out,
+                cost_usd=round(cost_usd, 6),
+                is_event=llm_response.is_event,
+                events_count=len(llm_response.events) if llm_response.events else 0,
+                events=event_summaries[:5],  # Log first 5 events
+            )
 
             if self.verbose and content:
-                print("\n   === RAW JSON RESPONSE ===")
-                print(f"   {content[:PREVIEW_LENGTH_RESPONSE]}...")
-                if len(content) > PREVIEW_LENGTH_RESPONSE:
-                    print(
-                        f"   ... ({len(content) - PREVIEW_LENGTH_RESPONSE} more chars)"
-                    )
-
-            sys.stdout.flush()
+                logger.debug(
+                    "llm_response_verbose",
+                    response_preview=content[:PREVIEW_LENGTH_RESPONSE],
+                    response_truncated=len(content) > PREVIEW_LENGTH_RESPONSE,
+                )
 
             # Store metadata
             self._last_call_metadata = LLMCallMetadata(
@@ -332,22 +340,38 @@ class LLMClient:
 
         except OpenAIRateLimitError as e:
             latency_ms = int((time.time() - start_time) * 1000)
-            print(f"   ❌ Rate limit after {latency_ms}ms: {e}")
-            sys.stdout.flush()
+            logger.error(
+                "llm_rate_limit_error",
+                latency_ms=latency_ms,
+                error=str(e),
+                model=self.model,
+            )
             raise LLMAPIError(f"Rate limit exceeded: {e}")
         except APIError as e:
             latency_ms = int((time.time() - start_time) * 1000)
-            print(f"   ❌ API error after {latency_ms}ms: {e}")
-            sys.stdout.flush()
+            logger.error(
+                "llm_api_error",
+                latency_ms=latency_ms,
+                error=str(e),
+                model=self.model,
+            )
             raise LLMAPIError(f"OpenAI API error: {e}")
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             if isinstance(e, ValidationError | LLMAPIError):
-                print(f"   ❌ Error after {latency_ms}ms: {e}")
-                sys.stdout.flush()
+                logger.error(
+                    "llm_validation_error",
+                    latency_ms=latency_ms,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
                 raise
-            print(f"   ❌ Unexpected error after {latency_ms}ms: {e}")
-            sys.stdout.flush()
+            logger.error(
+                "llm_unexpected_error",
+                latency_ms=latency_ms,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             raise LLMAPIError(f"Unexpected error: {e}")
 
     def extract_events_with_retry(
@@ -401,11 +425,18 @@ class LLMClient:
                     else:
                         delay = 2 * (attempt + 1)  # 2s, 4s, 6s for validation
 
-                    print(f"   ⚠️ Retry {attempt + 1}/{max_retries}: {error_msg}")
-                    print(f"   ⏳ Waiting {delay}s before retry...")
-                    import sys
-
-                    sys.stdout.flush()
+                    logger.warning(
+                        "llm_retry_attempt",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        error_type="rate_limit"
+                        if is_rate_limit
+                        else "timeout"
+                        if is_timeout
+                        else "validation",
+                        error_msg=error_msg,
+                        backoff_delay_s=delay,
+                    )
 
                     time.sleep(delay)
                     continue
