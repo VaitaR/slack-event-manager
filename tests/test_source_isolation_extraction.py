@@ -4,9 +4,12 @@ Verifies that extract_events_use_case correctly filters candidates by source_id
 and doesn't mix candidates from different sources.
 """
 
+from collections.abc import Iterable
 from datetime import datetime
+from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 import pytz
 
 from src.adapters.llm_client import LLMClient
@@ -17,6 +20,101 @@ from src.domain.models import (
     ScoringFeatures,
 )
 from src.use_cases.extract_events import extract_events_use_case
+
+
+class StubSettings:
+    """Lightweight settings substitute for extraction tests."""
+
+    def __init__(self, llm_daily_budget_usd: float = 100.0) -> None:
+        self.llm_daily_budget_usd = llm_daily_budget_usd
+
+    def get_scoring_config(
+        self, source_id: MessageSource, channel_id: str
+    ) -> None:  # pragma: no cover - configuration lookup is not exercised
+        """Return no channel configuration for the test scenarios."""
+
+        return None
+
+
+class FakeRepository:
+    """In-memory repository tailored for extraction tests."""
+
+    def __init__(self) -> None:
+        self._candidates: dict[str, EventCandidate] = {}
+        self._llm_calls: list[Any] = []
+
+    def save_candidates(self, candidates: Iterable[EventCandidate]) -> None:
+        """Store candidates keyed by message identifier."""
+
+        for candidate in candidates:
+            self._candidates[candidate.message_id] = candidate
+
+    def get_candidates_for_extraction(
+        self,
+        *,
+        batch_size: int | None,
+        min_score: float | None,
+        source_id: MessageSource | None,
+    ) -> list[EventCandidate]:
+        """Return candidates filtered by status, score, and source."""
+
+        filtered = [
+            candidate
+            for candidate in self._candidates.values()
+            if candidate.status == CandidateStatus.NEW
+        ]
+
+        if min_score is not None:
+            filtered = [
+                candidate for candidate in filtered if candidate.score >= min_score
+            ]
+
+        if source_id is not None:
+            filtered = [
+                candidate for candidate in filtered if candidate.source_id == source_id
+            ]
+
+        filtered.sort(key=lambda candidate: candidate.score, reverse=True)
+
+        if batch_size is not None:
+            return filtered[:batch_size]
+        return filtered
+
+    def save_llm_call(self, call_metadata: Any) -> None:
+        """Record LLM call metadata for observability assertions."""
+
+        self._llm_calls.append(call_metadata)
+
+    def save_events(
+        self, events: Iterable[Any]
+    ) -> None:  # pragma: no cover - unused path
+        """Discard events to mimic a write without touching external systems."""
+
+        return None
+
+    def update_candidate_status(self, message_id: str, status: str) -> None:
+        """Update candidate status after processing."""
+
+        candidate = self._candidates.get(message_id)
+        if candidate is None:
+            msg = f"Candidate with id {message_id} not found"
+            raise KeyError(msg)
+
+        candidate.status = CandidateStatus(status)
+
+
+@pytest.fixture(name="settings")
+def settings_fixture() -> StubSettings:
+    """Provide lightweight settings to avoid expensive config loading."""
+
+    return StubSettings()
+
+
+@pytest.fixture(name="repo")
+def repository_fixture() -> FakeRepository:
+    """Provide an in-memory repository for focused extraction tests."""
+
+    return FakeRepository()
 
 
 class TestSourceIsolationExtraction:
