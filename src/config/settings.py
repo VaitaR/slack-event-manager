@@ -8,7 +8,7 @@ All configs are automatically merged and validated against JSON schemas.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import yaml
 from jsonschema import ValidationError as JSONSchemaValidationError
@@ -28,6 +28,18 @@ from src.domain.models import (
     TelegramChannelConfig,
 )
 from src.domain.scoring_constants import DEFAULT_THRESHOLD_SCORE
+
+POSTGRES_MIN_CONNECTIONS_DEFAULT: Final[int] = 1
+POSTGRES_MAX_CONNECTIONS_DEFAULT: Final[int] = 10
+POSTGRES_STATEMENT_TIMEOUT_MS_DEFAULT: Final[int] = 10_000
+POSTGRES_CONNECT_TIMEOUT_SECONDS_DEFAULT: Final[int] = 10
+POSTGRES_APPLICATION_NAME_DEFAULT: Final[str] = "slack_event_manager"
+
+SLACK_FETCH_PAGE_SIZE_DEFAULT: Final[int] = 200
+SLACK_RATE_LIMIT_DELAY_SECONDS_DEFAULT: Final[float] = 0.5
+
+TELEGRAM_FETCH_PAGE_SIZE_DEFAULT: Final[int] = 200
+TELEGRAM_RATE_LIMIT_DELAY_SECONDS_DEFAULT: Final[float] = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -465,6 +477,18 @@ class Settings(BaseSettings):
         default="YOUR_DIGEST_CHANNEL_ID",
         description="Channel for daily digest publication",
     )
+    slack_page_size: int = Field(
+        default=SLACK_FETCH_PAGE_SIZE_DEFAULT,
+        description="Number of Slack messages to request per API page",
+    )
+    slack_max_messages_per_run: int | None = Field(
+        default=None,
+        description="Maximum Slack messages to ingest per run (None = unlimited)",
+    )
+    slack_page_delay_seconds: float = Field(
+        default=SLACK_RATE_LIMIT_DELAY_SECONDS_DEFAULT,
+        description="Delay between Slack pagination requests in seconds",
+    )
 
     # LLM configuration
     llm_model: str = Field(default="gpt-5-nano", description="OpenAI model to use")
@@ -492,6 +516,30 @@ class Settings(BaseSettings):
         default="slack_events", description="PostgreSQL database name"
     )
     postgres_user: str = Field(default="postgres", description="PostgreSQL user")
+    postgres_min_connections: int = Field(
+        default=POSTGRES_MIN_CONNECTIONS_DEFAULT,
+        description="Minimum number of connections in PostgreSQL pool",
+    )
+    postgres_max_connections: int = Field(
+        default=POSTGRES_MAX_CONNECTIONS_DEFAULT,
+        description="Maximum number of connections in PostgreSQL pool",
+    )
+    postgres_statement_timeout_ms: int = Field(
+        default=POSTGRES_STATEMENT_TIMEOUT_MS_DEFAULT,
+        description="PostgreSQL statement timeout in milliseconds",
+    )
+    postgres_connect_timeout_seconds: int = Field(
+        default=POSTGRES_CONNECT_TIMEOUT_SECONDS_DEFAULT,
+        description="PostgreSQL connection timeout in seconds",
+    )
+    postgres_application_name: str = Field(
+        default=POSTGRES_APPLICATION_NAME_DEFAULT,
+        description="Application name for PostgreSQL connections",
+    )
+    postgres_ssl_mode: str | None = Field(
+        default=None,
+        description="Optional SSL mode for PostgreSQL connections (e.g., require)",
+    )
 
     # Processing configuration
     tz_default: str = Field(
@@ -611,6 +659,18 @@ class Settings(BaseSettings):
     telegram_session_path: str = Field(
         default="data/telegram_session",
         description="Path to Telethon session file (without .session extension)",
+    )
+    telegram_page_size: int = Field(
+        default=TELEGRAM_FETCH_PAGE_SIZE_DEFAULT,
+        description="Number of Telegram messages to request per pagination batch",
+    )
+    telegram_max_messages_per_run: int | None = Field(
+        default=None,
+        description="Maximum Telegram messages to ingest per run (None = unlimited)",
+    )
+    telegram_page_delay_seconds: float = Field(
+        default=TELEGRAM_RATE_LIMIT_DELAY_SECONDS_DEFAULT,
+        description="Delay between Telegram pagination requests in seconds",
     )
 
     @field_validator("slack_channels", mode="before")

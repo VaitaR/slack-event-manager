@@ -1,13 +1,8 @@
-"""Telegram client adapter using Telethon library.
-
-Implements MessageClientProtocol for Telegram API interactions with user client.
-Uses async Telethon library wrapped in synchronous interface for compatibility.
-"""
+"""Telegram client adapter using Telethon library."""
 
 import asyncio
-import logging
 import types
-from typing import Any
+from typing import Any, Final
 
 import pytz
 
@@ -27,9 +22,14 @@ except ImportError:
     MessageEntityTextUrl = None
     MessageEntityUrl = None
 
+from src.config.logging_config import get_logger
 from src.domain.exceptions import RateLimitError
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+DEFAULT_TELEGRAM_PAGE_SIZE: Final[int] = 200
+DEFAULT_TELEGRAM_PAGE_DELAY_SECONDS: Final[float] = 1.0
+DEFAULT_TELEGRAM_MAX_RETRIES: Final[int] = 3
 
 
 class TelegramClient:
@@ -52,13 +52,27 @@ class TelegramClient:
         >>> messages = client.fetch_messages(channel_id="@channel", limit=10)
     """
 
-    def __init__(self, api_id: int, api_hash: str, session_name: str) -> None:
+    def __init__(
+        self,
+        api_id: int,
+        api_hash: str,
+        session_name: str,
+        *,
+        page_size: int | None = None,
+        max_total_messages: int | None = None,
+        page_delay_seconds: float = DEFAULT_TELEGRAM_PAGE_DELAY_SECONDS,
+        max_retries: int = DEFAULT_TELEGRAM_MAX_RETRIES,
+    ) -> None:
         """Initialize Telegram client with credentials.
 
         Args:
             api_id: Telegram API ID
             api_hash: Telegram API hash
             session_name: Path to session file
+            page_size: Optional pagination size override
+            max_total_messages: Optional maximum messages per fetch
+            page_delay_seconds: Delay between pagination batches
+            max_retries: Maximum FloodWait retry attempts
 
         Raises:
             ImportError: If telethon is not available
@@ -73,6 +87,12 @@ class TelegramClient:
         self.session_name = session_name
         self._client: TelegramClientLib | None = None
         self._is_connected = False
+        self._page_size = page_size or DEFAULT_TELEGRAM_PAGE_SIZE
+        if self._page_size <= 0:
+            raise ValueError("Telegram page_size must be positive")
+        self._max_total_messages = max_total_messages
+        self._page_delay_seconds = max(page_delay_seconds, 0.0)
+        self._max_retries = max(max_retries, 1)
 
     def _get_client(self) -> TelegramClientLib:
         """Get or create Telethon client instance.
@@ -153,122 +173,144 @@ class TelegramClient:
     async def _fetch_messages_async(
         self,
         channel_id: str,
-        oldest_ts: str | None = None,
-        latest_ts: str | None = None,
-        limit: int = 100,
-        max_retries: int = 3,
+        *,
+        min_message_id: int | None = None,
+        limit: int | None = None,
+        page_size: int | None = None,
+        max_retries: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch messages from Telegram channel (async implementation).
+        """Fetch messages from Telegram channel using incremental pagination."""
 
-        Args:
-            channel_id: Channel username (@channel) or numeric ID
-            oldest_ts: Oldest message ID (not used for Telegram, kept for compatibility)
-            latest_ts: Latest message ID (not used for Telegram, kept for compatibility)
-            limit: Maximum messages to fetch
-            max_retries: Maximum retry attempts for FloodWait
-
-        Returns:
-            List of message dictionaries
-
-        Raises:
-            RateLimitError: On FloodWait after max retries
-        """
         client = self._get_client()
-        retry_count = 0
-
-        # Ensure we're connected
         await self.connect()
 
+        effective_page_size = page_size or self._page_size
+        if effective_page_size <= 0:
+            raise ValueError("Telegram page_size must be positive")
+
+        effective_limit = limit if limit is not None else self._max_total_messages
+        retry_limit = max_retries or self._max_retries
+
         try:
-            # Get channel entity to extract username
             channel_entity = await client.get_entity(channel_id)
-            channel_username = None
-            if hasattr(channel_entity, "username") and channel_entity.username:
-                channel_username = channel_entity.username
-
-            messages: list[dict[str, Any]] = []
-
-            while retry_count < max_retries:
-                try:
-                    # Fetch messages using iter_messages
-                    # Note: In tests, iter_messages might return a list instead of async iterator
-                    messages_result = client.iter_messages(channel_id, limit=limit)
-
-                    if hasattr(messages_result, "__aiter__"):
-                        # Real async iterator (production)
-                        async for message in messages_result:
-                            # Convert Telethon Message to dict
-                            msg_dict = self._convert_message_to_dict(
-                                message, channel_id, channel_username
-                            )
-                            messages.append(msg_dict)
-
-                            # Respect limit
-                            if len(messages) >= limit:
-                                break
-                    else:
-                        # List of messages (test mock)
-                        for message in messages_result:
-                            # Convert Telethon Message to dict
-                            msg_dict = self._convert_message_to_dict(
-                                message, channel_id, channel_username
-                            )
-                            messages.append(msg_dict)
-
-                            # Respect limit
-                            if len(messages) >= limit:
-                                break
-
-                    # Success - break retry loop
-                    break
-
-                except FloodWaitError as e:
-                    retry_count += 1
-                    wait_seconds = e.seconds
-
-                    logger.warning(
-                        "Telegram FloodWait triggered",
-                        extra={
-                            "wait_seconds": wait_seconds,
-                            "retry_count": retry_count,
-                            "max_retries": max_retries,
-                            "channel_id": channel_id,
-                            "attempt": f"{retry_count}/{max_retries}",
-                        },
-                    )
-
-                    if retry_count >= max_retries:
-                        logger.error(
-                            "Telegram FloodWait retries exhausted",
-                            extra={
-                                "wait_seconds": wait_seconds,
-                                "final_retry_count": retry_count,
-                                "channel_id": channel_id,
-                            },
-                        )
-                        raise RateLimitError(retry_after=wait_seconds)
-
-                    # Wait as requested by Telegram
-                    logger.info(
-                        f"Waiting {wait_seconds}s due to Telegram FloodWait "
-                        f"(retry {retry_count}/{max_retries})"
-                    )
-                    await asyncio.sleep(wait_seconds)
-
-        except Exception as e:
-            # Handle other exceptions that might occur during message fetching
+        except Exception as exc:  # pragma: no cover - defensive logging
             logger.error(
-                "Unexpected error during Telegram message fetching",
-                extra={
-                    "error": str(e),
-                    "channel_id": channel_id,
-                    "retry_count": retry_count,
-                },
+                "telegram_get_entity_failed",
+                channel_id=channel_id,
+                error=str(exc),
             )
-            # Re-raise the exception after logging
             raise
 
+        channel_username = (
+            channel_entity.username
+            if getattr(channel_entity, "username", None)
+            else None
+        )
+
+        messages: list[dict[str, Any]] = []
+        current_min_id = min_message_id
+        retry_count = 0
+
+        while True:
+            if effective_limit is not None and len(messages) >= effective_limit:
+                break
+
+            remaining = (
+                effective_limit - len(messages) if effective_limit is not None else None
+            )
+            batch_limit = effective_page_size
+            if remaining is not None:
+                if remaining <= 0:
+                    break
+                batch_limit = min(batch_limit, remaining)
+
+            iter_kwargs: dict[str, Any] = {
+                "limit": batch_limit,
+                "reverse": True,
+            }
+            if current_min_id is not None:
+                iter_kwargs["min_id"] = current_min_id
+
+            try:
+                messages_iter = client.iter_messages(channel_id, **iter_kwargs)
+                batch = await self._collect_messages_batch(
+                    messages_iter,
+                    channel_id,
+                    channel_username,
+                    batch_limit,
+                )
+            except FloodWaitError as error:
+                retry_count += 1
+                wait_seconds = int(getattr(error, "seconds", 10))
+                logger.warning(
+                    "telegram_flood_wait",
+                    channel_id=channel_id,
+                    wait_seconds=wait_seconds,
+                    retry_count=retry_count,
+                    max_retries=retry_limit,
+                )
+                if retry_count >= retry_limit:
+                    logger.error(
+                        "telegram_flood_wait_exhausted",
+                        channel_id=channel_id,
+                        wait_seconds=wait_seconds,
+                    )
+                    raise RateLimitError(retry_after=wait_seconds)
+                await asyncio.sleep(wait_seconds)
+                continue
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "telegram_fetch_messages_error",
+                    channel_id=channel_id,
+                    error=str(exc),
+                )
+                raise
+
+            retry_count = 0
+
+            if not batch:
+                break
+
+            messages.extend(batch)
+
+            last_raw_id = int(batch[-1]["message_id"])
+            current_min_id = last_raw_id
+
+            if effective_limit is not None and len(messages) >= effective_limit:
+                break
+
+            if self._page_delay_seconds > 0:
+                await asyncio.sleep(self._page_delay_seconds)
+
         return messages
+
+    async def _collect_messages_batch(
+        self,
+        messages_iter: Any,
+        channel_id: str,
+        channel_username: str | None,
+        batch_limit: int,
+    ) -> list[dict[str, Any]]:
+        """Collect a single batch of Telegram messages from iterator."""
+
+        batch: list[dict[str, Any]] = []
+
+        if hasattr(messages_iter, "__aiter__"):
+            async for message in messages_iter:
+                batch.append(
+                    self._convert_message_to_dict(message, channel_id, channel_username)
+                )
+                if len(batch) >= batch_limit:
+                    break
+        else:
+            for message in messages_iter:
+                batch.append(
+                    self._convert_message_to_dict(message, channel_id, channel_username)
+                )
+                if len(batch) >= batch_limit:
+                    break
+
+        return batch
 
     def _convert_message_to_dict(
         self, message: Any, channel_id: str, channel_username: str | None
@@ -357,89 +399,88 @@ class TelegramClient:
         channel_id: str,
         oldest_ts: str | None = None,
         latest_ts: str | None = None,
-        limit: int = 100,
+        limit: int | None = None,
+        *,
+        min_message_id: int | None = None,
+        page_size: int | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch messages from Telegram channel (async version).
 
         Args:
             channel_id: Channel username (@channel) or numeric ID
-            oldest_ts: Oldest message ID (not used, kept for protocol compatibility)
-            latest_ts: Latest message ID (not used, kept for protocol compatibility)
-            limit: Maximum messages to fetch
+            oldest_ts: Legacy timestamp input (used to derive min_message_id when provided)
+            latest_ts: Unused placeholder for protocol compatibility
+            limit: Maximum messages to fetch (None = unlimited)
+            min_message_id: Minimum Telegram message ID (exclusive) to start from
+            page_size: Optional override for pagination size
 
         Returns:
             List of message dictionaries
-
-        Raises:
-            RateLimitError: On FloodWait after max retries
-
-        Example:
-            >>> client = TelegramClient(12345, "hash", "session")
-            >>> messages = await client.fetch_messages_async("@channel", limit=10)
-            >>> len(messages)
-            10
         """
-        return await self._fetch_messages_async(channel_id, oldest_ts, latest_ts, limit)
+        _ = latest_ts  # Explicitly unused
+
+        derived_min_id = min_message_id
+        if derived_min_id is None and oldest_ts:
+            try:
+                derived_min_id = int(oldest_ts)
+            except ValueError:
+                try:
+                    derived_min_id = int(float(oldest_ts))
+                except ValueError:
+                    derived_min_id = None
+
+        return await self._fetch_messages_async(
+            channel_id,
+            min_message_id=derived_min_id,
+            limit=limit,
+            page_size=page_size,
+        )
 
     def fetch_messages(
         self,
         channel_id: str,
         oldest_ts: str | None = None,
         latest_ts: str | None = None,
-        limit: int = 100,
+        limit: int | None = None,
+        *,
+        min_message_id: int | None = None,
+        page_size: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch messages from Telegram channel (synchronous wrapper).
+        """Fetch messages from Telegram channel (synchronous wrapper)."""
 
-        IMPORTANT: This method creates an isolated event loop for each call.
-        For production use in async contexts (FastAPI, aiojobs), use fetch_messages_async()
-        or create a dedicated async client instance.
+        import concurrent.futures
 
-        Args:
-            channel_id: Channel username (@channel) or numeric ID
-            oldest_ts: Oldest message ID (not used, kept for protocol compatibility)
-            latest_ts: Latest message ID (not used, kept for protocol compatibility)
-            limit: Maximum messages to fetch
-
-        Returns:
-            List of message dictionaries
-
-        Raises:
-            RateLimitError: On FloodWait after max retries
-
-        Example:
-            >>> client = TelegramClient(12345, "hash", "session")
-            >>> messages = client.fetch_messages("@channel", limit=10)
-            >>> len(messages)
-            10
-        """
-
-        # Use isolated event loop approach to avoid conflicts with existing event loops
-        # This is safe for sync contexts but should be avoided in async server contexts
         def _run_in_isolated_loop() -> list[dict[str, Any]]:
-            """Run async function in completely isolated event loop."""
+            """Run async fetch in an isolated event loop."""
+
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
             try:
-                # Create a fresh client instance for this isolated loop
-                # This avoids sharing client state between different event loops
                 fresh_client = TelegramClient(
-                    self.api_id, self.api_hash, self.session_name
+                    self.api_id,
+                    self.api_hash,
+                    self.session_name,
+                    page_size=self._page_size,
+                    max_total_messages=self._max_total_messages,
+                    page_delay_seconds=self._page_delay_seconds,
+                    max_retries=self._max_retries,
                 )
                 return new_loop.run_until_complete(
-                    fresh_client._fetch_messages_async(
-                        channel_id, oldest_ts, latest_ts, limit
+                    fresh_client.fetch_messages_async(
+                        channel_id,
+                        oldest_ts=oldest_ts,
+                        latest_ts=latest_ts,
+                        limit=limit,
+                        min_message_id=min_message_id,
+                        page_size=page_size,
                     )
                 )
             finally:
-                # Clean up the client and close the loop
                 try:
                     new_loop.run_until_complete(fresh_client.close())
                 except Exception:
-                    pass  # Ignore cleanup errors
+                    pass
                 new_loop.close()
-
-        # Run in thread pool to avoid blocking the main thread
-        import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(_run_in_isolated_loop)

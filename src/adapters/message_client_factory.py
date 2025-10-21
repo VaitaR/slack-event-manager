@@ -44,12 +44,16 @@ def get_message_client(
         ...     bot_token=""  # Not used for Telegram
         ... )
     """
-    if source_id == MessageSource.SLACK:
-        return SlackClient(bot_token=bot_token)
-    elif source_id == MessageSource.TELEGRAM:
-        # For Telegram, load credentials from settings
-        settings = get_settings()
+    settings = get_settings()
 
+    if source_id == MessageSource.SLACK:
+        return SlackClient(
+            bot_token=bot_token,
+            page_size=settings.slack_page_size,
+            max_total_messages=settings.slack_max_messages_per_run,
+            page_delay_seconds=settings.slack_page_delay_seconds,
+        )
+    elif source_id == MessageSource.TELEGRAM:
         if not settings.telegram_api_id or not settings.telegram_api_hash:
             raise ValueError(
                 "Telegram API_ID and API_HASH must be configured in .env. "
@@ -60,6 +64,9 @@ def get_message_client(
             api_id=settings.telegram_api_id,
             api_hash=settings.telegram_api_hash.get_secret_value(),
             session_name=settings.telegram_session_path,
+            page_size=settings.telegram_page_size,
+            max_total_messages=settings.telegram_max_messages_per_run,
+            page_delay_seconds=settings.telegram_page_delay_seconds,
         )
     else:
         raise ValueError(
