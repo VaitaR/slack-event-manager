@@ -5,14 +5,14 @@ and doesn't mix candidates from different sources.
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 import pytz
 
-from src.adapters.llm_client import LLMClient
 from src.domain.models import (
     CandidateStatus,
     EventCandidate,
@@ -20,6 +20,54 @@ from src.domain.models import (
     ScoringFeatures,
 )
 from src.use_cases.extract_events import extract_events_use_case
+
+
+@dataclass
+class StubLLMCallMetadata:
+    """Minimal metadata container for LLM calls."""
+
+    cost_usd: float = 0.0
+    message_id: str | None = None
+
+
+class StubLLMClient:
+    """Predictable LLM client substitute for extraction tests."""
+
+    def __init__(self, response: Any) -> None:
+        self._response = response
+        self._metadata = StubLLMCallMetadata()
+        self.calls: list[dict[str, Any]] = []
+
+    @property
+    def call_count(self) -> int:
+        """Return the number of extraction calls performed."""
+
+        return len(self.calls)
+
+    def extract_events_with_retry(
+        self,
+        *,
+        text: str,
+        links: list[str],
+        message_ts_dt: datetime,
+        channel_name: str,
+    ) -> Any:
+        """Record arguments and return the configured response."""
+
+        self.calls.append(
+            {
+                "text": text,
+                "links": links,
+                "message_ts_dt": message_ts_dt,
+                "channel_name": channel_name,
+            }
+        )
+        return self._response
+
+    def get_call_metadata(self) -> StubLLMCallMetadata:
+        """Return metadata used for repository persistence."""
+
+        return self._metadata
 
 
 class StubSettings:
@@ -152,19 +200,12 @@ class TestSourceIsolationExtraction:
         # Save candidates to repository
         repo.save_candidates([slack_candidate, telegram_candidate])
 
-        # Create mock LLM client
-        mock_llm = MagicMock(spec=LLMClient)
-
-        # Mock LLM response
-        mock_response = MagicMock()
-        mock_response.is_event = False
-        mock_response.events = []
-        mock_llm.extract_events_with_retry.return_value = mock_response
-        mock_llm.get_call_metadata.return_value = MagicMock()
+        # Create stub LLM client
+        llm_client = StubLLMClient(response=SimpleNamespace(is_event=False, events=[]))
 
         # Run extraction for Slack only
         result = extract_events_use_case(
-            llm_client=mock_llm,
+            llm_client=llm_client,
             repository=repo,
             settings=settings,
             source_id=MessageSource.SLACK,  # Filter to Slack only
@@ -177,11 +218,10 @@ class TestSourceIsolationExtraction:
         assert result.events_extracted == 0  # No events in mock response
 
         # Verify LLM was called only once (for Slack candidate)
-        assert mock_llm.extract_events_with_retry.call_count == 1
+        assert llm_client.call_count == 1
 
         # Verify the call was made for the Slack candidate
-        call_args = mock_llm.extract_events_with_retry.call_args
-        assert call_args[1]["text"] == "Slack message text"
+        assert llm_client.calls[0]["text"] == "Slack message text"
 
     def test_extract_events_telegram_only_filters_correctly(self, repo, settings):
         """Test that extract_events_use_case filters candidates by Telegram source only."""
@@ -215,19 +255,12 @@ class TestSourceIsolationExtraction:
         # Save candidates to repository
         repo.save_candidates([slack_candidate, telegram_candidate])
 
-        # Create mock LLM client
-        mock_llm = MagicMock(spec=LLMClient)
-
-        # Mock LLM response
-        mock_response = MagicMock()
-        mock_response.is_event = False
-        mock_response.events = []
-        mock_llm.extract_events_with_retry.return_value = mock_response
-        mock_llm.get_call_metadata.return_value = MagicMock()
+        # Create stub LLM client
+        llm_client = StubLLMClient(response=SimpleNamespace(is_event=False, events=[]))
 
         # Run extraction for Telegram only
         result = extract_events_use_case(
-            llm_client=mock_llm,
+            llm_client=llm_client,
             repository=repo,
             settings=settings,
             source_id=MessageSource.TELEGRAM,  # Filter to Telegram only
@@ -240,11 +273,10 @@ class TestSourceIsolationExtraction:
         assert result.events_extracted == 0  # No events in mock response
 
         # Verify LLM was called only once (for Telegram candidate)
-        assert mock_llm.extract_events_with_retry.call_count == 1
+        assert llm_client.call_count == 1
 
         # Verify the call was made for the Telegram candidate
-        call_args = mock_llm.extract_events_with_retry.call_args
-        assert call_args[1]["text"] == "Telegram message text"
+        assert llm_client.calls[0]["text"] == "Telegram message text"
 
     def test_extract_events_no_source_filter_processes_all(self, repo, settings):
         """Test that extract_events_use_case processes all sources when source_id=None."""
@@ -278,19 +310,12 @@ class TestSourceIsolationExtraction:
         # Save candidates to repository
         repo.save_candidates([slack_candidate, telegram_candidate])
 
-        # Create mock LLM client
-        mock_llm = MagicMock(spec=LLMClient)
-
-        # Mock LLM response
-        mock_response = MagicMock()
-        mock_response.is_event = False
-        mock_response.events = []
-        mock_llm.extract_events_with_retry.return_value = mock_response
-        mock_llm.get_call_metadata.return_value = MagicMock()
+        # Create stub LLM client
+        llm_client = StubLLMClient(response=SimpleNamespace(is_event=False, events=[]))
 
         # Run extraction for all sources (no filter)
         result = extract_events_use_case(
-            llm_client=mock_llm,
+            llm_client=llm_client,
             repository=repo,
             settings=settings,
             source_id=None,  # No source filter - process all
@@ -303,7 +328,7 @@ class TestSourceIsolationExtraction:
         assert result.events_extracted == 0  # No events in mock response
 
         # Verify LLM was called twice (for both candidates)
-        assert mock_llm.extract_events_with_retry.call_count == 2
+        assert llm_client.call_count == 2
 
     def test_extract_events_with_min_score_and_source_filter(self, repo, settings):
         """Test that extract_events_use_case correctly combines source filter with min_score filter."""
@@ -350,19 +375,12 @@ class TestSourceIsolationExtraction:
         # Save candidates to repository
         repo.save_candidates([low_score_slack, high_score_slack, high_score_telegram])
 
-        # Create mock LLM client
-        mock_llm = MagicMock(spec=LLMClient)
-
-        # Mock LLM response
-        mock_response = MagicMock()
-        mock_response.is_event = False
-        mock_response.events = []
-        mock_llm.extract_events_with_retry.return_value = mock_response
-        mock_llm.get_call_metadata.return_value = MagicMock()
+        # Create stub LLM client
+        llm_client = StubLLMClient(response=SimpleNamespace(is_event=False, events=[]))
 
         # Run extraction for Slack only (min_score will be calculated inside based on budget)
         result = extract_events_use_case(
-            llm_client=mock_llm,
+            llm_client=llm_client,
             repository=repo,
             settings=settings,
             source_id=MessageSource.SLACK,  # Filter to Slack only
@@ -377,13 +395,10 @@ class TestSourceIsolationExtraction:
         assert result.events_extracted == 0  # No events in mock response
 
         # Verify LLM was called twice (for both Slack candidates)
-        assert mock_llm.extract_events_with_retry.call_count == 2
+        assert llm_client.call_count == 2
 
         # Verify that only Slack candidates were processed (check call arguments)
-        call_args_list = [
-            call[1]["text"]
-            for call in mock_llm.extract_events_with_retry.call_args_list
-        ]
+        call_args_list = [call["text"] for call in llm_client.calls]
         assert "Low score Slack message" in call_args_list
         assert "High score Slack message" in call_args_list
         assert (
