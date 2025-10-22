@@ -28,6 +28,7 @@ class SlackClient:
         max_total_messages: int | None = None,
         page_delay_seconds: float = DEFAULT_SLACK_PAGE_DELAY_SECONDS,
         max_retries: int = DEFAULT_SLACK_MAX_RETRIES,
+        client: WebClient | None = None,
     ) -> None:
         """Initialize Slack client.
 
@@ -37,8 +38,9 @@ class SlackClient:
             max_total_messages: Optional maximum messages per fetch (default unlimited)
             page_delay_seconds: Delay between paginated requests
             max_retries: Maximum retry attempts for transient errors
+            client: Optional preconfigured Slack WebClient (for testing)
         """
-        self.client = WebClient(token=bot_token)
+        self.client = client or WebClient(token=bot_token)
         self._user_cache: dict[str, dict[str, Any]] = {}
         self._page_size = page_size or DEFAULT_SLACK_PAGE_SIZE
         if self._page_size <= 0:

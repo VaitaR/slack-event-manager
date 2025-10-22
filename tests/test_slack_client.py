@@ -14,12 +14,24 @@ def patch_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.adapters.slack_client.time.sleep", lambda *_: None)
 
 
-def test_fetch_messages_paginates_until_cursor_exhausted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_fetch_messages_paginates_until_cursor_exhausted() -> None:
     """SlackClient should fetch all pages when limit is not provided."""
 
-    client = SlackClient(bot_token="test-token", page_size=2)
+    class StubWebClient:
+        def __init__(self, queued_responses: list[dict[str, Any]]) -> None:
+            self._queued_responses = queued_responses
+            self.calls: list[dict[str, Any]] = []
+
+        def conversations_history(self, **params: Any) -> dict[str, Any]:
+            self.calls.append(params)
+            if not self._queued_responses:
+                raise AssertionError(
+                    "No response available for conversations_history call"
+                )
+            return self._queued_responses.pop(0)
+
+        def users_info(self, user: str) -> dict[str, Any]:
+            return {"ok": True, "user": {"id": user}}
 
     responses: list[dict[str, Any]] = [
         {
@@ -39,16 +51,11 @@ def test_fetch_messages_paginates_until_cursor_exhausted(
         },
     ]
 
-    call_history: list[dict[str, Any]] = []
-
-    def fake_history(**kwargs: Any) -> dict[str, Any]:
-        call_history.append(kwargs)
-        return responses.pop(0)
-
-    monkeypatch.setattr(client.client, "conversations_history", fake_history)
+    stub_web_client = StubWebClient(responses)
+    client = SlackClient(bot_token="test-token", page_size=2, client=stub_web_client)
 
     messages = client.fetch_messages(channel_id="C123")
 
     assert len(messages) == 3
-    assert call_history[0]["limit"] == 2
-    assert call_history[1]["cursor"] == "cursor-1"
+    assert stub_web_client.calls[0]["limit"] == 2
+    assert stub_web_client.calls[1]["cursor"] == "cursor-1"
