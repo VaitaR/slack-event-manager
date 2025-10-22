@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 import pytz
 
+from src.adapters.query_builders import CandidateQueryCriteria
 from src.domain.models import (
     CandidateStatus,
     EventCandidate,
@@ -97,6 +98,11 @@ class FakeRepository:
         for candidate in candidates:
             self._candidates[candidate.message_id] = candidate
 
+    def get_daily_llm_cost(self, day: datetime) -> float:  # pragma: no cover - trivial
+        """Return zero cost to bypass budget checks during tests."""
+
+        return 0.0
+
     def get_candidates_for_extraction(
         self,
         *,
@@ -126,6 +132,37 @@ class FakeRepository:
 
         if batch_size is not None:
             return filtered[:batch_size]
+        return filtered
+
+    def query_candidates(
+        self, criteria: CandidateQueryCriteria
+    ) -> list[EventCandidate]:
+        """Return candidates filtered by the provided criteria."""
+
+        filtered = list(self._candidates.values())
+
+        if criteria.status is not None:
+            filtered = [
+                candidate
+                for candidate in filtered
+                if candidate.status.value == criteria.status
+            ]
+
+        if criteria.min_score is not None:
+            filtered = [
+                candidate
+                for candidate in filtered
+                if candidate.score >= criteria.min_score
+            ]
+
+        key_name = criteria.order_by or "score"
+        filtered.sort(
+            key=lambda candidate: getattr(candidate, key_name),
+            reverse=criteria.order_desc,
+        )
+
+        if criteria.limit is not None:
+            return filtered[: criteria.limit]
         return filtered
 
     def save_llm_call(self, call_metadata: Any) -> None:
@@ -163,6 +200,34 @@ def repository_fixture() -> FakeRepository:
     """Provide an in-memory repository for focused extraction tests."""
 
     return FakeRepository()
+
+
+@pytest.fixture(autouse=True)
+def patch_extract_events_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace heavy global services in the extraction use case with lightweight stubs."""
+
+    monkeypatch.setattr(
+        "src.use_cases.extract_events._object_registry",
+        SimpleNamespace(
+            canonicalize_object=lambda *_args, **_kwargs: None,
+            get_synonyms=lambda *_args, **_kwargs: [],
+            get_all_object_ids=lambda: [],
+        ),
+    )
+    monkeypatch.setattr(
+        "src.use_cases.extract_events._importance_scorer",
+        SimpleNamespace(score=lambda *_args, **_kwargs: 0.0),
+    )
+    monkeypatch.setattr(
+        "src.use_cases.extract_events._event_validator",
+        SimpleNamespace(
+            validate_event=lambda *_args, **_kwargs: {
+                "critical_errors": [],
+                "warnings": [],
+                "info": [],
+            }
+        ),
+    )
 
 
 class TestSourceIsolationExtraction:
