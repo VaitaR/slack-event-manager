@@ -1,7 +1,4 @@
-"""Factory for creating database repository instances.
-
-Supports SQLite (development) and PostgreSQL (production).
-"""
+"""Factory for creating database repository instances."""
 
 from typing import cast
 
@@ -11,8 +8,11 @@ try:
     from src.adapters.postgres_repository import PostgresRepository
 except ImportError:
     PostgresRepository = None  # type: ignore[misc,assignment]
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.protocols import RepositoryProtocol
+
+logger = get_logger(__name__)
 
 
 def create_repository(settings: Settings) -> RepositoryProtocol:
@@ -29,7 +29,7 @@ def create_repository(settings: Settings) -> RepositoryProtocol:
         RepositoryError: On connection errors
     """
     if settings.database_type == "sqlite":
-        print(f"📁 SQLite database mode: {settings.db_path}")
+        logger.info("repository_sqlite_selected", path=settings.db_path)
         return cast(RepositoryProtocol, SQLiteRepository(db_path=settings.db_path))
 
     elif settings.database_type == "postgres":
@@ -44,9 +44,12 @@ def create_repository(settings: Settings) -> RepositoryProtocol:
                 "POSTGRES_PASSWORD environment variable must be set when using PostgreSQL"
             )
 
-        print(
-            f"🐘 PostgreSQL database mode: {settings.postgres_user}@"
-            f"{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+        logger.info(
+            "repository_postgres_selected",
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            database=settings.postgres_database,
+            user=settings.postgres_user,
         )
         return cast(
             RepositoryProtocol,

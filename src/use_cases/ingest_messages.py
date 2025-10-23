@@ -12,7 +12,7 @@ import pytz
 from src.adapters.slack_client import SlackClient
 from src.config.logging_config import get_logger
 from src.config.settings import Settings
-from src.domain.models import IngestResult, SlackMessage
+from src.domain.models import IngestResult, MessageSource, SlackMessage
 from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
 
@@ -252,6 +252,8 @@ def ingest_messages_use_case(
                 channel_id=channel_id,
                 oldest_ts=oldest_ts,
                 latest_ts=None,  # up to now
+                limit=settings.slack_max_messages_per_run,
+                page_size=settings.slack_page_size,
             )
 
             total_fetched += len(raw_messages)
@@ -298,7 +300,9 @@ def ingest_messages_use_case(
                 latest_ts_float = float(latest_ts_str)
                 # Add small epsilon to avoid refetching the same message
                 repository.update_last_processed_ts(
-                    channel_id, latest_ts_float + 0.000001
+                    channel_id,
+                    latest_ts_float + 0.000001,
+                    source_id=MessageSource.SLACK,
                 )
                 logger.info(
                     "slack_ingestion_state_updated",
@@ -308,7 +312,9 @@ def ingest_messages_use_case(
                 )
             elif last_ts is None:
                 # First run but no messages: still mark as processed up to now
-                repository.update_last_processed_ts(channel_id, now_ts)
+                repository.update_last_processed_ts(
+                    channel_id, now_ts, source_id=MessageSource.SLACK
+                )
                 logger.info(
                     "slack_ingestion_state_initialized",
                     channel_id=channel_id,

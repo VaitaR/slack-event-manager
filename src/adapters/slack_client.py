@@ -1,10 +1,7 @@
-"""Slack API client adapter.
-
-Implements SlackClientProtocol for Slack API interactions.
-"""
+"""Slack API client adapter."""
 
 import time
-from typing import Any
+from typing import Any, Final, cast
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -15,24 +12,50 @@ from src.domain.exceptions import RateLimitError, SlackAPIError
 logger = get_logger(__name__)
 
 
+DEFAULT_SLACK_PAGE_SIZE: Final[int] = 200
+DEFAULT_SLACK_PAGE_DELAY_SECONDS: Final[float] = 0.5
+DEFAULT_SLACK_MAX_RETRIES: Final[int] = 3
+
+
 class SlackClient:
     """Slack API client with rate limiting and caching."""
 
-    def __init__(self, bot_token: str) -> None:
+    def __init__(
+        self,
+        bot_token: str,
+        *,
+        page_size: int | None = None,
+        max_total_messages: int | None = None,
+        page_delay_seconds: float = DEFAULT_SLACK_PAGE_DELAY_SECONDS,
+        max_retries: int = DEFAULT_SLACK_MAX_RETRIES,
+        client: WebClient | None = None,
+    ) -> None:
         """Initialize Slack client.
 
         Args:
             bot_token: Slack bot user OAuth token
+            page_size: Optional override for per-page size (default 200)
+            max_total_messages: Optional maximum messages per fetch (default unlimited)
+            page_delay_seconds: Delay between paginated requests
+            max_retries: Maximum retry attempts for transient errors
+            client: Optional preconfigured Slack WebClient (for testing)
         """
-        self.client = WebClient(token=bot_token)
+        self.client = client or WebClient(token=bot_token)
         self._user_cache: dict[str, dict[str, Any]] = {}
+        self._page_size = page_size or DEFAULT_SLACK_PAGE_SIZE
+        if self._page_size <= 0:
+            raise ValueError("Slack page_size must be positive")
+        self._max_total_messages = max_total_messages
+        self._page_delay_seconds = max(page_delay_seconds, 0.0)
+        self._max_retries = max(max_retries, 1)
 
     def fetch_messages(
         self,
         channel_id: str,
         oldest_ts: str | None = None,
         latest_ts: str | None = None,
-        limit: int = 100,
+        limit: int | None = None,
+        page_size: int | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch messages from Slack channel (root messages only).
 
@@ -42,7 +65,8 @@ class SlackClient:
             channel_id: Slack channel ID
             oldest_ts: Oldest timestamp (inclusive)
             latest_ts: Latest timestamp (inclusive)
-            limit: Messages per page
+            limit: Maximum total messages to fetch (None = unlimited)
+            page_size: Optional override for messages per page
 
         Returns:
             List of raw Slack message dictionaries
@@ -51,88 +75,107 @@ class SlackClient:
             SlackAPIError: On API communication errors
             RateLimitError: On rate limit exceeded
         """
-        all_messages: list[dict[str, Any]] = []
+        aggregated: list[dict[str, Any]] = []
         cursor: str | None = None
-        retry_count = 0
-        max_retries = 3
+        effective_page_size = page_size or self._page_size
+        if effective_page_size <= 0:
+            raise ValueError("Slack page_size must be positive")
 
-        while retry_count < max_retries:
+        effective_limit = limit if limit is not None else self._max_total_messages
+
+        while True:
+            remaining = (
+                effective_limit - len(aggregated)
+                if effective_limit is not None
+                else None
+            )
+            if remaining is not None and remaining <= 0:
+                break
+
+            page_limit = effective_page_size
+            if remaining is not None:
+                page_limit = min(page_limit, remaining)
+
+            params: dict[str, Any] = {
+                "channel": channel_id,
+                "limit": page_limit,
+            }
+
+            if oldest_ts:
+                params["oldest"] = oldest_ts
+            if latest_ts:
+                params["latest"] = latest_ts
+            if cursor:
+                params["cursor"] = cursor
+
+            response = self._fetch_page_with_retries(channel_id, params)
+
+            if not response.get("ok"):
+                raise SlackAPIError(f"Slack API error: {response.get('error')}")
+
+            messages: list[dict[str, Any]] = response.get("messages", [])
+
+            root_messages = [
+                msg
+                for msg in messages
+                if msg.get("thread_ts") is None or msg.get("thread_ts") == msg.get("ts")
+            ]
+
+            aggregated.extend(root_messages)
+
+            cursor = response.get("response_metadata", {}).get("next_cursor")  # type: ignore[call-overload]
+            if not cursor:
+                break
+
+            if self._page_delay_seconds > 0:
+                time.sleep(self._page_delay_seconds)
+
+        if effective_limit is not None and len(aggregated) > effective_limit:
+            return aggregated[:effective_limit]
+
+        return aggregated
+
+    def _fetch_page_with_retries(
+        self, channel_id: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Execute conversations.history with retry handling."""
+
+        attempt = 0
+        while True:
             try:
-                params: dict[str, Any] = {
-                    "channel": channel_id,
-                    "limit": limit,
-                }
-
-                if oldest_ts:
-                    params["oldest"] = oldest_ts
-                if latest_ts:
-                    params["latest"] = latest_ts
-                if cursor:
-                    params["cursor"] = cursor
-
-                response = self.client.conversations_history(**params)
-
-                if not response["ok"]:
-                    raise SlackAPIError(f"Slack API error: {response.get('error')}")
-
-                messages: list[dict[str, Any]] = response.get("messages", [])
-
-                # Filter for root messages only (thread_ts == ts or no thread_ts)
-                root_messages = [
-                    msg
-                    for msg in messages
-                    if msg.get("thread_ts") is None
-                    or msg.get("thread_ts") == msg.get("ts")
-                ]
-
-                all_messages.extend(root_messages)
-
-                # Stop if we've reached the requested limit
-                if len(all_messages) >= limit:
-                    all_messages = all_messages[:limit]
-                    break
-
-                # Check for more pages
-                cursor = response.get("response_metadata", {}).get("next_cursor")  # type: ignore[call-overload]
-                if not cursor:
-                    break
-
-                # Rate limit courtesy delay
-                time.sleep(0.5)
-
-            except SlackApiError as e:
-                if e.response.get("error") == "ratelimited":
-                    retry_after = int(e.response.headers.get("Retry-After", 10))
+                return cast(dict[str, Any], self.client.conversations_history(**params))
+            except SlackApiError as error:
+                if error.response.get("error") == "ratelimited":
+                    retry_after = int(error.response.headers.get("Retry-After", 10))
                     logger.warning(
                         "slack_rate_limited",
-                        retry_after_seconds=retry_after,
-                        attempt=retry_count + 1,
-                        max_retries=max_retries,
                         channel_id=channel_id,
+                        retry_after_seconds=retry_after,
+                        attempt=attempt + 1,
+                        max_retries=self._max_retries,
                     )
                     time.sleep(retry_after)
-                    retry_count += 1
-                    if retry_count >= max_retries:
+                    attempt += 1
+                    if attempt >= self._max_retries:
                         raise RateLimitError(retry_after=retry_after)
                     continue
 
-                retry_count += 1
-                if retry_count >= max_retries:
-                    raise SlackAPIError(f"Failed after {max_retries} retries: {e}")
+                attempt += 1
+                if attempt >= self._max_retries:
+                    raise SlackAPIError(
+                        f"Failed after {self._max_retries} retries: {error}"
+                    )
 
-                # Exponential backoff
-                backoff_seconds = 2**retry_count
+                backoff_seconds = 2**attempt
                 logger.warning(
                     "slack_api_retry",
-                    error=str(e),
-                    attempt=retry_count,
-                    max_retries=max_retries,
+                    error=str(error),
+                    attempt=attempt,
+                    max_retries=self._max_retries,
                     backoff_seconds=backoff_seconds,
                     channel_id=channel_id,
                 )
                 time.sleep(backoff_seconds)
-
-        return all_messages
 
     def get_user_info(self, user_id: str) -> dict[str, Any]:
         """Get user information by ID (with in-memory caching).

@@ -1,4 +1,4 @@
-.PHONY: help install format lint typecheck test ci clean
+.PHONY: help install format lint typecheck test ci clean makefile
 
 # Colors for output
 BLUE := \033[0;34m
@@ -92,6 +92,9 @@ pre-push: ## Run pre-push checks (matches CI exactly)
 ci: ## Run all CI checks (format, lint, typecheck, test) - matches GitHub Actions
 	@echo "$(BLUE)Running CI pipeline...$(NC)"
 	@make format-check && make lint && make typecheck && make test && echo "$(GREEN)✓ All CI checks passed!$(NC)"
+
+makefile: ## Run all linters and tests (alias for ci)
+	@$(MAKE) ci
 
 ci-local: ## Run CI checks locally (same as GitHub Actions)
 	@echo "$(BLUE)===========================================$(NC)"

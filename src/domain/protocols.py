@@ -44,7 +44,7 @@ class MessageClientProtocol(Protocol):
         channel_id: str,
         oldest_ts: str | None = None,
         latest_ts: str | None = None,
-        limit: int = 100,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch messages from source channel.
 
@@ -52,7 +52,7 @@ class MessageClientProtocol(Protocol):
             channel_id: Channel ID or username
             oldest_ts: Oldest timestamp/message_id to fetch (inclusive)
             latest_ts: Latest timestamp/message_id to fetch (inclusive)
-            limit: Maximum messages to fetch
+            limit: Maximum messages to fetch (None = unlimited)
 
         Returns:
             List of raw message dictionaries
@@ -85,6 +85,8 @@ class SlackClientProtocol(Protocol):
         channel_id: str,
         oldest_ts: str | None = None,
         latest_ts: str | None = None,
+        limit: int | None = None,
+        page_size: int | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch messages from Slack channel.
 
@@ -92,6 +94,8 @@ class SlackClientProtocol(Protocol):
             channel_id: Slack channel ID
             oldest_ts: Oldest timestamp to fetch (inclusive)
             latest_ts: Latest timestamp to fetch (inclusive)
+            limit: Maximum total messages to return (None = unlimited)
+            page_size: Optional per-page limit override
 
         Returns:
             List of raw Slack message dictionaries

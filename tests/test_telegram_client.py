@@ -107,6 +107,42 @@ class TestFetchMessages:
         assert len(messages) <= 3
 
     @patch("src.adapters.telegram_client.TelegramClientLib")
+    def test_fetch_messages_uses_min_message_id(self, mock_telethon: Mock) -> None:
+        """Test fetch_messages forwards min_message_id to Telethon iterator."""
+
+        mock_client_instance = AsyncMock()
+        mock_telethon.return_value = mock_client_instance
+
+        mock_message = Mock()
+        mock_message.id = 11
+        mock_message.date = datetime(2025, 10, 17, 12, 0, 0, tzinfo=pytz.UTC)
+        mock_message.message = "Test"
+        mock_message.text = "Test"
+        mock_message.sender_id = 123
+        mock_message.entities = []
+        mock_message.media = None
+        mock_message.views = 0
+        mock_message.forwards = None
+        mock_message.replies = None
+
+        mock_client_instance.iter_messages = Mock(return_value=[mock_message])
+        mock_client_instance.get_entity = AsyncMock()
+        mock_client_instance.start = AsyncMock()
+        mock_client_instance.disconnect = AsyncMock()
+
+        client = TelegramClient(
+            api_id=12345,
+            api_hash="test_hash",
+            session_name="test_session",
+        )
+
+        client.fetch_messages(channel_id="@test_channel", min_message_id=5, page_size=1)
+
+        iter_kwargs = mock_client_instance.iter_messages.call_args.kwargs
+        assert iter_kwargs["min_id"] == 5
+        assert iter_kwargs["limit"] == 1
+
+    @patch("src.adapters.telegram_client.TelegramClientLib")
     def test_fetch_messages_async_wrapper(self, mock_telethon: Mock) -> None:
         """Test that fetch_messages properly wraps async Telethon calls."""
         mock_client_instance = AsyncMock()

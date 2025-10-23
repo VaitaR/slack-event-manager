@@ -315,11 +315,18 @@ async def ingest_telegram_messages_use_case_async(
                     },
                 )
 
-            # Fetch messages from Telegram (async version for production use)
-            # Note: Telegram returns newest first, we'll filter by date
+            min_message_id_int: int | None = None
+            if last_message_id is not None:
+                try:
+                    min_message_id_int = int(last_message_id)
+                except ValueError:
+                    min_message_id_int = None
+
             raw_messages = await telegram_client.fetch_messages_async(
                 channel_id=channel_id,
-                limit=100,  # Fetch up to 100 messages
+                limit=settings.telegram_max_messages_per_run,
+                min_message_id=min_message_id_int,
+                page_size=settings.telegram_page_size,
             )
 
             total_fetched += len(raw_messages)
@@ -347,12 +354,12 @@ async def ingest_telegram_messages_use_case_async(
                         break
                     filtered_messages.append(raw_msg)
 
-            # Filter by last_message_id if incremental
-            if last_message_id is not None:
+            # Filter by last_message_id if incremental (defensive double-check)
+            if min_message_id_int is not None:
                 filtered_messages = [
                     msg
                     for msg in filtered_messages
-                    if int(msg.get("message_id", "0")) > int(last_message_id)
+                    if int(msg.get("message_id", "0")) > min_message_id_int
                 ]
 
             if not filtered_messages:
