@@ -1,8 +1,4 @@
-"""
-Tests for repository multi-source support.
-
-Following TDD: Write tests first, then implement in src/adapters/sqlite_repository.py
-"""
+"""Tests for repository multi-source support."""
 
 import sqlite3
 from datetime import datetime, timedelta
@@ -11,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+import pytz
 
 from src.adapters.repository_factory import create_repository
 from src.config.settings import Settings
@@ -51,7 +48,7 @@ def create_test_candidate(
     return EventCandidate(
         message_id=message_id,
         channel=channel,
-        ts_dt=kwargs.get("message_date", datetime.utcnow()),
+        ts_dt=kwargs.get("message_date", datetime.now(tz=pytz.UTC)),
         text_norm=kwargs.get("text_normalized", "test text"),
         links_norm=kwargs.get("links_norm", []),
         anchors=kwargs.get("anchors", []),
@@ -59,6 +56,8 @@ def create_test_candidate(
         status=kwargs.get("status", CandidateStatus.NEW),
         features=kwargs.get("features", ScoringFeatures()),
         source_id=source_id,
+        lease_attempts=kwargs.get("lease_attempts", 0),
+        processing_started_at=kwargs.get("processing_started_at"),
     )
 
 
@@ -691,3 +690,63 @@ class TestCandidateLeasing:
         repo.update_candidate_status("m1", CandidateStatus.LLM_OK.value)
         third_batch = repo.get_candidates_for_extraction(batch_size=10)
         assert [c.message_id for c in third_batch] == []
+
+    def test_processing_candidates_released_after_timeout(self, temp_db: Path) -> None:
+        """Stuck processing candidates should return to the queue after TTL."""
+
+        repo = make_repository(temp_db)
+        candidate = create_test_candidate(
+            message_id="m-timeout", channel="C1", score=0.9
+        )
+        repo.save_candidates([candidate])
+
+        stale_started_at = datetime.now(tz=pytz.UTC) - timedelta(hours=2)
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE event_candidates
+                SET status = ?, processing_started_at = ?, lease_attempts = 1
+                WHERE message_id = ?
+                """,
+                (
+                    CandidateStatus.PROCESSING.value,
+                    stale_started_at.isoformat(),
+                    "m-timeout",
+                ),
+            )
+            conn.commit()
+
+        leased = repo.get_candidates_for_extraction(batch_size=1)
+
+        assert [c.message_id for c in leased] == ["m-timeout"]
+        assert leased[0].status is CandidateStatus.PROCESSING
+        assert leased[0].lease_attempts == 2
+        assert leased[0].processing_started_at is not None
+        assert leased[0].processing_started_at > stale_started_at
+
+    def test_lease_attempts_increment_each_time(self, temp_db: Path) -> None:
+        """Lease attempts counter increases whenever a candidate is leased."""
+
+        repo = make_repository(temp_db)
+        candidate = create_test_candidate(message_id="m-retry", channel="C1", score=0.9)
+        repo.save_candidates([candidate])
+
+        first_lease = repo.get_candidates_for_extraction(batch_size=1)
+        assert first_lease[0].lease_attempts == 1
+
+        # Simulate failure by returning candidate to NEW state
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE event_candidates
+                SET status = ?, processing_started_at = NULL
+                WHERE message_id = ?
+                """,
+                (CandidateStatus.NEW.value, "m-retry"),
+            )
+            conn.commit()
+
+        second_lease = repo.get_candidates_for_extraction(batch_size=1)
+        assert second_lease[0].lease_attempts == 2

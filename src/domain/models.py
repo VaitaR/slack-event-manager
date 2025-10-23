@@ -377,6 +377,15 @@ class EventCandidate(BaseModel):
     source_id: MessageSource = Field(
         default=MessageSource.SLACK, description="Message source"
     )
+    lease_attempts: int = Field(
+        default=0,
+        ge=0,
+        description="Number of times this candidate has been leased",
+    )
+    processing_started_at: datetime | None = Field(
+        default=None,
+        description="UTC timestamp when the current processing lease started",
+    )
 
 
 class EventRelation(BaseModel):

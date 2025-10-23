@@ -6,12 +6,14 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
 
+import pytz
 from psycopg2 import Error as PsycopgError
 from psycopg2 import extensions
 from psycopg2 import pool as psycopg2_pool
 from psycopg2.extras import RealDictCursor
 
 from src.config.logging_config import get_logger
+from src.domain.candidate_constants import CANDIDATE_LEASE_TIMEOUT
 from src.domain.exceptions import RepositoryError
 from src.domain.models import (
     CandidateStatus,
@@ -247,20 +249,24 @@ class PostgresRepository:
         """
         from src.domain.models import CandidateStatus, ScoringFeatures
 
+        source_raw = row.get("source_id") or MessageSource.SLACK.value
+        source_id = MessageSource(source_raw) if source_raw else MessageSource.SLACK
+
         return EventCandidate(
             message_id=row["message_id"],
             channel=row["channel"],
             ts_dt=row["ts_dt"],  # Already datetime from PostgreSQL
             text_norm=row["text_norm"] or "",
-            links_norm=row.get("links_norm") or [],  # Already parsed list from JSONB
-            anchors=row.get("anchors") or [],  # Already parsed list from JSONB
+            links_norm=row.get("links_norm") or [],
+            anchors=row.get("anchors") or [],
             score=row["score"] or 0.0,
             status=CandidateStatus(row["status"])
             if row["status"]
             else CandidateStatus.NEW,
-            features=ScoringFeatures.model_validate(
-                row["features_json"] or {}
-            ),  # Already parsed dict
+            features=ScoringFeatures.model_validate(row["features_json"] or {}),
+            source_id=source_id,
+            lease_attempts=int(row.get("lease_attempts") or 0),
+            processing_started_at=row.get("processing_started_at"),
         )
 
     def _row_to_event(self, row: dict[str, Any]) -> Event:
@@ -580,14 +586,21 @@ class PostgresRepository:
                         """
                         INSERT INTO event_candidates (
                             message_id, channel, ts_dt, text_norm, links_norm,
-                            anchors, score, status, features_json
+                            anchors, score, status, features_json, source_id,
+                            processing_started_at, lease_attempts
                         ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                         ON CONFLICT (message_id) DO UPDATE SET
+                            text_norm = EXCLUDED.text_norm,
+                            links_norm = EXCLUDED.links_norm,
+                            anchors = EXCLUDED.anchors,
                             score = EXCLUDED.score,
                             features_json = EXCLUDED.features_json,
-                            status = EXCLUDED.status
+                            status = EXCLUDED.status,
+                            source_id = EXCLUDED.source_id,
+                            processing_started_at = EXCLUDED.processing_started_at,
+                            lease_attempts = EXCLUDED.lease_attempts
                         """,
                         (
                             cand.message_id,
@@ -599,6 +612,9 @@ class PostgresRepository:
                             cand.score,
                             cand.status.value,
                             json.dumps(cand.features.model_dump()),
+                            cand.source_id.value,
+                            cand.processing_started_at,
+                            cand.lease_attempts,
                         ),
                     )
                 conn.commit()
@@ -625,6 +641,24 @@ class PostgresRepository:
         """
         with self._get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                now = datetime.now(tz=pytz.UTC)
+                stale_before = now - CANDIDATE_LEASE_TIMEOUT
+
+                cur.execute(
+                    """
+                    UPDATE event_candidates
+                    SET status = %s, processing_started_at = NULL
+                    WHERE status = %s AND (
+                        processing_started_at IS NULL OR processing_started_at < %s
+                    )
+                    """,
+                    (
+                        CandidateStatus.NEW.value,
+                        CandidateStatus.PROCESSING.value,
+                        stale_before,
+                    ),
+                )
+
                 clauses = ["SELECT * FROM event_candidates WHERE status = 'new'"]
                 params: list[Any] = []
 
@@ -653,21 +687,26 @@ class PostgresRepository:
                     return []
 
                 message_ids = [row["message_id"] for row in rows]
-                placeholders = ",".join(["%s"] * len(message_ids))
-                update_query = (
-                    f"UPDATE event_candidates SET status = %s "
-                    f"WHERE message_id IN ({placeholders})"
-                )
                 cur.execute(
-                    update_query,
-                    [CandidateStatus.PROCESSING.value, *message_ids],
+                    """
+                    UPDATE event_candidates
+                    SET status = %s,
+                        processing_started_at = %s,
+                        lease_attempts = COALESCE(lease_attempts, 0) + 1
+                    WHERE message_id = ANY(%s)
+                    """,
+                    (CandidateStatus.PROCESSING.value, now, message_ids),
                 )
 
                 conn.commit()
 
                 return [
                     self._row_to_candidate(dict(row)).model_copy(
-                        update={"status": CandidateStatus.PROCESSING}
+                        update={
+                            "status": CandidateStatus.PROCESSING,
+                            "processing_started_at": now,
+                            "lease_attempts": (row.get("lease_attempts") or 0) + 1,
+                        }
                     )
                     for row in rows
                 ]
@@ -741,10 +780,26 @@ class PostgresRepository:
         """
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE event_candidates SET status = %s WHERE message_id = %s",
-                    (status, message_id),
-                )
+                if status == CandidateStatus.PROCESSING.value:
+                    cur.execute(
+                        """
+                        UPDATE event_candidates
+                        SET status = %s,
+                            processing_started_at = %s,
+                            lease_attempts = COALESCE(lease_attempts, 0) + 1
+                        WHERE message_id = %s
+                        """,
+                        (status, datetime.now(tz=pytz.UTC), message_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE event_candidates
+                        SET status = %s, processing_started_at = NULL
+                        WHERE message_id = %s
+                        """,
+                        (status, message_id),
+                    )
                 conn.commit()
 
     def save_events(self, events: list[Event]) -> int:
