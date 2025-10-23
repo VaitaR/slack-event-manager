@@ -211,7 +211,9 @@ class TelegramClient:
             )
             self._loop_thread.start()
 
-        self._loop_ready.wait()
+        # Wait with timeout to prevent hanging in tests
+        if not self._loop_ready.wait(timeout=10.0):
+            raise TimeoutError("Telegram event loop failed to start within 10 seconds")
         assert self._loop is not None
         return self._loop
 
@@ -220,7 +222,9 @@ class TelegramClient:
 
         loop = self._ensure_loop()
         future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result()
+        # Add timeout to prevent hanging (default 60s, can be overridden in tests)
+        timeout = getattr(self, "_operation_timeout", 60.0)
+        return future.result(timeout=timeout)
 
     async def _fetch_messages_async(
         self,
