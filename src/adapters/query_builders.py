@@ -256,7 +256,7 @@ class CandidateQueryCriteria:
 
     # Status filter
     status: str | None = None
-    """Filter by processing status (new, llm_ok, llm_fail)"""
+    """Filter by processing status (new, processing, llm_ok, llm_fail)"""
 
     # Channel filter
     channel: str | None = None
@@ -558,7 +558,7 @@ class PostgresCandidateQueryCriteria(BaseQueryCriteria):
 
     # Status filter
     status: str | None = None
-    """Filter by processing status (new, llm_ok, llm_fail)"""
+    """Filter by processing status (new, processing, llm_ok, llm_fail)"""
 
     # Channel filter
     channel: str | None = None

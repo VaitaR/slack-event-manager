@@ -57,6 +57,7 @@ class CandidateStatus(str, Enum):
     """Status of event candidate processing."""
 
     NEW = "new"
+    PROCESSING = "processing"
     LLM_OK = "llm_ok"
     LLM_FAIL = "llm_fail"
 

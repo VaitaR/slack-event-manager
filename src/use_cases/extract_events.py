@@ -498,11 +498,16 @@ def extract_events_use_case(
                 candidate.message_id, CandidateStatus.LLM_FAIL.value
             )
         except BudgetExceededError:
-            # Stop processing on budget exceeded
             errors.append("Budget exceeded during processing")
+            repository.update_candidate_status(
+                candidate.message_id, CandidateStatus.NEW.value
+            )
             break
         except Exception as e:
             errors.append(f"Unexpected error for {candidate.message_id}: {str(e)}")
+            repository.update_candidate_status(
+                candidate.message_id, CandidateStatus.LLM_FAIL.value
+            )
 
     result = ExtractionResult(
         events_extracted=events_extracted,

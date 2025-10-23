@@ -26,6 +26,14 @@ from src.domain.models import (
 from src.domain.protocols import RepositoryProtocol
 
 
+@pytest.fixture(autouse=True)
+def _required_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure required secrets are present for settings construction."""
+
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+
 @pytest.fixture
 def settings(
     tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest

@@ -59,3 +59,26 @@ def test_fetch_messages_paginates_until_cursor_exhausted() -> None:
     assert len(messages) == 3
     assert stub_web_client.calls[0]["limit"] == 2
     assert stub_web_client.calls[1]["cursor"] == "cursor-1"
+
+
+def test_get_permalink_uses_cache() -> None:
+    """Permalink lookups must be cached to prevent duplicate API calls."""
+
+    class StubWebClient:
+        def __init__(self) -> None:
+            self.permalink_calls: list[tuple[str, str]] = []
+
+        def chat_getPermalink(  # noqa: N802
+            self, channel: str, message_ts: str
+        ) -> dict[str, Any]:
+            self.permalink_calls.append((channel, message_ts))
+            return {"ok": True, "permalink": f"https://slack/{channel}/{message_ts}"}
+
+    stub_web_client = StubWebClient()
+    client = SlackClient(bot_token="test-token", client=stub_web_client)
+
+    permalink_one = client.get_permalink("C123", "111.0001")
+    permalink_two = client.get_permalink("C123", "111.0001")
+
+    assert permalink_one == permalink_two
+    assert stub_web_client.permalink_calls == [("C123", "111.0001")]

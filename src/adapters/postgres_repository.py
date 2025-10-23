@@ -14,6 +14,7 @@ from psycopg2.extras import RealDictCursor
 from src.config.logging_config import get_logger
 from src.domain.exceptions import RepositoryError
 from src.domain.models import (
+    CandidateStatus,
     Event,
     EventCandidate,
     LLMCallMetadata,
@@ -623,32 +624,53 @@ class PostgresRepository:
             RepositoryError: On storage errors
         """
         with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=extensions.cursor) as cur:
-                query = """
-                    SELECT * FROM event_candidates
-                    WHERE status = 'new'
-                """
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                clauses = ["SELECT * FROM event_candidates WHERE status = 'new'"]
                 params: list[Any] = []
 
                 if source_id is not None:
-                    query += " AND source_id = %s"
+                    clauses.append("AND source_id = %s")
                     params.append(source_id.value)
 
                 if min_score is not None:
-                    query += " AND score >= %s"
+                    clauses.append("AND score >= %s")
                     params.append(min_score)
 
-                query += " ORDER BY score DESC"
+                clauses.append("ORDER BY score DESC")
 
                 if batch_size is not None:
-                    query += " LIMIT %s"
+                    clauses.append("LIMIT %s")
                     params.append(batch_size)
 
+                clauses.append("FOR UPDATE SKIP LOCKED")
+
+                query = " ".join(clauses)
                 cur.execute(query, params)
                 rows = cur.fetchall()
-                # Get column names from cursor description
-                columns = [desc[0] for desc in cur.description]
-                return [self._row_to_candidate(dict(zip(columns, row))) for row in rows]
+
+                if not rows:
+                    conn.commit()
+                    return []
+
+                message_ids = [row["message_id"] for row in rows]
+                placeholders = ",".join(["%s"] * len(message_ids))
+                update_query = (
+                    f"UPDATE event_candidates SET status = %s "
+                    f"WHERE message_id IN ({placeholders})"
+                )
+                cur.execute(
+                    update_query,
+                    [CandidateStatus.PROCESSING.value, *message_ids],
+                )
+
+                conn.commit()
+
+                return [
+                    self._row_to_candidate(dict(row)).model_copy(
+                        update={"status": CandidateStatus.PROCESSING}
+                    )
+                    for row in rows
+                ]
 
     def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
         """Get most recent Slack messages for presentation use."""
