@@ -2,16 +2,41 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from src.config.settings import (
+    Settings,
     deep_merge,
     load_all_configs,
     load_schema,
     validate_config_section,
 )
+
+
+class StubLogger:
+    """Capture structured logging calls."""
+
+    def __init__(self) -> None:
+        self.debug_calls: list[tuple[str, dict[str, Any]]] = []
+        self.info_calls: list[tuple[str, dict[str, Any]]] = []
+        self.warning_calls: list[tuple[str, dict[str, Any]]] = []
+        self.error_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def debug(self, event: str, **kwargs: Any) -> None:
+        self.debug_calls.append((event, kwargs))
+
+    def info(self, event: str, **kwargs: Any) -> None:
+        self.info_calls.append((event, kwargs))
+
+    def warning(self, event: str, **kwargs: Any) -> None:
+        self.warning_calls.append((event, kwargs))
+
+    def error(self, event: str, **kwargs: Any) -> None:
+        self.error_calls.append((event, kwargs))
 
 
 def test_deep_merge_simple() -> None:
@@ -172,6 +197,38 @@ def test_load_all_configs_main_only(tmp_path: Path) -> None:
         assert config == main_config
     finally:
         os.chdir(original_cwd)
+
+
+def test_load_all_configs_logs_structured_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Config loader should emit structured warnings when files fail to load."""
+
+    logger_stub = StubLogger()
+    monkeypatch.setattr("src.config.settings.logger", logger_stub)
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "main.yaml").write_text("invalid: [yaml", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    load_all_configs()
+
+    assert logger_stub.warning_calls
+    event, payload = logger_stub.warning_calls[0]
+    assert event == "config_file_load_failed"
+    assert payload["path"].endswith("main.yaml")
+    assert "error" in payload
+
+
+def test_settings_missing_secrets_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings must fail fast when required secrets are absent."""
+
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_load_all_configs_merge(tmp_path: Path) -> None:

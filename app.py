@@ -7,6 +7,7 @@ allowing users to configure settings, run the pipeline, and visualize results.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pandas as pd
 import plotly.express as px
@@ -138,7 +139,19 @@ def main():
         show_database_inspection()
 
 
-def run_full_pipeline(message_limit: int, channels: list):
+def fetch_channel_messages(
+    slack_client: SlackClient, *, channels: list[str], limit: int | None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Fetch messages for each channel while preserving attribution."""
+
+    channel_messages: list[tuple[str, dict[str, Any]]] = []
+    for channel in channels:
+        messages = slack_client.fetch_messages(channel_id=channel, limit=limit)
+        channel_messages.extend((channel, message) for message in messages)
+    return channel_messages
+
+
+def run_full_pipeline(message_limit: int, channels: list[str]):
     """Run the complete pipeline and show results."""
 
     with st.spinner("Running pipeline... This may take a few minutes."):
@@ -173,21 +186,16 @@ def run_full_pipeline(message_limit: int, channels: list):
             status_text.text("📨 Fetching messages from Slack...")
             progress_bar.progress(10)
 
-            all_messages = []
-            for channel in channels:
-                messages = slack_client.fetch_messages(
-                    channel_id=channel, limit=message_limit
-                )
-                all_messages.extend(messages)
+            all_messages = fetch_channel_messages(
+                slack_client, channels=channels, limit=message_limit
+            )
 
             # Step 2: Process and save messages
             status_text.text("💾 Processing and saving messages...")
             progress_bar.progress(30)
 
             processed_messages = []
-            for idx, msg in enumerate(all_messages):
-                channel = channels[idx % len(channels)]
-
+            for channel, msg in all_messages:
                 # Get user info if available
                 user_info = None
                 user_id = msg.get("user")
@@ -198,6 +206,7 @@ def run_full_pipeline(message_limit: int, channels: list):
                         pass  # Continue without user info
 
                 # Get permalink
+                permalink = None
                 permalink = None
                 msg_ts = msg.get("ts")
                 if msg_ts:

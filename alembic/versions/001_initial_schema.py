@@ -73,7 +73,8 @@ def upgrade() -> None:
             "features_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True
         ),
         sa.CheckConstraint(
-            "status IN ('new', 'llm_ok', 'llm_fail')", name="status_check"
+            "status IN ('new', 'processing', 'llm_ok', 'llm_fail')",
+            name="status_check",
         ),
         sa.PrimaryKeyConstraint("message_id"),
     )

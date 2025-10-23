@@ -655,3 +655,39 @@ class TestDashboardQueries:
 
         assert len(recent_events) == 1
         assert recent_events[0].message_id == "newer"
+
+
+class TestCandidateLeasing:
+    """Ensure candidates are leased atomically for extraction."""
+
+    def test_candidates_marked_processing_until_final_status(
+        self, temp_db: Path
+    ) -> None:
+        """Repository should reserve candidates to avoid duplicate work."""
+
+        repo = make_repository(temp_db)
+        candidate_one = create_test_candidate(message_id="m1", channel="C1", score=0.9)
+        candidate_two = create_test_candidate(message_id="m2", channel="C2", score=0.5)
+        repo.save_candidates([candidate_one, candidate_two])
+
+        first_batch = repo.get_candidates_for_extraction(batch_size=1)
+        assert [c.message_id for c in first_batch] == ["m1"]
+
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT status FROM event_candidates WHERE message_id = ?",
+                ("m1",),
+            )
+            status_row = cursor.fetchone()
+            assert status_row is not None
+            assert status_row[0] == CandidateStatus.PROCESSING.value
+
+        # Second lease should return the remaining candidate only
+        second_batch = repo.get_candidates_for_extraction(batch_size=5)
+        assert [c.message_id for c in second_batch] == ["m2"]
+
+        # Mark the first candidate complete and ensure it is not re-leased
+        repo.update_candidate_status("m1", CandidateStatus.LLM_OK.value)
+        third_batch = repo.get_candidates_for_extraction(batch_size=10)
+        assert [c.message_id for c in third_batch] == []

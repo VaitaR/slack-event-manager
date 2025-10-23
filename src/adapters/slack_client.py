@@ -1,6 +1,7 @@
 """Slack API client adapter."""
 
 import time
+from functools import lru_cache
 from typing import Any, Final, cast
 
 from slack_sdk import WebClient
@@ -41,7 +42,6 @@ class SlackClient:
             client: Optional preconfigured Slack WebClient (for testing)
         """
         self.client = client or WebClient(token=bot_token)
-        self._user_cache: dict[str, dict[str, Any]] = {}
         self._page_size = page_size or DEFAULT_SLACK_PAGE_SIZE
         if self._page_size <= 0:
             raise ValueError("Slack page_size must be positive")
@@ -193,19 +193,8 @@ class SlackClient:
             return {"real_name": "Unknown", "name": "unknown"}
 
         # Check cache
-        if user_id in self._user_cache:
-            return self._user_cache[user_id]
-
         try:
-            response = self.client.users_info(user=user_id)
-
-            if not response["ok"]:
-                return {"real_name": "Unknown", "name": "unknown"}
-
-            user_data = response["user"]
-            self._user_cache[user_id] = user_data
-            return user_data
-
+            return self._get_user_info_cached(user_id)
         except SlackApiError as e:
             raise SlackAPIError(f"Failed to fetch user info: {e}")
 
@@ -271,12 +260,24 @@ class SlackClient:
             Permalink URL or None if lookup fails
         """
         try:
-            response = self.client.chat_getPermalink(
-                channel=channel_id, message_ts=message_ts
-            )
-            if response["ok"]:
-                return response["permalink"]
+            return self._get_permalink_cached(channel_id, message_ts)
         except SlackApiError:
-            pass
+            return None
 
+    @lru_cache(maxsize=1024)
+    def _get_user_info_cached(self, user_id: str) -> dict[str, Any]:
+        response = self.client.users_info(user=user_id)
+
+        if not response["ok"]:
+            return {"real_name": "Unknown", "name": "unknown"}
+
+        return response["user"]
+
+    @lru_cache(maxsize=4096)
+    def _get_permalink_cached(self, channel_id: str, message_ts: str) -> str | None:
+        response = self.client.chat_getPermalink(
+            channel=channel_id, message_ts=message_ts
+        )
+        if response["ok"]:
+            return response["permalink"]
         return None

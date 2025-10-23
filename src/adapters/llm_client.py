@@ -5,11 +5,12 @@ Implements LLMClientProtocol with OpenAI integration.
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytz
 import yaml
@@ -39,6 +40,8 @@ PREVIEW_LENGTH_PROMPT: Final[int] = 800
 
 PREVIEW_LENGTH_RESPONSE: Final[int] = 1000
 """Maximum characters to show in response preview for logging."""
+
+VERBOSE_ENV_FLAG: Final[str] = "LLM_ALLOW_VERBOSE_LOGS"
 
 
 @dataclass(frozen=True)
@@ -154,7 +157,8 @@ class LLMClient:
         """
         self.client = OpenAI(api_key=api_key, timeout=timeout)
         self.model = model
-        self.verbose = verbose
+        self._verbose_requested = verbose
+        self.verbose = verbose and self._is_verbose_allowed()
 
         # Set optimal temperature based on model if not provided
         if temperature is None:
@@ -208,6 +212,13 @@ class LLMClient:
             },
         )
 
+        if self._verbose_requested and not self.verbose:
+            logger.warning(
+                "llm_verbose_disabled",
+                env_flag=VERBOSE_ENV_FLAG,
+                reason="env_flag_missing",
+            )
+
         self._last_call_metadata: LLMCallMetadata | None = None
 
     def extract_events(
@@ -250,9 +261,7 @@ class LLMClient:
         if self.verbose:
             logger.debug(
                 "llm_request_verbose",
-                system_prompt_preview=self.system_prompt[:500],
-                user_prompt_preview=prompt[:PREVIEW_LENGTH_PROMPT],
-                prompt_truncated=len(prompt) > PREVIEW_LENGTH_PROMPT,
+                **self._build_prompt_log_payload(prompt),
             )
 
         try:
@@ -319,8 +328,7 @@ class LLMClient:
             if self.verbose and content:
                 logger.debug(
                     "llm_response_verbose",
-                    response_preview=content[:PREVIEW_LENGTH_RESPONSE],
-                    response_truncated=len(content) > PREVIEW_LENGTH_RESPONSE,
+                    **self._build_response_log_payload(content),
                 )
 
             # Store metadata
@@ -373,6 +381,27 @@ class LLMClient:
                 error_type=type(e).__name__,
             )
             raise LLMAPIError(f"Unexpected error: {e}")
+
+    @staticmethod
+    def _is_verbose_allowed() -> bool:
+        flag = os.getenv(VERBOSE_ENV_FLAG, "").strip().lower()
+        return flag in {"1", "true", "yes"}
+
+    def _build_prompt_log_payload(self, prompt: str) -> dict[str, Any]:
+        return {
+            "system_prompt_checksum": self._system_prompt_hash,
+            "system_prompt_char_length": len(self.system_prompt),
+            "prompt_checksum": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "prompt_char_length": len(prompt),
+            "prompt_redacted": True,
+        }
+
+    def _build_response_log_payload(self, content: str) -> dict[str, Any]:
+        return {
+            "response_checksum": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "response_char_length": len(content),
+            "response_redacted": True,
+        }
 
     def extract_events_with_retry(
         self,

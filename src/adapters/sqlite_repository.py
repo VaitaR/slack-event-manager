@@ -136,7 +136,7 @@ class SQLiteRepository:
                 links_norm TEXT,
                 anchors TEXT,
                 score REAL,
-                status TEXT CHECK(status IN ('new', 'llm_ok', 'llm_fail')),
+                status TEXT CHECK(status IN ('new', 'processing', 'llm_ok', 'llm_fail')),
                 features_json TEXT,
                 source_id TEXT DEFAULT 'slack'
             )
@@ -726,7 +726,8 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Build query with source filter
+            cursor.execute("BEGIN IMMEDIATE")
+
             where_conditions = ["status = 'new'"]
             params: list[Any] = []
 
@@ -749,11 +750,33 @@ class SQLiteRepository:
                 params.append(batch_size)
 
             cursor.execute(query, params)
-
             rows = cursor.fetchall()
+
+            if not rows:
+                conn.commit()
+                conn.close()
+                return []
+
+            message_ids = [row["message_id"] for row in rows]
+            placeholders = ",".join(["?"] * len(message_ids))
+            cursor.execute(
+                f"""
+                UPDATE event_candidates
+                SET status = ?
+                WHERE message_id IN ({placeholders})
+                """,
+                [CandidateStatus.PROCESSING.value, *message_ids],
+            )
+
+            conn.commit()
             conn.close()
 
-            return [self._row_to_candidate(row) for row in rows]
+            return [
+                self._row_to_candidate(row).model_copy(
+                    update={"status": CandidateStatus.PROCESSING}
+                )
+                for row in rows
+            ]
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get candidates: {e}")

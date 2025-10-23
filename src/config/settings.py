@@ -6,16 +6,16 @@ All configs are automatically merged and validated against JSON schemas.
 """
 
 import json
-import logging
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 import yaml
 from jsonschema import ValidationError as JSONSchemaValidationError
 from jsonschema import validate
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.config.logging_config import get_logger
 from src.domain.deduplication_constants import (
     DEFAULT_DATE_WINDOW_HOURS,
     DEFAULT_MESSAGE_LOOKBACK_DAYS,
@@ -41,7 +41,7 @@ SLACK_RATE_LIMIT_DELAY_SECONDS_DEFAULT: Final[float] = 0.5
 TELEGRAM_FETCH_PAGE_SIZE_DEFAULT: Final[int] = 200
 TELEGRAM_RATE_LIMIT_DELAY_SECONDS_DEFAULT: Final[float] = 1.0
 
-logger = logging.getLogger(__name__)
+logger = cast(Any, get_logger(__name__))
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -80,7 +80,11 @@ def load_schema(schema_name: str) -> dict[str, Any]:
         with open(schema_path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Failed to load schema {schema_name}: {e}")
+        logger.warning(
+            "config_schema_load_failed",
+            schema=schema_name,
+            error=str(e),
+        )
         return {}
 
 
@@ -104,7 +108,7 @@ def validate_config_section(
 
     try:
         validate(instance=config, schema=schema)
-        logger.debug(f"Config validation passed for {schema_name}")
+        logger.debug("config_validation_succeeded", schema=schema_name)
     except JSONSchemaValidationError as e:
         error_msg = f"Config validation failed for {schema_name}"
         if file_path:
@@ -137,9 +141,17 @@ def load_all_configs() -> dict[str, Any]:
                 main_config = yaml.safe_load(f) or {}
                 validate_config_section(main_config, "main", str(main_path))
                 merged_config = main_config
-                logger.debug(f"Loaded config from {main_path}")
+                logger.debug(
+                    "config_file_loaded",
+                    path=str(main_path),
+                    schema="main",
+                )
         except (yaml.YAMLError, OSError) as e:
-            logger.warning(f"Failed to load {main_path}: {e}")
+            logger.warning(
+                "config_file_load_failed",
+                path=str(main_path),
+                error=str(e),
+            )
 
     # 2. Load config directory files
     config_dir = Path("config")
@@ -161,18 +173,30 @@ def load_all_configs() -> dict[str, Any]:
 
                     # Deep merge
                     merged_config = deep_merge(merged_config, file_config)
-                    logger.debug(f"Loaded and merged config from {yaml_file}")
+                    logger.debug(
+                        "config_file_loaded",
+                        path=str(yaml_file),
+                        schema=schema_name,
+                    )
             except (yaml.YAMLError, OSError) as e:
-                logger.warning(f"Failed to load {yaml_file}: {e}")
+                logger.warning(
+                    "config_file_load_failed",
+                    path=str(yaml_file),
+                    error=str(e),
+                )
             except ValueError as e:
-                # Validation error
-                logger.error(str(e))
+                logger.error(
+                    "config_validation_failed",
+                    path=str(yaml_file),
+                    schema=schema_name,
+                    error=str(e),
+                )
                 raise
 
     file_count = (1 if main_path.exists() else 0) + (
         len(yaml_files) if config_dir.exists() and config_dir.is_dir() else 0
     )
-    logger.info(f"Configuration loaded and merged from {file_count} file(s)")
+    logger.info("config_load_complete", file_count=file_count)
     return merged_config
 
 
@@ -194,15 +218,11 @@ class Settings(BaseSettings):
 
     # Slack configuration
     slack_bot_token: SecretStr = Field(
-        default_factory=lambda: SecretStr("test-slack-token"),
-        description="Slack Bot User OAuth Token (from .env)",
+        ..., description="Slack Bot User OAuth Token (from .env)"
     )
 
     # OpenAI configuration
-    openai_api_key: SecretStr = Field(
-        default_factory=lambda: SecretStr("test-openai-key"),
-        description="OpenAI API key (from .env)",
-    )
+    openai_api_key: SecretStr = Field(..., description="OpenAI API key (from .env)")
 
     # PostgreSQL password (optional, only needed if using PostgreSQL)
     postgres_password: SecretStr | None = Field(
@@ -218,6 +238,24 @@ class Settings(BaseSettings):
     )
 
     # === NON-SENSITIVE CONFIG (from config.yaml or defaults) ===
+
+    @field_validator("slack_bot_token", "openai_api_key", mode="before")
+    @classmethod
+    def _ensure_secret(
+        cls, value: SecretStr | str | None, info: ValidationInfo
+    ) -> SecretStr:
+        if value is None:
+            raise ValueError(f"{info.field_name} must be provided")
+
+        if isinstance(value, SecretStr):
+            secret_value = value.get_secret_value()
+        else:
+            secret_value = str(value)
+
+        if not secret_value.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+
+        return value if isinstance(value, SecretStr) else SecretStr(secret_value)
 
     def __init__(self, **data: Any):
         """Initialize settings with auto-loaded configs from all YAML files."""

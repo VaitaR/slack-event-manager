@@ -8,6 +8,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.adapters.llm_client import VERBOSE_ENV_FLAG, LLMClient
+from src.adapters.repository_factory import create_repository
+from src.adapters.slack_client import SlackClient
+from src.config.settings import Settings, get_settings
+from src.domain.models import MessageSource
+from src.domain.protocols import RepositoryProtocol
+from src.use_cases.build_candidates import build_candidates_use_case
+from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.ingest_messages import process_slack_message
+
 # Setup logging to file and console
 LOG_FILE = "pipeline_detailed.log"
 log_handle = None
@@ -30,18 +41,6 @@ def log(msg: str) -> None:
     if log_handle:
         log_handle.write(msg + "\n")
         log_handle.flush()
-
-
-from src.adapters.llm_client import LLMClient
-from src.adapters.repository_factory import create_repository
-from src.adapters.slack_client import SlackClient
-from src.config.settings import Settings, get_settings
-from src.domain.models import MessageSource
-from src.domain.protocols import RepositoryProtocol
-from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
-from src.use_cases.ingest_messages import process_slack_message
 
 
 def inspect_database(db_path: str, stage: str = "") -> None:
@@ -188,12 +187,25 @@ def main() -> bool:
     log(f"   - Dedup title similarity: {settings.dedup_title_similarity}")
 
     slack_client = SlackClient(bot_token=settings.slack_bot_token.get_secret_value())
+    verbose_enabled = os.getenv(VERBOSE_ENV_FLAG, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if verbose_enabled:
+        log("🔍 Verbose LLM logging enabled (redacted previews)")
+    else:
+        log(
+            "🔒 Verbose LLM logging disabled; set "
+            f"{VERBOSE_ENV_FLAG}=1 for additional diagnostics"
+        )
+
     llm_client = LLMClient(
         api_key=settings.openai_api_key.get_secret_value(),
         model=settings.llm_model,
         temperature=settings.llm_temperature,
         timeout=30,  # Increased for complex messages
-        verbose=True,  # Enable verbose mode to see full prompts/responses
+        verbose=verbose_enabled,
     )
 
     # Use persistent database
