@@ -6,27 +6,26 @@ This app provides a visual interface for the Slack Event Manager pipeline,
 allowing users to configure settings, run the pipeline, and visualize results.
 """
 
-import sys
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-from datetime import UTC
-
-from adapters.llm_client import LLMClient
-from adapters.repository_factory import create_repository
-from adapters.slack_client import SlackClient
-from config.settings import get_settings
-from domain.models import MessageSource
-from use_cases.build_candidates import build_candidates_use_case
-from use_cases.deduplicate_events import deduplicate_events_use_case
-from use_cases.extract_events import extract_events_use_case
-from use_cases.ingest_messages import process_slack_message
+from src.adapters.llm_client import LLMClient
+from src.adapters.repository_factory import create_repository
+from src.adapters.slack_client import SlackClient
+from src.config.settings import get_settings
+from src.domain.models import MessageSource
+from src.use_cases.build_candidates import build_candidates_use_case
+from src.use_cases.dashboard_queries import (
+    fetch_recent_candidates,
+    fetch_recent_events,
+    fetch_recent_messages,
+)
+from src.use_cases.deduplicate_events import deduplicate_events_use_case
+from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.ingest_messages import process_slack_message
 
 # UI Constants
 MAX_MESSAGE_LENGTH = 150
@@ -322,11 +321,9 @@ def show_messages_table():
     st.subheader("📨 Raw Messages")
 
     try:
-        # Get repository and fetch ALL messages for UI display
         repo = get_repository()
         settings = get_settings()
 
-        # Show which database we're using
         if settings.database_type == "postgres":
             st.caption(
                 f"🐘 Source: PostgreSQL ({settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database})"
@@ -334,43 +331,7 @@ def show_messages_table():
         else:
             st.caption(f"📁 Source: SQLite ({settings.db_path})")
 
-        # Get all messages for UI display (not just unprocessed)
-        # For now, we'll fetch pending + some processed (PostgreSQL-specific query)
-        from src.adapters.postgres_repository import PostgresRepository
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        if isinstance(repo, PostgresRepository):
-            # Direct SQL for PostgreSQL to get all messages
-            with repo._get_connection() as conn:
-                with conn.cursor(
-                    cursor_factory=__import__(
-                        "psycopg2.extras", fromlist=["RealDictCursor"]
-                    ).RealDictCursor
-                ) as cur:
-                    cur.execute("""
-                        SELECT m.* FROM raw_slack_messages m
-                        ORDER BY m.ts_dt DESC
-                        LIMIT 100
-                    """)
-                    rows = cur.fetchall()
-                    messages = [repo._row_to_message(dict(row)) for row in rows]
-        elif isinstance(repo, SQLiteRepository):
-            # Direct SQL for SQLite
-            import sqlite3
-
-            conn = sqlite3.connect(settings.db_path)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT * FROM raw_slack_messages
-                ORDER BY ts_dt DESC
-                LIMIT 100
-            """)
-            rows = cur.fetchall()
-            messages = [repo._row_to_message(dict(row)) for row in rows]
-            conn.close()
-        else:
-            messages = repo.get_new_messages_for_candidates()
+        messages = fetch_recent_messages(repository=repo, limit=100)
 
         if not messages:
             st.info("No messages found.")
@@ -385,7 +346,7 @@ def show_messages_table():
                     "text": msg.text[:MAX_MESSAGE_LENGTH] + "..."
                     if len(msg.text) > MAX_MESSAGE_LENGTH
                     else msg.text,
-                    "ts": pd.to_datetime(msg.ts, unit="s"),
+                    "ts": msg.ts_dt,
                     "user_real_name": msg.user_real_name or "",
                     "user_email": msg.user_email or "",
                     "total_reactions": msg.total_reactions or 0,
@@ -393,6 +354,7 @@ def show_messages_table():
                     "attachments_count": msg.attachments_count or 0,
                     "files_count": msg.files_count or 0,
                     "permalink": msg.permalink or "",
+                    "edited_ts": msg.edited_ts,
                     "edited": msg.edited_ts is not None,
                 }
             )
@@ -456,45 +418,8 @@ def show_candidates_table():
     st.subheader("🎯 Event Candidates")
 
     try:
-        # Get repository and fetch ALL candidates for UI display
         repo = get_repository()
-        settings = get_settings()
-
-        from src.adapters.postgres_repository import PostgresRepository
-        from src.adapters.sqlite_repository import SQLiteRepository
-
-        if isinstance(repo, PostgresRepository):
-            # Direct SQL for PostgreSQL to get all candidates
-            with repo._get_connection() as conn:
-                with conn.cursor(
-                    cursor_factory=__import__(
-                        "psycopg2.extras", fromlist=["RealDictCursor"]
-                    ).RealDictCursor
-                ) as cur:
-                    cur.execute("""
-                        SELECT * FROM event_candidates
-                        ORDER BY score DESC
-                        LIMIT 100
-                    """)
-                    rows = cur.fetchall()
-                    candidates = [repo._row_to_candidate(dict(row)) for row in rows]
-        elif isinstance(repo, SQLiteRepository):
-            # Direct SQL for SQLite
-            import sqlite3
-
-            conn = sqlite3.connect(settings.db_path)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT * FROM event_candidates
-                ORDER BY score DESC
-                LIMIT 100
-            """)
-            rows = cur.fetchall()
-            candidates = [repo._row_to_candidate(dict(row)) for row in rows]
-            conn.close()
-        else:
-            candidates = repo.get_candidates_for_extraction(batch_size=100)
+        candidates = fetch_recent_candidates(repository=repo, limit=100)
 
         if not candidates:
             st.info("No candidates found.")
@@ -510,7 +435,7 @@ def show_candidates_table():
                     if len(cand.text_norm) > MAX_CANDIDATE_TEXT_LENGTH
                     else cand.text_norm,
                     "score": cand.score,
-                    "status": cand.status,
+                    "status": cand.status.value,
                     "features_json": str(
                         cand.features.model_dump() if cand.features else {}
                     ),
@@ -549,14 +474,8 @@ def show_events_table():
     st.subheader("📝 Extracted Events")
 
     try:
-        # Get repository and fetch events
         repo = get_repository()
-        # Get recent events (last 90 days)
-        from datetime import datetime, timedelta
-
-        start_date = datetime.now(UTC) - timedelta(days=90)
-        end_date = datetime.now(UTC) + timedelta(days=365)
-        events = repo.get_events_in_window(start_date, end_date)
+        events = fetch_recent_events(repository=repo, limit=100)
 
         if not events:
             st.info("No events found.")
@@ -628,7 +547,6 @@ def show_gantt_chart():
     try:
         # Get repository and fetch events with dates
         repo = get_repository()
-        from datetime import datetime, timedelta
 
         start_date = datetime.now(UTC) - timedelta(days=90)
         end_date = datetime.now(UTC) + timedelta(days=365)

@@ -27,6 +27,11 @@ from src.domain.models import (
     TimeSource,
 )
 from src.domain.protocols import RepositoryProtocol
+from src.domain.validation_constants import (
+    MAX_IMPACT_AREAS,
+    MAX_LINKS,
+    MAX_QUALIFIERS,
+)
 from src.services import deduplicator
 from src.services.importance_scorer import ImportanceScorer
 from src.services.object_registry import ObjectRegistry
@@ -51,20 +56,18 @@ def _get_object_registry() -> ObjectRegistry:
 
         if not registry_path.exists():
             # Graceful fallback if file doesn't exist
-            import logging
-
-            logging.warning(
-                f"Object registry not found at {registry_path}. "
-                "Object canonicalization disabled."
+            logger.warning(
+                "object_registry_missing",
+                path=str(registry_path),
             )
             # Try fallback to example file
             fallback_path = Path("config/defaults/object_registry.example.yaml")
             if fallback_path.exists():
                 registry_path = fallback_path
-                logging.info(f"Using fallback registry: {fallback_path}")
+                logger.info("object_registry_fallback", path=str(fallback_path))
             else:
                 # Create minimal empty registry
-                logging.warning("No object registry available")
+                logger.warning("object_registry_unavailable")
 
         _object_registry = ObjectRegistry(registry_path)
     return _object_registry
@@ -179,7 +182,7 @@ def convert_llm_event_to_domain(
         action=action,
         object_id=object_id,
         object_name_raw=llm_event.object_name_raw,
-        qualifiers=llm_event.qualifiers[:2],  # Max 2
+        qualifiers=llm_event.qualifiers[:MAX_QUALIFIERS],
         stroke=llm_event.stroke,
         anchor=llm_event.anchor,
         # Classification
@@ -198,9 +201,9 @@ def convert_llm_event_to_domain(
         # Content
         summary=llm_event.summary,
         why_it_matters=llm_event.why_it_matters,
-        links=llm_event.links[:3],  # Max 3
+        links=llm_event.links[:MAX_LINKS],
         anchors=llm_event.anchors,
-        impact_area=llm_event.impact_area[:3],  # Max 3
+        impact_area=llm_event.impact_area[:MAX_IMPACT_AREAS],
         impact_type=llm_event.impact_type,
         # Quality (importance calculated below)
         confidence=llm_event.confidence,
@@ -301,8 +304,17 @@ def extract_events_use_case(
         batch_size=batch_size, min_score=min_score, source_id=source_id
     )
 
+    logger.info(
+        "event_extraction_started",
+        candidate_count=len(candidates),
+        source=source_id.value if source_id else None,
+        batch_size=batch_size,
+        min_score=min_score,
+        check_budget=check_budget,
+    )
+
     if not candidates:
-        return ExtractionResult(
+        result = ExtractionResult(
             events_extracted=0,
             candidates_processed=0,
             llm_calls=0,
@@ -310,6 +322,15 @@ def extract_events_use_case(
             total_cost_usd=0.0,
             errors=[],
         )
+        logger.info(
+            "event_extraction_finished",
+            events_extracted=result.events_extracted,
+            candidates_processed=result.candidates_processed,
+            llm_calls=result.llm_calls,
+            cache_hits=result.cache_hits,
+            total_cost_usd=result.total_cost_usd,
+        )
+        return result
 
     events_extracted = 0
     candidates_processed = 0
@@ -344,12 +365,12 @@ def extract_events_use_case(
                 "calling_llm_api",
                 message_id=candidate.message_id[:8],
                 text_length=len(candidate.text_norm),
-                links_count=len(candidate.links_norm[:3]),
+                links_count=len(candidate.links_norm[:MAX_LINKS]),
             )
 
             llm_response = llm_client.extract_events_with_retry(
                 text=candidate.text_norm,
-                links=candidate.links_norm[:3],
+                links=candidate.links_norm[:MAX_LINKS],
                 message_ts_dt=candidate.ts_dt,
                 channel_name=channel_name,
             )
@@ -483,7 +504,7 @@ def extract_events_use_case(
         except Exception as e:
             errors.append(f"Unexpected error for {candidate.message_id}: {str(e)}")
 
-    return ExtractionResult(
+    result = ExtractionResult(
         events_extracted=events_extracted,
         candidates_processed=candidates_processed,
         llm_calls=llm_calls,
@@ -491,3 +512,15 @@ def extract_events_use_case(
         total_cost_usd=total_cost,
         errors=errors,
     )
+
+    logger.info(
+        "event_extraction_finished",
+        events_extracted=result.events_extracted,
+        candidates_processed=result.candidates_processed,
+        llm_calls=result.llm_calls,
+        cache_hits=result.cache_hits,
+        total_cost_usd=result.total_cost_usd,
+        errors=len(result.errors),
+    )
+
+    return result

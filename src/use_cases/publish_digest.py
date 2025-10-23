@@ -9,6 +9,7 @@ from typing import Any
 import pytz
 
 from src.adapters.slack_client import SlackClient
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.models import DigestResult, Event, EventCategory
 from src.domain.protocols import RepositoryProtocol
@@ -18,6 +19,7 @@ from src.services.validators import EventValidator
 # Initialize services
 _title_renderer = TitleRenderer()
 _event_validator = EventValidator()
+logger = get_logger(__name__)
 
 
 def format_event_date(event_date: datetime, tz_name: str = "Europe/Amsterdam") -> str:
@@ -340,63 +342,72 @@ def publish_digest_use_case(
         sorted_events = sorted_events[:max_events]
 
     # Validate events before publishing to Slack
-    print(f"🔍 Validating {len(sorted_events)} events before publishing...")
-    import sys
+    channel = target_channel or settings.slack_digest_channel_id
 
-    sys.stdout.flush()
+    logger.info(
+        "digest_publish_started",
+        channel=channel,
+        dry_run=dry_run,
+        event_count=len(sorted_events),
+        lookback_hours=lookback_hours,
+        min_confidence=min_confidence,
+        max_events=max_events,
+    )
 
     valid_events: list[Event] = []
-    invalid_events: list[Event] = []
-    validation_issues: list[str] = []
+    critical_issue_count = 0
+    warning_issue_count = 0
 
     for event in sorted_events:
         issues = _event_validator.validate_all(event)
 
         if issues:
-            # Check if issues are only warnings (not critical errors)
             critical_errors = [
                 issue for issue in issues if not issue.startswith("WARNING:")
             ]
 
             if critical_errors:
-                # Skip events with critical errors
-                invalid_events.append(event)
-                validation_issues.extend(
-                    [
-                        f"Event {event.object_name_raw}: {issue}"
-                        for issue in critical_errors
-                    ]
+                critical_issue_count += 1
+                logger.warning(
+                    "digest_validation_error",
+                    event_id=str(event.event_id),
+                    object_name=event.object_name_raw,
+                    issues=critical_errors,
                 )
-                print(
-                    f"   ❌ Critical validation errors for {event.object_name_raw}: {critical_errors}"
-                )
-                sys.stdout.flush()
             else:
-                # Include events with only warnings
                 valid_events.append(event)
-                validation_issues.extend(
-                    [f"Event {event.object_name_raw}: {issue}" for issue in issues]
+                warning_issue_count += len(issues)
+                logger.info(
+                    "digest_validation_warning",
+                    event_id=str(event.event_id),
+                    object_name=event.object_name_raw,
+                    warnings=issues,
                 )
         else:
-            # Event is fully valid
             valid_events.append(event)
 
-    if validation_issues:
-        print(
-            f"   📊 Validation summary: {len(validation_issues)} issues found ({len(invalid_events)} events skipped)"
+    if warning_issue_count or critical_issue_count:
+        logger.info(
+            "digest_validation_summary",
+            warnings=warning_issue_count,
+            critical_events=critical_issue_count,
         )
-        sys.stdout.flush()
 
     if not valid_events:
-        print("   ⚠️  No valid events to publish after validation")
-        sys.stdout.flush()
-        # Use default channel if no events to publish
-        channel = target_channel or settings.slack_digest_channel_id
-        return DigestResult(
-            messages_posted=0,
-            events_included=0,
+        result = DigestResult(messages_posted=0, events_included=0, channel=channel)
+        logger.warning(
+            "digest_no_valid_events",
             channel=channel,
+            total_events=len(sorted_events),
         )
+        logger.info(
+            "digest_publish_finished",
+            channel=result.channel,
+            messages_posted=result.messages_posted,
+            events_included=result.events_included,
+            dry_run=dry_run,
+        )
+        return result
 
     # Build blocks with validated events
     date_str = now.astimezone(pytz.timezone(settings.tz_default)).strftime("%d.%m.%Y")
@@ -405,21 +416,46 @@ def publish_digest_use_case(
     # Chunk blocks
     block_chunks = chunk_blocks(blocks, max_blocks=50)
 
-    # Post to Slack
-    channel = target_channel or settings.slack_digest_channel_id
     messages_posted = 0
 
     if not dry_run:
-        for chunk in block_chunks:
+        for index, chunk in enumerate(block_chunks):
             try:
-                slack_client.post_message(channel, chunk)
+                message_ts = slack_client.post_message(channel, chunk)
                 messages_posted += 1
-            except Exception as e:
-                # Log error but continue
-                print(f"Failed to post digest chunk: {e}")
+                logger.info(
+                    "digest_chunk_posted",
+                    channel=channel,
+                    chunk_index=index,
+                    message_ts=message_ts,
+                )
+            except Exception as exc:
+                logger.error(
+                    "digest_chunk_post_failed",
+                    channel=channel,
+                    chunk_index=index,
+                    error=str(exc),
+                )
+    else:
+        logger.info(
+            "digest_dry_run",
+            channel=channel,
+            chunk_count=len(block_chunks),
+            events=len(valid_events),
+        )
 
-    return DigestResult(
+    result = DigestResult(
         messages_posted=messages_posted,
-        events_included=len(sorted_events),
+        events_included=len(valid_events),
         channel=channel,
     )
+
+    logger.info(
+        "digest_publish_finished",
+        channel=result.channel,
+        messages_posted=result.messages_posted,
+        events_included=result.events_included,
+        dry_run=dry_run,
+    )
+
+    return result

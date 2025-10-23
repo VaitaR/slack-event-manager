@@ -72,6 +72,27 @@ class TestFetchMessages:
         assert isinstance(messages, list)
 
     @patch("src.adapters.telegram_client.TelegramClientLib")
+    def test_fetch_messages_reuses_single_client(self, mock_telethon: Mock) -> None:
+        """Subsequent fetches should reuse one Telethon client and connection."""
+
+        mock_client_instance = AsyncMock()
+        mock_client_instance.iter_messages = Mock(return_value=[])
+        mock_client_instance.get_entity = AsyncMock()
+        mock_client_instance.start = AsyncMock()
+        mock_client_instance.disconnect = AsyncMock()
+        mock_telethon.return_value = mock_client_instance
+
+        client = TelegramClient(
+            api_id=12345, api_hash="test_hash", session_name="test_session"
+        )
+
+        client.fetch_messages(channel_id="@test_channel", limit=1)
+        client.fetch_messages(channel_id="@test_channel", limit=1)
+
+        assert mock_telethon.call_count == 1
+        assert mock_client_instance.start.await_count == 1
+
+    @patch("src.adapters.telegram_client.TelegramClientLib")
     def test_fetch_messages_with_limit(self, mock_telethon: Mock) -> None:
         """Test fetch_messages respects limit parameter."""
         mock_client_instance = AsyncMock()

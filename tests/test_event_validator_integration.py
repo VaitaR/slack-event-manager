@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
+from structlog.testing import capture_logs
 
 from src.config.settings import Settings
 from src.domain.models import (
@@ -47,6 +48,31 @@ def mock_settings():
     settings.dedup_date_window_hours = 48
     settings.dedup_title_similarity = 0.8
     return settings
+
+
+def test_extract_events_use_case_emits_structured_logs(mock_settings) -> None:
+    """Extract use case should emit structured logs even with no candidates."""
+
+    repository = MagicMock()
+    repository.get_candidates_for_extraction.return_value = []
+    repository.get_daily_llm_cost.return_value = 0.0
+
+    llm_client = MagicMock()
+
+    with capture_logs() as logs:
+        result = extract_events_use_case(
+            llm_client=llm_client,
+            repository=repository,
+            settings=mock_settings,
+            source_id=MessageSource.SLACK,
+            batch_size=5,
+            check_budget=False,
+        )
+
+    assert result.events_extracted == 0
+    events = {entry["event"] for entry in logs}
+    assert "event_extraction_started" in events
+    assert "event_extraction_finished" in events
 
 
 @pytest.fixture
