@@ -23,7 +23,6 @@ class ObjectRegistry:
             registry_path: Path to registry YAML file
 
         Raises:
-            FileNotFoundError: If registry file doesn't exist
             ValueError: If registry format is invalid
         """
         self.registry_path = Path(registry_path)
@@ -36,12 +35,17 @@ class ObjectRegistry:
     def _load_registry(self) -> None:
         """Load registry from YAML file."""
         if not self.registry_path.exists():
-            raise FileNotFoundError(f"Registry file not found: {self.registry_path}")
+            self.objects = {}
+            return
 
         with open(self.registry_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
-        if not data or "objects" not in data:
+        if not data:
+            self.objects = {}
+            return
+
+        if "objects" not in data:
             raise ValueError("Registry must have 'objects' key")
 
         self.objects = data["objects"]
