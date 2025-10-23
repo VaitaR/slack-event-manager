@@ -1,8 +1,10 @@
 """Telegram client adapter using Telethon library."""
 
 import asyncio
+import threading
 import types
-from typing import Any, Final
+from collections.abc import Coroutine
+from typing import Any, Final, TypeVar
 
 import pytz
 
@@ -24,6 +26,8 @@ except ImportError:
 
 from src.config.logging_config import get_logger
 from src.domain.exceptions import RateLimitError
+
+T = TypeVar("T")
 
 logger = get_logger(__name__)
 
@@ -93,6 +97,10 @@ class TelegramClient:
         self._max_total_messages = max_total_messages
         self._page_delay_seconds = max(page_delay_seconds, 0.0)
         self._max_retries = max(max_retries, 1)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: threading.Thread | None = None
+        self._loop_ready = threading.Event()
+        self._loop_lock = threading.Lock()
 
     def _get_client(self) -> TelegramClientLib:
         """Get or create Telethon client instance.
@@ -169,6 +177,50 @@ class TelegramClient:
     ) -> None:
         """Context manager exit with cleanup."""
         await self.close()
+
+    def _loop_runner(self) -> None:
+        """Background thread that owns the asyncio event loop."""
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        with self._loop_lock:
+            self._loop = loop
+            self._loop_ready.set()
+        try:
+            loop.run_forever()
+        finally:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+            with self._loop_lock:
+                self._loop = None
+                self._loop_thread = None
+                self._loop_ready.clear()
+
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        """Ensure a background event loop is running."""
+
+        with self._loop_lock:
+            if self._loop and self._loop.is_running():
+                return self._loop
+
+            self._loop_ready.clear()
+            self._loop_thread = threading.Thread(
+                target=self._loop_runner,
+                name="TelegramClientLoop",
+                daemon=True,
+            )
+            self._loop_thread.start()
+
+        self._loop_ready.wait()
+        assert self._loop is not None
+        return self._loop
+
+    def _run_in_loop(self, coro: Coroutine[Any, Any, T]) -> T:
+        """Run coroutine on background loop and wait for result."""
+
+        loop = self._ensure_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
 
     async def _fetch_messages_async(
         self,
@@ -448,43 +500,16 @@ class TelegramClient:
     ) -> list[dict[str, Any]]:
         """Fetch messages from Telegram channel (synchronous wrapper)."""
 
-        import concurrent.futures
-
-        def _run_in_isolated_loop() -> list[dict[str, Any]]:
-            """Run async fetch in an isolated event loop."""
-
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                fresh_client = TelegramClient(
-                    self.api_id,
-                    self.api_hash,
-                    self.session_name,
-                    page_size=self._page_size,
-                    max_total_messages=self._max_total_messages,
-                    page_delay_seconds=self._page_delay_seconds,
-                    max_retries=self._max_retries,
-                )
-                return new_loop.run_until_complete(
-                    fresh_client.fetch_messages_async(
-                        channel_id,
-                        oldest_ts=oldest_ts,
-                        latest_ts=latest_ts,
-                        limit=limit,
-                        min_message_id=min_message_id,
-                        page_size=page_size,
-                    )
-                )
-            finally:
-                try:
-                    new_loop.run_until_complete(fresh_client.close())
-                except Exception:
-                    pass
-                new_loop.close()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_run_in_isolated_loop)
-            return future.result()
+        return self._run_in_loop(
+            self.fetch_messages_async(
+                channel_id,
+                oldest_ts=oldest_ts,
+                latest_ts=latest_ts,
+                limit=limit,
+                min_message_id=min_message_id,
+                page_size=page_size,
+            )
+        )
 
     def get_user_info(self, user_id: str) -> dict[str, Any]:
         """Get Telegram user information (stub for protocol compatibility).

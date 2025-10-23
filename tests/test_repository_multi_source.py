@@ -25,6 +25,7 @@ from src.domain.models import (
     EventStatus,
     MessageSource,
     ScoringFeatures,
+    SlackMessage,
     TelegramMessage,
     TimeSource,
 )
@@ -591,3 +592,66 @@ class TestCandidatesAndEventsSourceTracking:
 
         assert len(telegram_events) == 2
         assert all(e.source_id == MessageSource.TELEGRAM for e in telegram_events)
+
+
+class TestDashboardQueries:
+    """Tests for repository helpers used by dashboard presentation layer."""
+
+    def test_get_recent_slack_messages_returns_most_recent_first(
+        self, temp_db: Path, sample_slack_message: SlackMessage
+    ) -> None:
+        """Repository should return Slack messages ordered by recency."""
+
+        repo = make_repository(temp_db)
+
+        older_message = sample_slack_message.model_copy(
+            update={
+                "message_id": "older",
+                "ts": "123.456",
+                "ts_dt": sample_slack_message.ts_dt - timedelta(hours=1),
+                "ingested_at": sample_slack_message.ingested_at - timedelta(hours=1),
+            }
+        )
+        repo.save_messages([older_message, sample_slack_message])
+
+        recent_messages = repo.get_recent_slack_messages(limit=1)
+
+        assert len(recent_messages) == 1
+        assert recent_messages[0].message_id == sample_slack_message.message_id
+
+    def test_get_recent_candidates_orders_by_score(self, temp_db: Path) -> None:
+        """Repository should surface top-scoring candidates first."""
+
+        repo = make_repository(temp_db)
+
+        high_score = create_test_candidate(message_id="high", channel="test", score=0.9)
+        low_score = create_test_candidate(message_id="low", channel="test", score=0.1)
+        repo.save_candidates([low_score, high_score])
+
+        recent_candidates = repo.get_recent_candidates(limit=1)
+
+        assert len(recent_candidates) == 1
+        assert recent_candidates[0].message_id == "high"
+
+    def test_get_recent_events_orders_by_extraction_time(self, temp_db: Path) -> None:
+        """Repository should return most recently extracted events first."""
+
+        repo = make_repository(temp_db)
+
+        base_time = datetime.utcnow()
+        older_event = create_test_event(
+            message_id="older",
+            channel="test",
+            extracted_at=base_time - timedelta(hours=1),
+        )
+        newer_event = create_test_event(
+            message_id="newer",
+            channel="test",
+            extracted_at=base_time,
+        )
+        repo.save_events([older_event, newer_event])
+
+        recent_events = repo.get_recent_events(limit=1)
+
+        assert len(recent_events) == 1
+        assert recent_events[0].message_id == "newer"

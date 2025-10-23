@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 import pytz
+from structlog.testing import capture_logs
 
 from src.adapters.slack_client import SlackClient
 from src.config.settings import Settings
@@ -346,6 +347,26 @@ def test_chunk_blocks_over_limit() -> None:
     assert len(chunks) == 2
     assert len(chunks[0]) == 50
     assert len(chunks[1]) == 50
+
+
+def test_publish_digest_use_case_emits_structured_logs(mock_settings: Settings) -> None:
+    """Use case should emit structured logs for observability."""
+
+    mock_slack_client = Mock(spec=SlackClient)
+    mock_repository = Mock(spec=RepositoryProtocol)
+    mock_repository.get_events_in_window_filtered.return_value = []
+
+    with capture_logs() as logs:
+        publish_digest_use_case(
+            slack_client=mock_slack_client,
+            repository=mock_repository,
+            settings=mock_settings,
+            dry_run=True,
+        )
+
+    events = {entry["event"] for entry in logs}
+    assert "digest_publish_started" in events
+    assert "digest_publish_finished" in events
 
 
 def test_publish_digest_use_case_dry_run(

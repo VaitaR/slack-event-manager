@@ -650,6 +650,63 @@ class PostgresRepository:
                 columns = [desc[0] for desc in cur.description]
                 return [self._row_to_candidate(dict(zip(columns, row))) for row in rows]
 
+    def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
+        """Get most recent Slack messages for presentation use."""
+
+        if limit <= 0:
+            return []
+
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM raw_slack_messages
+                    ORDER BY ts_dt DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                return [self._row_to_message(dict(row)) for row in rows]
+
+    def get_recent_candidates(self, limit: int = 100) -> list[EventCandidate]:
+        """Get most recent event candidates for presentation use."""
+
+        if limit <= 0:
+            return []
+
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM event_candidates
+                    ORDER BY score DESC, ts_dt DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                return [self._row_to_candidate(dict(row)) for row in rows]
+
+    def get_recent_events(self, limit: int = 100) -> list[Event]:
+        """Get most recently extracted events for presentation use."""
+
+        if limit <= 0:
+            return []
+
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM events
+                    ORDER BY extracted_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                return [self._row_to_event(dict(row)) for row in rows]
+
     def update_candidate_status(self, message_id: str, status: str) -> None:
         """Update candidate processing status.
 

@@ -758,6 +758,75 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get candidates: {e}")
 
+    def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
+        """Get most recent Slack messages for presentation use."""
+
+        if limit <= 0:
+            return []
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM raw_slack_messages
+                ORDER BY ts_dt DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [self._row_to_message(row) for row in rows]
+        except sqlite3.Error as exc:  # pragma: no cover - defensive path
+            raise RepositoryError(f"Failed to load recent Slack messages: {exc}")
+
+    def get_recent_candidates(self, limit: int = 100) -> list[EventCandidate]:
+        """Get most recent event candidates for presentation use."""
+
+        if limit <= 0:
+            return []
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM event_candidates
+                ORDER BY score DESC, ts_dt DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [self._row_to_candidate(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise RepositoryError(f"Failed to load recent candidates: {exc}")
+
+    def get_recent_events(self, limit: int = 100) -> list[Event]:
+        """Get most recently extracted events for presentation use."""
+
+        if limit <= 0:
+            return []
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM events
+                ORDER BY extracted_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [self._row_to_event(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise RepositoryError(f"Failed to load recent events: {exc}")
+
     def update_candidate_status(self, message_id: str, status: str) -> None:
         """Update candidate processing status.
 

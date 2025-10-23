@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import Mock
 
 import pytz
+from structlog.testing import capture_logs
 
 from src.config.settings import Settings
 from src.domain.models import Event, MessageSource
@@ -234,3 +235,19 @@ def test_deduplicate_events_source_filtering() -> None:
     repository.query_events.assert_called_once()
     call_args = repository.query_events.call_args[0][0]
     assert call_args.source_id == MessageSource.SLACK.value
+
+
+def test_deduplicate_events_logs_structured_summary() -> None:
+    """Use case should emit structured logs instead of printing to stdout."""
+
+    repository = Mock()
+    repository.query_events.return_value = []
+
+    settings = create_mock_settings()
+
+    with capture_logs() as logs:
+        deduplicate_events_use_case(repository, settings)
+
+    event_names = {entry["event"] for entry in logs}
+    assert "deduplication_started" in event_names
+    assert "deduplication_finished" in event_names

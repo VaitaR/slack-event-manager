@@ -251,6 +251,21 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
+        """Get most recent Slack messages for presentation use."""
+
+        ...
+
+    def get_recent_candidates(self, limit: int = 100) -> list[EventCandidate]:
+        """Get most recent event candidates for presentation use."""
+
+        ...
+
+    def get_recent_events(self, limit: int = 100) -> list[Event]:
+        """Get most recently extracted events for presentation use."""
+
+        ...
+
     def query_candidates(
         self, criteria: "CandidateQueryCriteria"
     ) -> list[EventCandidate]:

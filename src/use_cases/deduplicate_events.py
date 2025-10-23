@@ -3,12 +3,12 @@
 Applies deduplication rules to merge similar events.
 """
 
-import sys
 from datetime import datetime, timedelta
 
 import pytz
 
 from src.adapters.query_builders import EventQueryCriteria
+from src.config.logging_config import get_logger
 from src.config.settings import Settings
 from src.domain.models import DeduplicationResult, Event, MessageSource
 from src.domain.protocols import RepositoryProtocol
@@ -18,6 +18,7 @@ from src.services.validators import EventValidator
 
 _TITLE_RENDERER = TitleRenderer()
 _EVENT_VALIDATOR = EventValidator()
+logger = get_logger(__name__)
 
 
 def deduplicate_events_use_case(
@@ -72,44 +73,26 @@ def deduplicate_events_use_case(
 
     all_events = repository.query_events(criteria)
 
-    if not all_events:
-        return DeduplicationResult(new_events=0, merged_events=0, total_events=0)
-
     initial_count = len(all_events)
 
-    # Log initial state
-    print("\n🔍 Deduplication Analysis:")
-    print(f"   Initial events: {initial_count}")
-    if source_id:
-        print(f"   Source filter: {source_id.value} (strict isolation)")
-    else:
-        print("   Source filter: None (all sources)")
-    print(f"   Date window: {settings.dedup_date_window_hours} hours")
-    print(f"   Title similarity threshold: {settings.dedup_title_similarity}")
-    print("")
+    logger.info(
+        "deduplication_started",
+        event_count=initial_count,
+        source=source_id.value if source_id else None,
+        lookback_days=lookback_days,
+        title_similarity=settings.dedup_title_similarity,
+        date_window_hours=settings.dedup_date_window_hours,
+    )
 
-    # Show all events before deduplication
-    print("   📋 Events BEFORE deduplication:")
-    for i, evt in enumerate(all_events, 1):
-        title = f"{evt.action.value}: {evt.object_name_raw}"
-        primary_time = (
-            evt.actual_start
-            or evt.actual_end
-            or evt.planned_start
-            or evt.planned_end
-            or evt.extracted_at
+    if not all_events:
+        result = DeduplicationResult(new_events=0, merged_events=0, total_events=0)
+        logger.info(
+            "deduplication_finished",
+            new_events=result.new_events,
+            merged_events=result.merged_events,
+            total_events=result.total_events,
         )
-        print(f"   {i}. {title[:60]}")
-        print(f"      Message ID: {evt.message_id[:8]}...")
-        print(f"      Date: {primary_time.isoformat()}")
-        print(f"      Links: {evt.links[:2]}")  # Show first 2 links
-        print(f"      Dedup key: {evt.dedup_key[:16]}...")
-        print("")
-    sys.stdout.flush()
-
-    # Deduplicate events with detailed logging
-    print("   🔄 Running deduplication...")
-    sys.stdout.flush()
+        return result
 
     deduplicated_events = deduplicator.deduplicate_event_list(
         all_events,
@@ -121,49 +104,19 @@ def deduplicate_events_use_case(
     final_count = len(deduplicated_events)
     merged_count = initial_count - final_count
 
-    print("\n   ✅ Deduplication complete:")
-    print(f"      Initial: {initial_count}")
-    print(f"      Final: {final_count}")
-    print(f"      Merged: {merged_count}")
-    print("")
-
-    # Show events after deduplication
-    print("   📋 Events AFTER deduplication:")
-    for i, evt in enumerate(deduplicated_events, 1):
-        title = f"{evt.action.value}: {evt.object_name_raw}"
-        primary_time = (
-            evt.actual_start
-            or evt.actual_end
-            or evt.planned_start
-            or evt.planned_end
-            or evt.extracted_at
-        )
-        print(f"   {i}. {title[:60]}")
-        print(f"      Message ID: {evt.message_id[:8]}...")
-        print(f"      Date: {primary_time.isoformat()}")
-        print(f"      Channels: {evt.source_channels}")
-        print(f"      Importance: {evt.importance}")
-        print("")
-    sys.stdout.flush()
-
     # Validate events after deduplication
     if deduplicated_events:
-        print("   🔍 Validating events after deduplication...")
-        sys.stdout.flush()
-
         validated_events: list[Event] = []
-        validation_issues: list[str] = []
 
         for event in deduplicated_events:
             issues = _EVENT_VALIDATOR.validate_all(event)
 
             if issues:
-                # Log validation issues but don't fail deduplication
-                validation_issues.extend(
-                    [f"Event {event.object_name_raw}: {issue}" for issue in issues]
+                logger.warning(
+                    "deduplication_validation_issue",
+                    message_id=event.message_id,
+                    issues=issues,
                 )
-                print(f"   ⚠️  Validation issues for {event.object_name_raw}: {issues}")
-                sys.stdout.flush()
 
             # Include event even with validation warnings
             validated_events.append(event)
@@ -171,12 +124,17 @@ def deduplicate_events_use_case(
         # Save validated events (they will be upserted)
         repository.save_events(validated_events)
 
-        if validation_issues:
-            print(f"   📊 Validation summary: {len(validation_issues)} issues found")
-            sys.stdout.flush()
-
-    return DeduplicationResult(
+    result = DeduplicationResult(
         new_events=final_count,
         merged_events=merged_count,
         total_events=final_count,
     )
+
+    logger.info(
+        "deduplication_finished",
+        new_events=result.new_events,
+        merged_events=result.merged_events,
+        total_events=result.total_events,
+    )
+
+    return result

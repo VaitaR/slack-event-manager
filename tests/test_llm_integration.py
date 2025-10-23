@@ -10,7 +10,16 @@ import pytest
 import pytz
 
 from src.domain.models import EventCategory, LLMEvent
+from src.domain.validation_constants import (
+    MAX_IMPACT_AREAS,
+    MAX_LINKS,
+    MAX_QUALIFIERS,
+)
 from src.use_cases.extract_events import convert_llm_event_to_domain
+
+hypothesis = pytest.importorskip("hypothesis")
+given = hypothesis.given
+st = hypothesis.strategies
 
 
 @pytest.fixture(autouse=True)
@@ -150,6 +159,44 @@ def test_convert_llm_event_time_parsing(mock_llm_event: LLMEvent) -> None:
     assert result.actual_start.year == 2025
     assert result.actual_start.month == 10
     assert result.actual_start.day == 20
+
+
+@given(
+    qualifiers=st.lists(st.text(min_size=1, max_size=10), max_size=6),
+    links=st.lists(st.text(min_size=5, max_size=30), max_size=6),
+    impact_areas=st.lists(st.text(min_size=1, max_size=20), max_size=6),
+)
+def test_convert_llm_event_respects_domain_limits(
+    mock_llm_event: LLMEvent,
+    qualifiers: list[str],
+    links: list[str],
+    impact_areas: list[str],
+) -> None:
+    """Conversion should respect domain-configured limits."""
+
+    llm_event = mock_llm_event.model_copy(
+        update={
+            "qualifiers": qualifiers,
+            "links": links,
+            "impact_area": impact_areas,
+        }
+    )
+
+    result = convert_llm_event_to_domain(
+        llm_event=llm_event,
+        message_id="msg",
+        message_ts_dt=datetime(2025, 10, 20, 8, 0, tzinfo=pytz.UTC),
+        channel_name="releases",
+    )
+
+    assert len(result.qualifiers) <= MAX_QUALIFIERS
+    assert result.qualifiers == llm_event.qualifiers[:MAX_QUALIFIERS]
+
+    assert len(result.links) <= MAX_LINKS
+    assert result.links == llm_event.links[:MAX_LINKS]
+
+    assert len(result.impact_area) <= MAX_IMPACT_AREAS
+    assert result.impact_area == llm_event.impact_area[:MAX_IMPACT_AREAS]
 
 
 def test_convert_llm_event_enum_parsing(mock_llm_event: LLMEvent) -> None:
