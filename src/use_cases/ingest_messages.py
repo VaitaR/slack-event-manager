@@ -19,6 +19,14 @@ from src.services import link_extractor, text_normalizer
 logger = get_logger(__name__)
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware in UTC."""
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=pytz.UTC)
+    return dt.astimezone(pytz.UTC)
+
+
 def generate_message_id(channel: str, ts: str) -> str:
     """Generate deterministic message ID.
 
@@ -200,6 +208,9 @@ def ingest_messages_use_case(
     if lookback_hours is None:
         lookback_hours = settings.lookback_hours_default
 
+    if lookback_hours < 0:
+        raise ValueError("lookback_hours must be non-negative")
+
     total_fetched = 0
     total_saved = 0
     channels_processed: list[str] = []
@@ -207,9 +218,6 @@ def ingest_messages_use_case(
 
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
     now_ts = now.timestamp()
-
-    # Default backfill window: 30 days
-    default_backfill_days = 30
 
     for channel_config in settings.slack_channels:
         channel_id = channel_config.channel_id
@@ -220,31 +228,45 @@ def ingest_messages_use_case(
 
             if last_ts is not None:
                 # Incremental: use last processed timestamp
-                oldest_ts = str(last_ts)
+                oldest_dt = datetime.fromtimestamp(last_ts, tz=pytz.UTC)
+                oldest_ts = str(oldest_dt.timestamp())
                 logger.info(
                     "slack_ingestion_incremental",
                     channel_id=channel_id,
                     oldest_ts=oldest_ts,
                     strategy="incremental",
                 )
-            elif backfill_from_date:
-                # First run with explicit backfill date
-                oldest_ts = str(backfill_from_date.timestamp())
-                logger.info(
-                    "slack_ingestion_backfill",
-                    channel_id=channel_id,
-                    backfill_date=backfill_from_date.isoformat(),
-                    strategy="explicit_backfill",
-                )
             else:
-                # First run: default 30 days
-                oldest_dt = now - timedelta(days=default_backfill_days)
+                lookback_dt = now - timedelta(hours=lookback_hours)
+                candidates: list[tuple[datetime, dict[str, object]]] = [
+                    (
+                        lookback_dt,
+                        {"strategy": "lookback", "lookback_hours": lookback_hours},
+                    )
+                ]
+
+                if backfill_from_date:
+                    backfill_dt = _ensure_utc(backfill_from_date)
+                    candidates.append(
+                        (
+                            backfill_dt,
+                            {
+                                "strategy": "explicit_backfill",
+                                "backfill_date": backfill_dt.isoformat(),
+                                "lookback_hours": lookback_hours,
+                            },
+                        )
+                    )
+
+                oldest_dt, log_context = min(candidates, key=lambda item: item[0])
                 oldest_ts = str(oldest_dt.timestamp())
                 logger.info(
-                    "slack_ingestion_first_run",
+                    "slack_ingestion_first_run"
+                    if log_context["strategy"] == "lookback"
+                    else "slack_ingestion_backfill",
                     channel_id=channel_id,
-                    backfill_days=default_backfill_days,
-                    strategy="default_backfill",
+                    oldest_ts=oldest_ts,
+                    **log_context,
                 )
 
             # Fetch messages from Slack
