@@ -8,6 +8,7 @@ from structlog.testing import capture_logs
 
 from src.config.settings import Settings
 from src.domain.models import Event, MessageSource
+from src.services.deduplicator import generate_dedup_key
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
 
 
@@ -199,6 +200,41 @@ def test_deduplicate_events_invariant_verification() -> None:
 
     initial_count = 2
     assert result.new_events + result.merged_events == initial_count
+
+
+def test_deduplicate_events_regenerates_dedup_keys() -> None:
+    """Merged events must persist refreshed dedup keys."""
+
+    later_time = datetime(2025, 10, 16, 12, 0, tzinfo=pytz.UTC)
+    earlier_time = datetime(2025, 10, 15, 12, 0, tzinfo=pytz.UTC)
+
+    event1 = create_test_event(
+        message_id="m1",
+        object_name="Release",
+        links=["https://example.com/release"],
+    ).model_copy(update={"actual_start": None, "planned_start": later_time})
+
+    event1 = event1.model_copy(update={"dedup_key": generate_dedup_key(event1)})
+
+    event2 = create_test_event(
+        message_id="m2",
+        object_name="Release",
+        links=["https://example.com/release"],
+    ).model_copy(update={"actual_start": earlier_time})
+
+    event2 = event2.model_copy(update={"dedup_key": generate_dedup_key(event2)})
+
+    repository = Mock()
+    repository.query_events.return_value = [event1, event2]
+    repository.save_events = Mock()
+
+    settings = create_mock_settings()
+    deduplicate_events_use_case(repository, settings)
+
+    saved_events = repository.save_events.call_args[0][0]
+    assert saved_events
+    assert saved_events[0].actual_start == earlier_time
+    assert saved_events[0].dedup_key == generate_dedup_key(saved_events[0])
 
     # Test case 3: Partial merges
     event5 = create_test_event("msg5", "Feature", ["https://feature.com"])

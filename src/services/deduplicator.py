@@ -281,6 +281,10 @@ def merge_events(event1: Event, event2: Event) -> Event:
         relations=event1.relations,  # Keep event1's relations
     )
 
+    refreshed_key = generate_dedup_key(merged)
+    if refreshed_key != merged.dedup_key:
+        merged = merged.model_copy(update={"dedup_key": refreshed_key})
+
     return merged
 
 

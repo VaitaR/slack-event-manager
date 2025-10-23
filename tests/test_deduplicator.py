@@ -119,6 +119,45 @@ def test_should_merge_events_date_too_far() -> None:
     )
 
 
+def test_merge_events_refreshes_dedup_key() -> None:
+    """Merged events must have dedup_key recomputed after time updates."""
+
+    later_time = datetime(2025, 10, 20, 10, 0, tzinfo=pytz.UTC)
+    earlier_time = datetime(2025, 10, 19, 9, 0, tzinfo=pytz.UTC)
+
+    event1 = create_test_event(
+        message_id="msg-target",
+        object_name="Release v1.0",
+        dedup_key="temp",
+        planned_start=later_time,
+        actual_start=None,
+        links=["https://example.com"],
+        anchors=["PROJ-1"],
+    ).model_copy(update={"actual_start": None, "planned_start": later_time})
+
+    event1 = event1.model_copy(
+        update={"dedup_key": deduplicator.generate_dedup_key(event1)}
+    )
+
+    event2 = create_test_event(
+        message_id="msg-new",
+        object_name="Release v1.0",
+        dedup_key="temp2",
+        actual_start=earlier_time,
+        links=["https://example.com"],
+        anchors=["PROJ-1"],
+    )
+
+    event2 = event2.model_copy(
+        update={"dedup_key": deduplicator.generate_dedup_key(event2)}
+    )
+
+    merged = deduplicator.merge_events(event1, event2)
+
+    assert merged.actual_start == earlier_time
+    assert merged.dedup_key == deduplicator.generate_dedup_key(merged)
+
+
 def test_should_merge_events_with_link_overlap() -> None:
     """Test merge with link overlap."""
     event1 = create_test_event(

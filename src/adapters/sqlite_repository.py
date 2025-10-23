@@ -17,6 +17,7 @@ from src.adapters.query_builders import (
     EventQueryCriteria,
 )
 from src.config.logging_config import get_logger
+from src.domain.candidate_constants import CANDIDATE_LEASE_TIMEOUT
 from src.domain.exceptions import RepositoryError
 from src.domain.models import (
     CandidateStatus,
@@ -138,9 +139,32 @@ class SQLiteRepository:
                 score REAL,
                 status TEXT CHECK(status IN ('new', 'processing', 'llm_ok', 'llm_fail')),
                 features_json TEXT,
-                source_id TEXT DEFAULT 'slack'
+                source_id TEXT DEFAULT 'slack',
+                processing_started_at TEXT,
+                lease_attempts INTEGER DEFAULT 0
             )
         """
+        )
+
+        # Backfill new lease tracking columns for existing databases
+        try:
+            cursor.execute(
+                "ALTER TABLE event_candidates ADD COLUMN processing_started_at TEXT"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+        try:
+            cursor.execute(
+                "ALTER TABLE event_candidates ADD COLUMN lease_attempts INTEGER DEFAULT 0"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+        cursor.execute(
+            "UPDATE event_candidates SET lease_attempts = 0 WHERE lease_attempts IS NULL"
         )
 
         # Events table (new structure with title slots)
@@ -681,8 +705,9 @@ class SQLiteRepository:
                     """
                     INSERT OR REPLACE INTO event_candidates (
                         message_id, channel, ts_dt, text_norm, links_norm,
-                        anchors, score, status, features_json, source_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        anchors, score, status, features_json, source_id,
+                        processing_started_at, lease_attempts
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         candidate.message_id,
@@ -695,6 +720,10 @@ class SQLiteRepository:
                         candidate.status.value,
                         candidate.features.model_dump_json(),
                         candidate.source_id.value,
+                        candidate.processing_started_at.isoformat()
+                        if candidate.processing_started_at
+                        else None,
+                        candidate.lease_attempts,
                     ),
                 )
 
@@ -727,6 +756,24 @@ class SQLiteRepository:
             cursor = conn.cursor()
 
             cursor.execute("BEGIN IMMEDIATE")
+
+            now = datetime.now(tz=pytz.UTC)
+            stale_before = (now - CANDIDATE_LEASE_TIMEOUT).isoformat()
+
+            cursor.execute(
+                """
+                UPDATE event_candidates
+                SET status = ?, processing_started_at = NULL
+                WHERE status = ? AND (
+                    processing_started_at IS NULL OR processing_started_at < ?
+                )
+                """,
+                (
+                    CandidateStatus.NEW.value,
+                    CandidateStatus.PROCESSING.value,
+                    stale_before,
+                ),
+            )
 
             where_conditions = ["status = 'new'"]
             params: list[Any] = []
@@ -762,10 +809,11 @@ class SQLiteRepository:
             cursor.execute(
                 f"""
                 UPDATE event_candidates
-                SET status = ?
+                SET status = ?, processing_started_at = ?,
+                    lease_attempts = COALESCE(lease_attempts, 0) + 1
                 WHERE message_id IN ({placeholders})
                 """,
-                [CandidateStatus.PROCESSING.value, *message_ids],
+                [CandidateStatus.PROCESSING.value, now.isoformat(), *message_ids],
             )
 
             conn.commit()
@@ -773,7 +821,11 @@ class SQLiteRepository:
 
             return [
                 self._row_to_candidate(row).model_copy(
-                    update={"status": CandidateStatus.PROCESSING}
+                    update={
+                        "status": CandidateStatus.PROCESSING,
+                        "processing_started_at": now,
+                        "lease_attempts": (row["lease_attempts"] or 0) + 1,
+                    }
                 )
                 for row in rows
             ]
@@ -861,10 +913,25 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(
-                "UPDATE event_candidates SET status = ? WHERE message_id = ?",
-                (status, message_id),
-            )
+            if status == CandidateStatus.PROCESSING.value:
+                cursor.execute(
+                    """
+                    UPDATE event_candidates
+                    SET status = ?, processing_started_at = ?,
+                        lease_attempts = COALESCE(lease_attempts, 0) + 1
+                    WHERE message_id = ?
+                    """,
+                    (status, datetime.now(tz=pytz.UTC).isoformat(), message_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE event_candidates
+                    SET status = ?, processing_started_at = NULL
+                    WHERE message_id = ?
+                    """,
+                    (status, message_id),
+                )
 
             conn.commit()
             conn.close()
@@ -1424,6 +1491,18 @@ class SQLiteRepository:
             status=CandidateStatus(row["status"]),
             features=ScoringFeatures.model_validate_json(row["features_json"]),
             source_id=source_id,
+            lease_attempts=int(row["lease_attempts"] or 0)
+            if "lease_attempts" in row.keys()
+            else 0,
+            processing_started_at=(
+                datetime.fromisoformat(row["processing_started_at"]).replace(
+                    tzinfo=pytz.UTC
+                )
+                if row["processing_started_at"]
+                else None
+            )
+            if "processing_started_at" in row.keys()
+            else None,
         )
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
