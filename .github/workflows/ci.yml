@@ -69,6 +69,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -92,7 +93,7 @@ jobs:
           SLACK_BOT_TOKEN: dummy
           OPENAI_API_KEY: dummy
         run: |
-          python -m pytest --cov=src --cov-report=term-missing --cov-report=html
+          python -m pytest --cov=src --cov-report=term-missing --cov-report=html --timeout=30
 
       - name: Upload coverage HTML report
         if: always()
