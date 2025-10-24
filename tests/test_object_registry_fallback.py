@@ -36,16 +36,11 @@ def test_object_registry_initializes_empty_when_file_missing(
     assert registry.canonicalize_object("any system") is None
 
 
-def test_get_object_registry_uses_empty_registry_when_file_missing(
-    dummy_settings: _DummySettings, monkeypatch: pytest.MonkeyPatch
+def test_build_object_registry_handles_missing_file(
+    dummy_settings: _DummySettings,
 ) -> None:
-    """_get_object_registry should fallback to an empty registry when file is missing."""
+    """build_object_registry should fallback when file is missing."""
 
-    monkeypatch.setattr(extract_events_module, "_object_registry", None)
-    monkeypatch.setattr(
-        "src.config.settings.get_settings", lambda: dummy_settings, raising=False
-    )
-
-    registry = extract_events_module._get_object_registry()
+    registry = extract_events_module.build_object_registry(dummy_settings)  # type: ignore[arg-type]
 
     assert registry.canonicalize_object("unknown system") is None

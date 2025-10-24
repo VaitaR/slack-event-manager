@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Final, Protocol, cast
 from uuid import uuid4
 
 from src.adapters.llm_client import LLMClient
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
+from src.clients.slack_wrapped import SlackClient as WrappedSlackClient
 from src.config.logging_config import get_logger
 from src.config.settings import Settings, get_settings
 from src.domain.models import (
@@ -18,11 +19,13 @@ from src.domain.models import (
     IngestResult,
     MessageSource,
 )
-from src.domain.protocols import RepositoryProtocol
+from src.domain.protocols import RepositoryProtocol, SlackClientProtocol
 from src.observability.tracing import correlation_scope
+from src.services.importance_scorer import ImportanceScorer
+from src.services.object_registry import ObjectRegistry
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import build_object_registry, extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
 
 logger = get_logger(__name__)
@@ -62,8 +65,10 @@ class PipelineDependencies:
 
     settings: Settings
     repository: RepositoryProtocol
-    slack_client: SlackClient
+    slack_client: SlackClientProtocol
     llm_client: LLMClient
+    object_registry: ObjectRegistry
+    importance_scorer: ImportanceScorer
 
     @classmethod
     def from_environment(cls, params: PipelineParams) -> PipelineDependencies:
@@ -99,12 +104,16 @@ class PipelineDependencies:
             verbose=False,
         )
         repository = create_repository(effective_settings)
+        object_registry = build_object_registry(effective_settings)
+        importance_scorer = ImportanceScorer()
 
         return cls(
             settings=effective_settings,
             repository=repository,
             slack_client=slack_client,
             llm_client=llm_client,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
 
 
@@ -136,7 +145,7 @@ def run_ingest_and_extract_pipeline(
 
         reporter.update(progress=0.05, message="Starting ingestion")
         ingest_result = ingest_messages_use_case(
-            slack_client=deps.slack_client,
+            slack_client=cast(WrappedSlackClient, deps.slack_client),
             repository=deps.repository,
             settings=deps.settings,
             correlation_id=correlation_id,
@@ -156,6 +165,8 @@ def run_ingest_and_extract_pipeline(
             source_id=MessageSource.SLACK,
             batch_size=None,
             check_budget=False,
+            object_registry=deps.object_registry,
+            importance_scorer=deps.importance_scorer,
             correlation_id=correlation_id,
         )
 

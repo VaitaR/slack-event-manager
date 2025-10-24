@@ -21,9 +21,10 @@ from src.adapters.slack_client import SlackClient
 from src.config.settings import Settings, get_settings
 from src.domain.models import MessageSource
 from src.domain.protocols import RepositoryProtocol
+from src.services.importance_scorer import ImportanceScorer
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import build_object_registry, extract_events_use_case
 from src.use_cases.ingest_messages import process_slack_message
 
 
@@ -53,6 +54,8 @@ def main() -> bool:
             update={"db_path": temp_db.name, "database_type": "sqlite"}
         )
         repository = create_repository(temp_settings)
+        object_registry = build_object_registry(settings)
+        importance_scorer = ImportanceScorer()
         log("✅ Components initialized")
         log("")
 
@@ -110,6 +113,8 @@ def main() -> bool:
             source_id=MessageSource.SLACK,  # Minimal test - Slack only
             batch_size=10,
             check_budget=False,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
         log(f"✅ Extracted {extraction_result.events_extracted} events")
         log(f"   LLM calls: {extraction_result.llm_calls}")

@@ -23,8 +23,9 @@ from src.domain.models import (
     TelegramMessage,
 )
 from src.domain.protocols import RepositoryProtocol
+from src.services.importance_scorer import ImportanceScorer
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import build_object_registry, extract_events_use_case
 
 DATABASE_BACKENDS = [
     "sqlite",
@@ -47,6 +48,7 @@ def mock_settings() -> object:
                 keyword_weight=1.0,
                 whitelist_keywords=[],
             )
+            self.object_registry_path = "config/defaults/object_registry.example.yaml"
 
         def get_channel_config(self, channel_id: str) -> ChannelConfig | None:
             """Mock get_channel_config method."""
@@ -476,6 +478,9 @@ def test_telegram_pipeline_early_return_fix(
 
     mock_llm = MockLLMClient()
 
+    object_registry = build_object_registry(settings)  # type: ignore[arg-type]
+    importance_scorer = ImportanceScorer()
+
     # This step was previously bypassed for Telegram sources!
     # The fact that we reach this line proves the early return is fixed
     extraction_result = extract_events_use_case(
@@ -484,6 +489,8 @@ def test_telegram_pipeline_early_return_fix(
         settings=settings,  # type: ignore
         source_id=MessageSource.TELEGRAM,  # Telegram pipeline test
         batch_size=10,
+        object_registry=object_registry,
+        importance_scorer=importance_scorer,
     )
 
     # Verify LLM extraction worked (proves we didn't return early)

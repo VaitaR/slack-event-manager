@@ -20,6 +20,7 @@ from openai import RateLimitError as OpenAIRateLimitError
 from src.config.logging_config import get_logger
 from src.domain.exceptions import LLMAPIError, ValidationError
 from src.domain.models import LLMCallMetadata, LLMResponse
+from src.services import token_budget
 
 logger = get_logger(__name__)
 
@@ -143,6 +144,7 @@ class LLMClient:
         verbose: bool = False,
         prompt_template: str | None = None,
         prompt_file: str | None = None,
+        prompt_budget: int | None = None,
     ) -> None:
         """Initialize LLM client.
 
@@ -154,11 +156,18 @@ class LLMClient:
             verbose: If True, log full prompts and responses
             prompt_template: Custom prompt template (optional)
             prompt_file: Path to prompt file (takes precedence over prompt_template)
+            prompt_budget: Optional override for prompt token budget
         """
         self.client = OpenAI(api_key=api_key, timeout=timeout)
         self.model = model
         self._verbose_requested = verbose
         self.verbose = verbose and self._is_verbose_allowed()
+
+        self.prompt_token_budget: int = (
+            prompt_budget
+            if prompt_budget is not None
+            else token_budget.prompt_budget_for_model(model)
+        )
 
         # Set optimal temperature based on model if not provided
         if temperature is None:
@@ -227,6 +236,8 @@ class LLMClient:
         links: list[str],
         message_ts_dt: datetime,
         channel_name: str = "",
+        *,
+        chunk_index: int | None = None,
     ) -> LLMResponse:
         """Extract events from message text using LLM.
 
@@ -245,8 +256,32 @@ class LLMClient:
         """
         start_time = time.time()
 
+        effective_text = text
+        char_budget = token_budget.characters_for_tokens(
+            self.prompt_token_budget, self.model
+        )
+        estimated_tokens = token_budget.estimate_tokens(effective_text, self.model)
+
+        if (
+            len(effective_text) > char_budget
+            or estimated_tokens > self.prompt_token_budget
+        ):
+            chunks = token_budget.truncate_or_chunk(effective_text, char_budget)
+            truncated_text = chunks[0] if chunks else effective_text
+            if truncated_text != effective_text:
+                logger.warning(
+                    "llm_prompt_truncated",
+                    model=self.model,
+                    chunk_index=chunk_index,
+                    original_tokens=estimated_tokens,
+                    budget_tokens=self.prompt_token_budget,
+                    original_chars=len(text),
+                    truncated_chars=len(truncated_text),
+                )
+            effective_text = truncated_text
+
         # Build prompt
-        prompt = self._build_prompt(text, links, message_ts_dt, channel_name)
+        prompt = self._build_prompt(effective_text, links, message_ts_dt, channel_name)
 
         # Log request details
         logger.info(
@@ -256,11 +291,13 @@ class LLMClient:
             prompt_length=len(prompt),
             system_prompt_length=len(self.system_prompt),
             channel=channel_name,
+            chunk_index=chunk_index,
         )
 
         if self.verbose:
             logger.debug(
                 "llm_request_verbose",
+                chunk_index=chunk_index,
                 **self._build_prompt_log_payload(prompt),
             )
 
@@ -323,11 +360,13 @@ class LLMClient:
                 events_count=len(llm_response.events) if llm_response.events else 0,
                 events=redacted_events[:5],
                 events_redacted=True,
+                chunk_index=chunk_index,
             )
 
             if self.verbose and content:
                 logger.debug(
                     "llm_response_verbose",
+                    chunk_index=chunk_index,
                     **self._build_response_log_payload(content),
                 )
 
@@ -416,6 +455,8 @@ class LLMClient:
         message_ts_dt: datetime,
         channel_name: str = "",
         max_retries: int = 3,
+        *,
+        chunk_index: int | None = None,
     ) -> LLMResponse:
         """Extract events with retry on failures (timeout, rate limit, validation).
 
@@ -425,6 +466,7 @@ class LLMClient:
             message_ts_dt: Message timestamp
             channel_name: Channel name
             max_retries: Maximum retry attempts (default: 3)
+            chunk_index: Optional chunk index for logging and caching
 
         Returns:
             LLM response
@@ -437,7 +479,13 @@ class LLMClient:
 
         for attempt in range(max_retries + 1):
             try:
-                return self.extract_events(text, links, message_ts_dt, channel_name)
+                return self.extract_events(
+                    text,
+                    links,
+                    message_ts_dt,
+                    channel_name,
+                    chunk_index=chunk_index,
+                )
             except (ValidationError, LLMAPIError) as e:
                 last_error = e
                 error_msg = str(e)

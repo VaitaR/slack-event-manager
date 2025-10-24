@@ -26,8 +26,9 @@ from src.adapters.slack_client import SlackClient
 from src.config.settings import Settings, get_settings
 from src.domain.models import EventCategory, LLMEvent, LLMResponse, MessageSource
 from src.domain.protocols import RepositoryProtocol
+from src.services.importance_scorer import ImportanceScorer
 from src.use_cases.build_candidates import build_candidates_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import build_object_registry, extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
 
 # Mock messages for demo when no real Slack access
@@ -367,6 +368,8 @@ def run_e2e_demo(
             update={"db_path": temp_db.name, "database_type": "sqlite"}
         )
         repository = create_repository(temp_settings)
+        object_registry = build_object_registry(settings)
+        importance_scorer = ImportanceScorer()
         print("✅ Components initialized")
 
         # For real Slack demo, we'll fetch real messages instead of mock data
@@ -459,6 +462,8 @@ def run_e2e_demo(
             source_id=MessageSource.SLACK,  # Demo script - Slack only
             batch_size=50,
             check_budget=False,  # Disable budget check for demo
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
 
         print(f"✅ Candidates processed: {extraction_result.candidates_processed}")

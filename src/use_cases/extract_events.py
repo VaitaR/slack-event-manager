@@ -26,6 +26,7 @@ from src.domain.models import (
     EventStatus,
     ExtractionResult,
     LLMCallMetadata,
+    LLMEvent,
     LLMResponse,
     MessageSource,
     Severity,
@@ -39,53 +40,31 @@ from src.domain.validation_constants import (
 )
 from src.observability.metrics import PIPELINE_STAGE_DURATION_SECONDS
 from src.observability.tracing import correlation_scope
-from src.services import deduplicator
+from src.services import deduplicator, token_budget
 from src.services.importance_scorer import ImportanceScorer
 from src.services.object_registry import ObjectRegistry
 from src.services.validators import EventValidator
 
 logger = get_logger(__name__)
 
-# Initialize services (singleton-style)
-_object_registry: ObjectRegistry | None = None
-_importance_scorer: ImportanceScorer | None = None
 _event_validator: EventValidator | None = None
 
 
-def _get_object_registry() -> ObjectRegistry:
-    """Get or create ObjectRegistry instance."""
-    global _object_registry
-    if _object_registry is None:
-        from src.config.settings import get_settings
+def build_object_registry(settings: Settings) -> ObjectRegistry:
+    """Build an object registry using application settings."""
 
-        settings = get_settings()
-        registry_path = Path(settings.object_registry_path)
+    registry_path = Path(settings.object_registry_path)
 
-        if not registry_path.exists():
-            # Graceful fallback if file doesn't exist
-            logger.warning(
-                "object_registry_missing",
-                path=str(registry_path),
-            )
-            # Try fallback to example file
-            fallback_path = Path("config/defaults/object_registry.example.yaml")
-            if fallback_path.exists():
-                registry_path = fallback_path
-                logger.info("object_registry_fallback", path=str(fallback_path))
-            else:
-                # Create minimal empty registry
-                logger.warning("object_registry_unavailable")
+    if not registry_path.exists():
+        logger.warning("object_registry_missing", path=str(registry_path))
+        fallback_path = Path("config/defaults/object_registry.example.yaml")
+        if fallback_path.exists():
+            registry_path = fallback_path
+            logger.info("object_registry_fallback", path=str(fallback_path))
+        else:
+            logger.warning("object_registry_unavailable")
 
-        _object_registry = ObjectRegistry(registry_path)
-    return _object_registry
-
-
-def _get_importance_scorer() -> ImportanceScorer:
-    """Get or create ImportanceScorer instance."""
-    global _importance_scorer
-    if _importance_scorer is None:
-        _importance_scorer = ImportanceScorer()
-    return _importance_scorer
+    return ObjectRegistry(registry_path)
 
 
 def _get_event_validator() -> EventValidator:
@@ -121,33 +100,42 @@ def _normalize_to_utc(dt: datetime) -> datetime:
 
 def _compute_prompt_hash(
     llm_client: LLMClient,
-    text: str,
+    chunk_text: str,
     links: list[str],
     message_ts_dt: datetime,
     channel_name: str,
+    chunk_index: int,
 ) -> str:
     """Compute deterministic prompt hash for caching."""
 
     payload = {
-        "system_hash": str(llm_client.system_prompt_hash),
-        "model": str(llm_client.model),
-        "text": text,
+        "text": chunk_text,
         "links": links,
         "ts": _normalize_to_utc(message_ts_dt).isoformat(),
         "channel": channel_name,
     }
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    normalized_content_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    template_version = llm_client.prompt_version or "inline"
+    hash_input = "|".join(
+        [
+            llm_client.model,
+            template_version,
+            str(chunk_index),
+            normalized_content_hash,
+        ]
+    )
+    return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
 
 def convert_llm_event_to_domain(
     llm_event: Any,
+    *,
     message_id: str,
     message_ts_dt: datetime,
     channel_name: str,
     source_id: MessageSource,
-    reaction_count: int = 0,
-    mention_count: int = 0,
+    object_registry: ObjectRegistry,
 ) -> Event:
     """Convert LLM event to domain Event model with new comprehensive structure.
 
@@ -159,16 +147,11 @@ def convert_llm_event_to_domain(
         message_ts_dt: Message timestamp for date fallback
         channel_name: Channel name
         source_id: Source identifier for provenance
-        reaction_count: Reaction count from message (for importance)
-        mention_count: Mention count from message (for importance)
+        object_registry: Registry for canonicalizing object names
 
     Returns:
         Domain Event object with all new fields
     """
-    # Get services
-    object_registry = _get_object_registry()
-    importance_scorer = _get_importance_scorer()
-
     # Parse all time fields
     planned_start = _parse_datetime(llm_event.planned_start, None)
     planned_end = _parse_datetime(llm_event.planned_end, None)
@@ -257,16 +240,6 @@ def convert_llm_event_to_domain(
     event.cluster_key = deduplicator.generate_cluster_key(event)
     event.dedup_key = deduplicator.generate_dedup_key(event)
 
-    # Calculate importance score
-    importance_result = importance_scorer.calculate_importance(
-        event,
-        llm_score=None,  # TODO: Add LLM importance scoring if needed
-        reaction_count=reaction_count,
-        mention_count=mention_count,
-        is_duplicate=False,
-    )
-    event.importance = importance_result.final_score
-
     return event
 
 
@@ -278,6 +251,9 @@ def extract_events_use_case(
     batch_size: int | None = 50,
     check_budget: bool = True,
     *,
+    object_registry: ObjectRegistry,
+    importance_scorer: ImportanceScorer,
+    event_validator: EventValidator | None = None,
     correlation_id: str | None = None,
 ) -> ExtractionResult:
     """Extract events from candidates using LLM.
@@ -307,7 +283,15 @@ def extract_events_use_case(
         ExtractionResult with counts and cost
 
     Example:
-        >>> result = extract_events_use_case(llm, repo, settings)
+        >>> registry = build_object_registry(settings)
+        >>> scorer = ImportanceScorer()
+        >>> result = extract_events_use_case(
+        ...     llm,
+        ...     repo,
+        ...     settings,
+        ...     object_registry=registry,
+        ...     importance_scorer=scorer,
+        ... )
         >>> result.events_extracted
         45
     """
@@ -386,6 +370,7 @@ def extract_events_use_case(
             cache_hits = 0
             total_cost = 0.0
             errors: list[str] = []
+            validator = event_validator or _get_event_validator()
 
             for candidate in candidates:
                 candidates_processed += 1
@@ -409,88 +394,117 @@ def extract_events_use_case(
 
                 try:
                     limited_links = candidate.links_norm[:MAX_LINKS]
-                    prompt_hash = _compute_prompt_hash(
-                        llm_client=llm_client,
-                        text=candidate.text_norm,
-                        links=limited_links,
-                        message_ts_dt=candidate.ts_dt,
-                        channel_name=channel_name,
+                    char_budget = token_budget.characters_for_tokens(
+                        llm_client.prompt_token_budget,
+                        llm_client.model,
+                    )
+                    text_chunks = token_budget.truncate_or_chunk(
+                        candidate.text_norm, char_budget
                     )
 
-                    llm_response: LLMResponse | None = None
-                    cached_payload = repository.get_cached_llm_response(prompt_hash)
-                    if isinstance(cached_payload, str) and cached_payload:
-                        try:
-                            llm_response = LLMResponse.model_validate_json(
-                                cached_payload
-                            )
-                        except Exception as exc:  # noqa: BLE001 - surface parsing issues
-                            logger.warning(
-                                "llm_cache_deserialization_failed",
-                                prompt_hash=prompt_hash,
-                                error=str(exc),
-                            )
-                        else:
-                            cache_hits += 1
-                            logger.info(
-                                "llm_cache_hit",
-                                message_id=candidate.message_id[:8],
-                                prompt_hash=prompt_hash[:12],
-                                events_count=len(llm_response.events)
-                                if llm_response.events
-                                else 0,
-                            )
-                            repository.save_llm_call(
-                                LLMCallMetadata(
-                                    message_id=candidate.message_id,
-                                    prompt_hash=prompt_hash,
-                                    model=llm_client.model,
-                                    tokens_in=0,
-                                    tokens_out=0,
-                                    cost_usd=0.0,
-                                    latency_ms=0,
-                                    cached=True,
-                                )
-                            )
-
-                    if llm_response is None:
-                        logger.debug(
-                            "calling_llm_api",
+                    if len(text_chunks) > 1:
+                        logger.info(
+                            "llm_candidate_chunked",
                             message_id=candidate.message_id[:8],
-                            text_length=len(candidate.text_norm),
-                            links_count=len(limited_links),
+                            chunk_count=len(text_chunks),
+                            channel=channel_name,
                         )
 
-                        llm_response = llm_client.extract_events_with_retry(
-                            text=candidate.text_norm,
+                    chunk_events: list[LLMEvent] = []
+                    chunk_is_event = False
+
+                    for chunk_index, chunk_text in enumerate(text_chunks):
+                        prompt_hash = _compute_prompt_hash(
+                            llm_client=llm_client,
+                            chunk_text=chunk_text,
                             links=limited_links,
                             message_ts_dt=candidate.ts_dt,
                             channel_name=channel_name,
+                            chunk_index=chunk_index,
                         )
 
-                        logger.info(
-                            "llm_response_received",
-                            message_id=candidate.message_id[:8],
-                            is_event=llm_response.is_event,
-                            events_count=len(llm_response.events)
-                            if llm_response.events
-                            else 0,
-                        )
+                        llm_response: LLMResponse | None = None
+                        cached_payload = repository.get_cached_llm_response(prompt_hash)
+                        if isinstance(cached_payload, str) and cached_payload:
+                            try:
+                                llm_response = LLMResponse.model_validate_json(
+                                    cached_payload
+                                )
+                            except Exception as exc:  # noqa: BLE001 - surface parsing issues
+                                logger.warning(
+                                    "llm_cache_deserialization_failed",
+                                    prompt_hash=prompt_hash,
+                                    error=str(exc),
+                                )
+                            else:
+                                cache_hits += 1
+                                logger.info(
+                                    "llm_cache_hit",
+                                    message_id=candidate.message_id[:8],
+                                    prompt_hash=prompt_hash[:12],
+                                    chunk_index=chunk_index,
+                                    events_count=len(llm_response.events)
+                                    if llm_response.events
+                                    else 0,
+                                )
+                                repository.save_llm_call(
+                                    LLMCallMetadata(
+                                        message_id=candidate.message_id,
+                                        prompt_hash=prompt_hash,
+                                        model=llm_client.model,
+                                        tokens_in=0,
+                                        tokens_out=0,
+                                        cost_usd=0.0,
+                                        latency_ms=0,
+                                        cached=True,
+                                    )
+                                )
 
-                        llm_calls += 1
+                        if llm_response is None:
+                            logger.debug(
+                                "calling_llm_api",
+                                message_id=candidate.message_id[:8],
+                                text_length=len(chunk_text),
+                                links_count=len(limited_links),
+                                chunk_index=chunk_index,
+                            )
 
-                        call_metadata = llm_client.get_call_metadata()
-                        call_metadata.message_id = candidate.message_id
-                        call_metadata.prompt_hash = prompt_hash
-                        call_metadata.cached = False
-                        total_cost += call_metadata.cost_usd
+                            llm_response = llm_client.extract_events_with_retry(
+                                text=chunk_text,
+                                links=limited_links,
+                                message_ts_dt=candidate.ts_dt,
+                                channel_name=channel_name,
+                                chunk_index=chunk_index,
+                            )
 
-                        repository.save_llm_call(call_metadata)
-                        repository.save_llm_response(
-                            prompt_hash, llm_response.model_dump_json()
-                        )
+                            logger.info(
+                                "llm_response_received",
+                                message_id=candidate.message_id[:8],
+                                is_event=llm_response.is_event,
+                                events_count=len(llm_response.events)
+                                if llm_response.events
+                                else 0,
+                                chunk_index=chunk_index,
+                            )
 
-                    events_source = llm_response.events if llm_response.events else []
+                            llm_calls += 1
+
+                            call_metadata = llm_client.get_call_metadata()
+                            call_metadata.message_id = candidate.message_id
+                            call_metadata.prompt_hash = prompt_hash
+                            call_metadata.cached = False
+                            total_cost += call_metadata.cost_usd
+
+                            repository.save_llm_call(call_metadata)
+                            repository.save_llm_response(
+                                prompt_hash, llm_response.model_dump_json()
+                            )
+
+                        if llm_response.events:
+                            chunk_events.extend(llm_response.events)
+                        chunk_is_event = chunk_is_event or llm_response.is_event
+
+                    events_source = chunk_events
                     max_events_raw = getattr(settings, "llm_max_events_per_msg", 5)
                     try:
                         max_events = (
@@ -512,27 +526,23 @@ def extract_events_use_case(
                             max_events=max_events,
                         )
 
-                    if llm_response.is_event and llm_events:
+                    if chunk_is_event and llm_events:
                         events_to_save: list[Event] = []
                         validation_errors: list[str] = []
 
                         reaction_count = candidate.features.reaction_count
                         mention_count = 1 if candidate.features.has_mention else 0
 
-                        validator = _get_event_validator()
-
                         for llm_event in llm_events:
                             domain_event = convert_llm_event_to_domain(
                                 llm_event,
-                                candidate.message_id,
-                                candidate.ts_dt,
-                                channel_name,
-                                candidate_source,
-                                reaction_count=reaction_count,
-                                mention_count=mention_count,
+                                message_id=candidate.message_id,
+                                message_ts_dt=candidate.ts_dt,
+                                channel_name=channel_name,
+                                source_id=candidate_source,
+                                object_registry=object_registry,
                             )
 
-                            importance_scorer = _get_importance_scorer()
                             importance_result = importance_scorer.calculate_importance(
                                 domain_event,
                                 llm_score=None,
