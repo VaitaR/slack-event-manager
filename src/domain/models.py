@@ -3,18 +3,20 @@
 All models use Pydantic v2 for validation and serialization.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.domain.validation_constants import (
-    MAX_IMPACT_AREAS,
-    MAX_LINKS,
-    MAX_QUALIFIERS,
-)
+from src.domain.validation_constants import MAX_IMPACT_AREAS, MAX_LINKS, MAX_QUALIFIERS
+
+
+def _utcnow() -> datetime:
+    """Return current UTC time with timezone information."""
+
+    return datetime.now(tz=UTC)
 
 
 class MessageSource(str, Enum):
@@ -278,7 +280,7 @@ class SlackMessage(BaseModel):
     edited_ts: str | None = Field(default=None, description="Edit timestamp if edited")
     edited_user: str | None = Field(default=None, description="User who edited")
     ingested_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Ingestion timestamp"
+        default_factory=_utcnow, description="Ingestion timestamp"
     )
     source_id: MessageSource = Field(
         default=MessageSource.SLACK, description="Message source (always slack)"
@@ -320,7 +322,7 @@ class TelegramMessage(BaseModel):
     attachments_count: int = Field(default=0, description="Number of attachments")
     files_count: int = Field(default=0, description="Number of files")
     ingested_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Ingestion timestamp"
+        default_factory=_utcnow, description="Ingestion timestamp"
     )
     source_id: MessageSource = Field(
         default=MessageSource.TELEGRAM, description="Message source (always telegram)"
@@ -416,7 +418,7 @@ class Event(BaseModel):
         default_factory=list, description="Source channel names"
     )
     extracted_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Extraction timestamp"
+        default_factory=_utcnow, description="Extraction timestamp"
     )
 
     # 3.2 Title Slots (source of truth for title generation)
@@ -516,6 +518,29 @@ class Event(BaseModel):
         if len(v) > MAX_QUALIFIERS:
             raise ValueError(f"Maximum {MAX_QUALIFIERS} qualifiers allowed")
         return v
+
+    @field_validator("extracted_at", mode="before")
+    @classmethod
+    def ensure_extracted_at_timezone(cls, value: Any) -> datetime:
+        """Ensure extracted_at is always timezone-aware UTC."""
+
+        if isinstance(value, datetime):
+            return (
+                value.replace(tzinfo=UTC)
+                if value.tzinfo is None
+                else value.astimezone(UTC)
+            )
+
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return (
+                parsed.replace(tzinfo=UTC)
+                if parsed.tzinfo is None
+                else parsed.astimezone(UTC)
+            )
+
+        msg = "extracted_at must be a datetime or ISO8601 string"
+        raise ValueError(msg)
 
     @field_validator("impact_area")
     @classmethod
@@ -638,7 +663,7 @@ class LLMCallMetadata(BaseModel):
     cost_usd: float
     latency_ms: int
     cached: bool
-    ts: datetime = Field(default_factory=datetime.utcnow)
+    ts: datetime = Field(default_factory=_utcnow)
 
 
 class IngestResult(BaseModel):

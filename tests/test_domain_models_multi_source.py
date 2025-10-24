@@ -3,11 +3,10 @@
 Tests MessageSource enum, MessageRecord, TelegramMessage, and source_id tracking.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-import pytz
 
 from src.domain.models import (
     ActionType,
@@ -54,7 +53,7 @@ class TestSlackMessage:
             message_id="test123",
             channel="C123",
             ts="1234567890.123456",
-            ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
+            ts_dt=datetime.now(tz=UTC),
             text="Test message",
         )
         assert msg.message_id == "test123"
@@ -66,7 +65,7 @@ class TestSlackMessage:
             message_id="test123",
             channel="C123",
             ts="1234567890.123456",
-            ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
+            ts_dt=datetime.now(tz=UTC),
             text="Test message",
             source_id=MessageSource.SLACK,
         )
@@ -81,7 +80,7 @@ class TestTelegramMessage:
         msg = TelegramMessage(
             message_id="tg_123",
             channel="@test_channel",
-            message_date=datetime.utcnow().replace(tzinfo=pytz.UTC),
+            message_date=datetime.now(tz=UTC),
             text="Test telegram message",
             source_id=MessageSource.TELEGRAM,
         )
@@ -94,7 +93,7 @@ class TestTelegramMessage:
         msg = TelegramMessage(
             message_id="tg_123",
             channel="@test_channel",
-            message_date=datetime.utcnow().replace(tzinfo=pytz.UTC),
+            message_date=datetime.now(tz=UTC),
             text="Test",
             source_id=MessageSource.TELEGRAM,
             sender_id="user123",
@@ -118,7 +117,7 @@ class TestEventCandidateSourceTracking:
         candidate = EventCandidate(
             message_id="test123",
             channel="C123",
-            ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
+            ts_dt=datetime.now(tz=UTC),
             text_norm="normalized text",
             links_norm=["https://example.com"],
             anchors=["ABC-123"],
@@ -134,7 +133,7 @@ class TestEventCandidateSourceTracking:
         candidate = EventCandidate(
             message_id="tg_123",
             channel="@test",
-            ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
+            ts_dt=datetime.now(tz=UTC),
             text_norm="telegram message",
             links_norm=[],
             anchors=[],
@@ -217,3 +216,28 @@ class TestEventSourceTracking:
             # source_id not provided - should default to SLACK
         )
         assert event.source_id == MessageSource.SLACK
+
+    def test_event_extracted_at_is_timezone_aware(self) -> None:
+        """Event.extracted_at should always carry UTC timezone information."""
+
+        event = Event(
+            event_id=uuid4(),
+            message_id="utc_check",
+            source_channels=["releases"],
+            action=ActionType.LAUNCH,
+            object_name_raw="Test",
+            category=EventCategory.PRODUCT,
+            status=EventStatus.CONFIRMED,
+            change_type=ChangeType.LAUNCH,
+            environment=Environment.PROD,
+            time_source=TimeSource.EXPLICIT,
+            time_confidence=0.9,
+            summary="Test",
+            confidence=0.85,
+            importance=75,
+            cluster_key="test",
+            dedup_key="test",
+        )
+
+        assert event.extracted_at.tzinfo is not None
+        assert event.extracted_at.utcoffset() == timedelta(0)

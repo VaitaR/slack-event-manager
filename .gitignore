@@ -89,3 +89,4 @@ Thumbs.db
 # Temporary files
 slack_messages.json
 msg_*.py
+*.session

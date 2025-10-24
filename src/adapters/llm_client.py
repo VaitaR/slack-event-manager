@@ -301,16 +301,15 @@ class LLMClient:
             cost_usd = self._calculate_cost(tokens_in, tokens_out)
 
             # Log response details
-            event_summaries = []
-            if llm_response.events:
-                event_summaries = [
-                    {
-                        "action": evt.action,
-                        "object": evt.object_name_raw,
-                        "category": evt.category,
-                    }
-                    for evt in llm_response.events
-                ]
+            redacted_events = [
+                {
+                    "action": evt.action,
+                    "category": evt.category,
+                    "anchor_present": bool(evt.anchor),
+                    "link_count": len(evt.links),
+                }
+                for evt in (llm_response.events or [])
+            ]
 
             logger.info(
                 "llm_response_success",
@@ -322,7 +321,8 @@ class LLMClient:
                 cost_usd=round(cost_usd, 6),
                 is_event=llm_response.is_event,
                 events_count=len(llm_response.events) if llm_response.events else 0,
-                events=event_summaries[:5],  # Log first 5 events
+                events=redacted_events[:5],
+                events_redacted=True,
             )
 
             if self.verbose and content:
@@ -341,7 +341,7 @@ class LLMClient:
                 cost_usd=cost_usd,
                 latency_ms=latency_ms,
                 cached=False,
-                ts=datetime.utcnow().replace(tzinfo=pytz.UTC),
+                ts=datetime.now(tz=pytz.UTC),
             )
 
             return llm_response
@@ -386,6 +386,12 @@ class LLMClient:
     def _is_verbose_allowed() -> bool:
         flag = os.getenv(VERBOSE_ENV_FLAG, "").strip().lower()
         return flag in {"1", "true", "yes"}
+
+    @property
+    def system_prompt_hash(self) -> str:
+        """Expose system prompt hash for cache fingerprinting."""
+
+        return self._system_prompt_hash
 
     def _build_prompt_log_payload(self, prompt: str) -> dict[str, Any]:
         return {

@@ -3,6 +3,8 @@
 Uses LLM to extract structured events from candidate messages.
 """
 
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,8 @@ from src.domain.models import (
     Event,
     EventStatus,
     ExtractionResult,
+    LLMCallMetadata,
+    LLMResponse,
     MessageSource,
     Severity,
     TimeSource,
@@ -104,11 +108,41 @@ def _parse_datetime(
         return fallback
 
 
+def _normalize_to_utc(dt: datetime) -> datetime:
+    """Ensure datetime has UTC timezone information."""
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=pytz.UTC)
+    return dt.astimezone(pytz.UTC)
+
+
+def _compute_prompt_hash(
+    llm_client: LLMClient,
+    text: str,
+    links: list[str],
+    message_ts_dt: datetime,
+    channel_name: str,
+) -> str:
+    """Compute deterministic prompt hash for caching."""
+
+    payload = {
+        "system_hash": str(llm_client.system_prompt_hash),
+        "model": str(llm_client.model),
+        "text": text,
+        "links": links,
+        "ts": _normalize_to_utc(message_ts_dt).isoformat(),
+        "channel": channel_name,
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def convert_llm_event_to_domain(
     llm_event: Any,
     message_id: str,
     message_ts_dt: datetime,
     channel_name: str,
+    source_id: MessageSource,
     reaction_count: int = 0,
     mention_count: int = 0,
 ) -> Event:
@@ -121,6 +155,7 @@ def convert_llm_event_to_domain(
         message_id: Source message ID
         message_ts_dt: Message timestamp for date fallback
         channel_name: Channel name
+        source_id: Source identifier for provenance
         reaction_count: Reaction count from message (for importance)
         mention_count: Mention count from message (for importance)
 
@@ -178,6 +213,7 @@ def convert_llm_event_to_domain(
         # Identification
         message_id=message_id,
         source_channels=[channel_name] if channel_name else [],
+        source_id=source_id,
         # Title slots
         action=action,
         object_id=object_id,
@@ -273,7 +309,7 @@ def extract_events_use_case(
     # Check budget
     min_score = None
     if check_budget:
-        today = datetime.utcnow().replace(tzinfo=pytz.UTC)
+        today = datetime.now(tz=pytz.UTC)
         daily_cost = repository.get_daily_llm_cost(today)
 
         if daily_cost >= settings.llm_daily_budget_usd:
@@ -361,55 +397,120 @@ def extract_events_use_case(
         )
 
         try:
-            logger.debug(
-                "calling_llm_api",
-                message_id=candidate.message_id[:8],
-                text_length=len(candidate.text_norm),
-                links_count=len(candidate.links_norm[:MAX_LINKS]),
-            )
-
-            llm_response = llm_client.extract_events_with_retry(
+            limited_links = candidate.links_norm[:MAX_LINKS]
+            prompt_hash = _compute_prompt_hash(
+                llm_client=llm_client,
                 text=candidate.text_norm,
-                links=candidate.links_norm[:MAX_LINKS],
+                links=limited_links,
                 message_ts_dt=candidate.ts_dt,
                 channel_name=channel_name,
             )
 
-            logger.info(
-                "llm_response_received",
-                message_id=candidate.message_id[:8],
-                is_event=llm_response.is_event,
-                events_count=len(llm_response.events) if llm_response.events else 0,
-            )
+            llm_response: LLMResponse | None = None
+            cached_payload = repository.get_cached_llm_response(prompt_hash)
+            if isinstance(cached_payload, str) and cached_payload:
+                try:
+                    llm_response = LLMResponse.model_validate_json(cached_payload)
+                except Exception as exc:  # noqa: BLE001 - surface parsing issues
+                    logger.warning(
+                        "llm_cache_deserialization_failed",
+                        prompt_hash=prompt_hash,
+                        error=str(exc),
+                    )
+                else:
+                    cache_hits += 1
+                    logger.info(
+                        "llm_cache_hit",
+                        message_id=candidate.message_id[:8],
+                        prompt_hash=prompt_hash[:12],
+                        events_count=len(llm_response.events)
+                        if llm_response.events
+                        else 0,
+                    )
+                    repository.save_llm_call(
+                        LLMCallMetadata(
+                            message_id=candidate.message_id,
+                            prompt_hash=prompt_hash,
+                            model=llm_client.model,
+                            tokens_in=0,
+                            tokens_out=0,
+                            cost_usd=0.0,
+                            latency_ms=0,
+                            cached=True,
+                        )
+                    )
 
-            llm_calls += 1
+            if llm_response is None:
+                logger.debug(
+                    "calling_llm_api",
+                    message_id=candidate.message_id[:8],
+                    text_length=len(candidate.text_norm),
+                    links_count=len(limited_links),
+                )
 
-            # Get call metadata
-            call_metadata = llm_client.get_call_metadata()
-            call_metadata.message_id = candidate.message_id
-            total_cost += call_metadata.cost_usd
+                llm_response = llm_client.extract_events_with_retry(
+                    text=candidate.text_norm,
+                    links=limited_links,
+                    message_ts_dt=candidate.ts_dt,
+                    channel_name=channel_name,
+                )
 
-            # Save call metadata
-            repository.save_llm_call(call_metadata)
+                logger.info(
+                    "llm_response_received",
+                    message_id=candidate.message_id[:8],
+                    is_event=llm_response.is_event,
+                    events_count=len(llm_response.events) if llm_response.events else 0,
+                )
 
-            # Process events
-            if llm_response.is_event and llm_response.events:
+                llm_calls += 1
+
+                call_metadata = llm_client.get_call_metadata()
+                call_metadata.message_id = candidate.message_id
+                call_metadata.prompt_hash = prompt_hash
+                call_metadata.cached = False
+                total_cost += call_metadata.cost_usd
+
+                repository.save_llm_call(call_metadata)
+                repository.save_llm_response(
+                    prompt_hash, llm_response.model_dump_json()
+                )
+
+            events_source = llm_response.events if llm_response.events else []
+            max_events_raw = getattr(settings, "llm_max_events_per_msg", 5)
+            try:
+                max_events = int(max_events_raw) if max_events_raw is not None else None
+            except (TypeError, ValueError):
+                max_events = 5
+
+            if max_events is not None:
+                llm_events = events_source[:max_events]
+            else:
+                llm_events = events_source
+
+            if len(events_source) > len(llm_events):
+                logger.info(
+                    "llm_response_truncated",
+                    message_id=candidate.message_id[:8],
+                    original_count=len(events_source),
+                    max_events=max_events,
+                )
+
+            if llm_response.is_event and llm_events:
                 events_to_save: list[Event] = []
                 validation_errors: list[str] = []
 
-                # Get reaction and mention counts from candidate features
                 reaction_count = candidate.features.reaction_count
                 mention_count = 1 if candidate.features.has_mention else 0
 
-                # Get validator for event validation
                 validator = _get_event_validator()
 
-                for llm_event in llm_response.events:
+                for llm_event in llm_events:
                     domain_event = convert_llm_event_to_domain(
                         llm_event,
                         candidate.message_id,
                         candidate.ts_dt,
                         channel_name,
+                        candidate_source,
                         reaction_count=reaction_count,
                         mention_count=mention_count,
                     )
@@ -455,9 +556,7 @@ def extract_events_use_case(
                     events_extracted += len(events_to_save)
 
                 # Log validation summary with audit trail
-                total_events_processed = (
-                    len(llm_response.events) if llm_response.events else 0
-                )
+                total_events_processed = len(events_source)
                 blocked_events = total_events_processed - len(events_to_save)
                 saved_events = len(events_to_save)
 

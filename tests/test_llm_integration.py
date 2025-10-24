@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 import pytz
 
-from src.domain.models import EventCategory, LLMEvent
+from src.domain.models import EventCategory, LLMEvent, MessageSource
 from src.domain.validation_constants import (
     MAX_IMPACT_AREAS,
     MAX_LINKS,
@@ -79,6 +79,7 @@ def test_convert_llm_event_basic(mock_llm_event: LLMEvent) -> None:
         message_id="test123",
         message_ts_dt=datetime(2025, 10, 20, 8, 0, tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
         reaction_count=5,
         mention_count=1,
     )
@@ -98,6 +99,7 @@ def test_convert_llm_event_object_canonicalization(mock_llm_event: LLMEvent) -> 
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     # "Stocks & ETFs" should be canonicalized to "wallet.stocks" by registry
@@ -111,6 +113,7 @@ def test_convert_llm_event_importance_calculated(mock_llm_event: LLMEvent) -> No
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
         reaction_count=10,  # Should boost importance
         mention_count=1,
     )
@@ -127,6 +130,7 @@ def test_convert_llm_event_cluster_key_generated(mock_llm_event: LLMEvent) -> No
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     assert result.cluster_key != ""
@@ -140,6 +144,7 @@ def test_convert_llm_event_dedup_key_generated(mock_llm_event: LLMEvent) -> None
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     assert result.dedup_key != ""
@@ -153,6 +158,7 @@ def test_convert_llm_event_time_parsing(mock_llm_event: LLMEvent) -> None:
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     assert result.actual_start is not None
@@ -187,6 +193,7 @@ def test_convert_llm_event_respects_domain_limits(
         message_id="msg",
         message_ts_dt=datetime(2025, 10, 20, 8, 0, tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     assert len(result.qualifiers) <= MAX_QUALIFIERS
@@ -206,6 +213,7 @@ def test_convert_llm_event_enum_parsing(mock_llm_event: LLMEvent) -> None:
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     from src.domain.models import (
@@ -233,6 +241,7 @@ def test_convert_llm_event_invalid_enum_fallback(mock_llm_event: LLMEvent) -> No
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     from src.domain.models import ActionType, EventStatus
@@ -253,6 +262,7 @@ def test_convert_llm_event_max_constraints(mock_llm_event: LLMEvent) -> None:
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     # Should be truncated
@@ -272,6 +282,7 @@ def test_convert_llm_event_unknown_object_no_canonicalization(
         message_id="test123",
         message_ts_dt=datetime.utcnow().replace(tzinfo=pytz.UTC),
         channel_name="releases",
+        source_id=MessageSource.SLACK,
     )
 
     # Unknown object should have None object_id
@@ -312,6 +323,7 @@ def test_convert_llm_event_full_integration() -> None:
         message_id="msg456",
         message_ts_dt=datetime(2025, 10, 18, 8, 0, tzinfo=pytz.UTC),
         channel_name="deployments",
+        source_id=MessageSource.SLACK,
         reaction_count=3,
         mention_count=0,
     )

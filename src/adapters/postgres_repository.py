@@ -286,9 +286,19 @@ class PostgresRepository:
             Environment,
             EventCategory,
             EventStatus,
+            MessageSource,
             Severity,
             TimeSource,
         )
+
+        source_id_value = row.get("source_id") or MessageSource.SLACK.value
+        extracted_at_raw = row.get("extracted_at")
+        if not isinstance(extracted_at_raw, datetime):
+            raise RepositoryError("Event row missing extracted_at timestamp")
+        if extracted_at_raw.tzinfo is None:
+            extracted_at = extracted_at_raw.replace(tzinfo=pytz.UTC)
+        else:
+            extracted_at = extracted_at_raw.astimezone(pytz.UTC)
 
         return Event(
             # Identification
@@ -296,7 +306,8 @@ class PostgresRepository:
             message_id=row["message_id"],
             source_channels=row.get("source_channels")
             or [],  # Already parsed from JSONB
-            extracted_at=row["extracted_at"],  # Already datetime from PostgreSQL
+            extracted_at=extracted_at,
+            source_id=MessageSource(source_id_value),
             # Title slots
             action=ActionType(row["action"]),
             object_id=row.get("object_id"),
@@ -835,6 +846,7 @@ class PostgresRepository:
                                 message_id = %s,
                                 source_channels = %s,
                                 extracted_at = %s,
+                                source_id = %s,
                                 action = %s,
                                 object_id = %s,
                                 object_name_raw = %s,
@@ -867,6 +879,7 @@ class PostgresRepository:
                                 event.message_id,
                                 json.dumps(event.source_channels),
                                 event.extracted_at,
+                                event.source_id.value,
                                 event.action.value,
                                 event.object_id,
                                 event.object_name_raw,
@@ -901,7 +914,7 @@ class PostgresRepository:
                         cur.execute(
                             """
                             INSERT INTO events (
-                                event_id, message_id, source_channels, extracted_at,
+                                event_id, message_id, source_channels, extracted_at, source_id,
                                 action, object_id, object_name_raw, qualifiers, stroke, anchor,
                                 category, status, change_type, environment, severity,
                                 planned_start, planned_end, actual_start, actual_end,
@@ -910,7 +923,7 @@ class PostgresRepository:
                                 confidence, importance, cluster_key, dedup_key
                             ) VALUES (
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                             )
                             """,
@@ -919,6 +932,7 @@ class PostgresRepository:
                                 event.message_id,
                                 json.dumps(event.source_channels),
                                 event.extracted_at,
+                                event.source_id.value,
                                 event.action.value,
                                 event.object_id,
                                 event.object_name_raw,
@@ -999,9 +1013,9 @@ class PostgresRepository:
                         call_id, message_id, model, temperature, prompt_hash,
                         prompt_tokens, completion_tokens, total_tokens,
                         cost_usd, latency_ms, success, error_msg,
-                        response_cached, created_at
+                        response_cached, response_json, created_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
@@ -1018,6 +1032,7 @@ class PostgresRepository:
                         True,  # success (LLMCallMetadata doesn't track failures)
                         None,  # error_msg
                         metadata.cached,  # Map to response_cached
+                        None,
                         metadata.ts,  # Map to created_at
                     ),
                 )
@@ -1060,8 +1075,41 @@ class PostgresRepository:
         Raises:
             RepositoryError: On storage errors
         """
-        # Not implemented yet - would need separate cache table
-        return None
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT response_json
+                    FROM llm_calls
+                    WHERE prompt_hash = %s AND response_json IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (prompt_hash,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+
+    def save_llm_response(self, prompt_hash: str, response_json: str) -> None:
+        """Persist structured LLM response for caching reuse."""
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE llm_calls
+                    SET response_json = %s
+                    WHERE call_id = (
+                        SELECT call_id
+                        FROM llm_calls
+                        WHERE prompt_hash = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
+                    """,
+                    (response_json, prompt_hash),
+                )
+                conn.commit()
 
     def get_last_processed_ts(
         self, channel: str, source_id: MessageSource | None = None
