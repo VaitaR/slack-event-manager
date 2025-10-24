@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 import pytz
 
-from src.adapters.slack_client import SlackClient
+from src.clients.slack_wrapped import SlackClient
 from src.adapters.slack_state_store import GetConnectionCallable, SlackStateStore
 from src.config.logging_config import get_logger
 from src.config.settings import Settings
