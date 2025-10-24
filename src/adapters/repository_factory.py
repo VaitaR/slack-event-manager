@@ -30,7 +30,13 @@ def create_repository(settings: Settings) -> RepositoryProtocol:
     """
     if settings.database_type == "sqlite":
         logger.info("repository_sqlite_selected", path=settings.db_path)
-        return cast(RepositoryProtocol, SQLiteRepository(db_path=settings.db_path))
+        return cast(
+            RepositoryProtocol,
+            SQLiteRepository(
+                db_path=settings.db_path,
+                chunk_size=settings.bulk_upsert_chunk_size,
+            ),
+        )
 
     elif settings.database_type == "postgres":
         if PostgresRepository is None:

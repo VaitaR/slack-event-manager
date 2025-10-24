@@ -231,24 +231,6 @@ class SlackClient:
 
             raise SlackAPIError(f"Failed to post message: {e}")
 
-    def get_channel_name(self, channel_id: str) -> str:
-        """Get channel name by ID.
-
-        Args:
-            channel_id: Channel ID
-
-        Returns:
-            Channel name or ID if lookup fails
-        """
-        try:
-            response = self.client.conversations_info(channel=channel_id)
-            if response["ok"]:
-                return response["channel"]["name"]
-        except SlackApiError:
-            pass
-
-        return channel_id
-
     def get_permalink(self, channel_id: str, message_ts: str) -> str | None:
         """Get permalink for a message.
 

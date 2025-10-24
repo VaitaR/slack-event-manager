@@ -282,6 +282,10 @@ class Settings(BaseSettings):
             data.setdefault(
                 "db_path", config["database"].get("path", "data/slack_events.db")
             )
+            data.setdefault(
+                "bulk_upsert_chunk_size",
+                config["database"].get("bulk_upsert_chunk_size", 500),
+            )
             # Load PostgreSQL settings if present
             if "postgres" in config["database"]:
                 pg = config["database"]["postgres"]
@@ -547,6 +551,11 @@ class Settings(BaseSettings):
     )
     db_path: str = Field(
         default="data/slack_events.db", description="SQLite database path"
+    )
+    bulk_upsert_chunk_size: int = Field(
+        default=500,
+        ge=1,
+        description="Batch size for bulk upserts",
     )
     postgres_host: str = Field(default="localhost", description="PostgreSQL host")
     postgres_port: int = Field(default=5432, description="PostgreSQL port")

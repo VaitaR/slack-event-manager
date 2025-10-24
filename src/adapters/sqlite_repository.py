@@ -12,6 +12,13 @@ from uuid import UUID
 
 import pytz
 
+from src.adapters.bulk_persistence import (
+    DatabaseBackend,
+    EventDTO,
+    RelationDTO,
+    upsert_event_relations_bulk,
+    upsert_events_bulk,
+)
 from src.adapters.query_builders import (
     CandidateQueryCriteria,
     EventQueryCriteria,
@@ -37,13 +44,16 @@ logger = get_logger(__name__)
 class SQLiteRepository:
     """SQLite-based repository for MVP."""
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, chunk_size: int = 500) -> None:
         """Initialize repository and ensure schema.
 
         Args:
             db_path: Path to SQLite database file
         """
         self.db_path = db_path
+        if chunk_size <= 0:
+            raise RepositoryError("chunk_size must be positive")
+        self._bulk_chunk_size = chunk_size
 
         # Ensure data directory exists
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -120,11 +130,39 @@ class SQLiteRepository:
                 views INTEGER DEFAULT 0,
                 reply_count INTEGER DEFAULT 0,
                 reactions TEXT,
+                reactions_count INTEGER DEFAULT 0,
                 post_url TEXT,
+                attachments_count INTEGER DEFAULT 0,
+                files_count INTEGER DEFAULT 0,
+                bot_id TEXT,
+                is_bot INTEGER DEFAULT 0,
+                reply_to_id TEXT,
+                thread_id TEXT,
+                has_file INTEGER DEFAULT 0,
+                file_mime TEXT,
                 ingested_at TEXT
             )
         """
         )
+
+        telegram_alter_statements = [
+            "ALTER TABLE raw_telegram_messages ADD COLUMN reactions_count INTEGER DEFAULT 0",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN attachments_count INTEGER DEFAULT 0",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN files_count INTEGER DEFAULT 0",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN bot_id TEXT",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN is_bot INTEGER DEFAULT 0",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN reply_to_id TEXT",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN thread_id TEXT",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN has_file INTEGER DEFAULT 0",
+            "ALTER TABLE raw_telegram_messages ADD COLUMN file_mime TEXT",
+        ]
+
+        for statement in telegram_alter_statements:
+            try:
+                cursor.execute(statement)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
         # Candidates table
         cursor.execute(
@@ -308,27 +346,6 @@ class SQLiteRepository:
         """
         )
 
-        # Watermarks table
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS channel_watermarks (
-                channel TEXT PRIMARY KEY,
-                processing_ts TEXT,
-                committed_ts TEXT
-            )
-        """
-        )
-
-        # Ingestion state table (legacy - tracks last processed timestamp per channel)
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ingestion_state (
-                channel_id TEXT PRIMARY KEY,
-                last_ts REAL NOT NULL
-            )
-        """
-        )
-
         # Source-specific ingestion state tables
         cursor.execute(
             """
@@ -348,7 +365,17 @@ class SQLiteRepository:
                 last_processed_message_id TEXT,
                 updated_at TIMESTAMP NOT NULL
             )
-        """
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS channel_watermarks (
+                channel TEXT PRIMARY KEY,
+                committed_ts TEXT,
+                processing_ts TEXT
+            )
+            """
         )
 
         conn.commit()
@@ -449,8 +476,10 @@ class SQLiteRepository:
                         message_id, channel, message_date, sender_id, sender_name,
                         text, text_norm, forward_from_channel, forward_from_message_id,
                         media_type, links_raw, links_norm, anchors, views, reply_count,
-                        reactions, post_url, ingested_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        reactions, reactions_count, post_url, attachments_count,
+                        files_count, bot_id, is_bot, reply_to_id, thread_id, has_file,
+                        file_mime, ingested_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         msg.message_id,
@@ -469,7 +498,16 @@ class SQLiteRepository:
                         msg.views,
                         msg.reply_count,
                         json.dumps(msg.reactions),
+                        msg.reactions_count,
                         msg.post_url,
+                        msg.attachments_count,
+                        msg.files_count,
+                        msg.bot_id,
+                        1 if msg.is_bot else 0,
+                        msg.reply_to_id,
+                        msg.thread_id,
+                        1 if msg.has_file else 0,
+                        msg.file_mime,
                         msg.ingested_at.isoformat(),
                     ),
                 )
@@ -525,6 +563,9 @@ class SQLiteRepository:
         Returns:
             TelegramMessage instance
         """
+        reactions_data = json.loads(row["reactions"]) if row["reactions"] else {}
+        reactions_count = row["reactions_count"] or sum(reactions_data.values())
+
         return TelegramMessage(
             message_id=row["message_id"],
             channel=row["channel"],
@@ -541,8 +582,18 @@ class SQLiteRepository:
             anchors=json.loads(row["anchors"]) if row["anchors"] else [],
             views=row["views"] or 0,
             reply_count=row["reply_count"] or 0,
-            reactions=json.loads(row["reactions"]) if row["reactions"] else {},
+            reactions=reactions_data,
+            reactions_count=reactions_count,
             post_url=row["post_url"],
+            attachments_count=row["attachments_count"] or 0,
+            files_count=row["files_count"] or 0,
+            bot_id=row["bot_id"],
+            is_bot=bool(row["is_bot"]),
+            reply_to_id=row["reply_to_id"],
+            thread_id=row["thread_id"],
+            is_reply=bool(row["reply_to_id"]),
+            has_file=bool(row["has_file"]),
+            file_mime=row["file_mime"],
             ingested_at=datetime.fromisoformat(row["ingested_at"]),
         )
 
@@ -940,181 +991,46 @@ class SQLiteRepository:
             raise RepositoryError(f"Failed to update candidate status: {e}")
 
     def save_events(self, events: list[Event]) -> int:
-        """Save events with new comprehensive structure (upsert by dedup_key).
+        """Save events with new comprehensive structure (upsert by dedup_key)."""
 
-        Args:
-            events: List of events
-
-        Returns:
-            Number saved
-        """
         if not events:
             return 0
 
+        conn = self._get_connection()
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
-            for event in events:
-                # Check if dedup_key exists
-                cursor.execute(
-                    "SELECT event_id FROM events WHERE dedup_key = ?",
-                    (event.dedup_key,),
+            event_dtos = [
+                EventDTO.from_event(
+                    event,
+                    backend=DatabaseBackend.SQLITE,
+                    connection=conn,
                 )
-                existing = cursor.fetchone()
+                for event in events
+            ]
+            upsert_events_bulk(event_dtos, chunk=self._bulk_chunk_size)
 
-                if existing:
-                    # Update existing event
-                    cursor.execute(
-                        """
-                        UPDATE events SET
-                            source_channels = ?,
-                            action = ?,
-                            object_id = ?,
-                            object_name_raw = ?,
-                            qualifiers = ?,
-                            stroke = ?,
-                            anchor = ?,
-                            category = ?,
-                            status = ?,
-                            change_type = ?,
-                            environment = ?,
-                            severity = ?,
-                            planned_start = ?,
-                            planned_end = ?,
-                            actual_start = ?,
-                            actual_end = ?,
-                            time_source = ?,
-                            time_confidence = ?,
-                            summary = ?,
-                            why_it_matters = ?,
-                            links = ?,
-                            anchors = ?,
-                            impact_area = ?,
-                            impact_type = ?,
-                            confidence = ?,
-                            importance = ?,
-                            cluster_key = ?,
-                            source_id = ?
-                        WHERE dedup_key = ?
-                        """,
-                        (
-                            json.dumps(event.source_channels),
-                            event.action.value,
-                            event.object_id,
-                            event.object_name_raw,
-                            json.dumps(event.qualifiers),
-                            event.stroke,
-                            event.anchor,
-                            event.category.value,
-                            event.status.value,
-                            event.change_type.value,
-                            event.environment.value,
-                            event.severity.value if event.severity else None,
-                            event.planned_start.isoformat()
-                            if event.planned_start
-                            else None,
-                            event.planned_end.isoformat()
-                            if event.planned_end
-                            else None,
-                            event.actual_start.isoformat()
-                            if event.actual_start
-                            else None,
-                            event.actual_end.isoformat() if event.actual_end else None,
-                            event.time_source.value,
-                            event.time_confidence,
-                            event.summary,
-                            event.why_it_matters,
-                            json.dumps(event.links),
-                            json.dumps(event.anchors),
-                            json.dumps(event.impact_area),
-                            json.dumps(event.impact_type),
-                            event.confidence,
-                            event.importance,
-                            event.cluster_key,
-                            event.source_id.value,
-                            event.dedup_key,
-                        ),
-                    )
-                else:
-                    # Insert new event
-                    cursor.execute(
-                        """
-                        INSERT INTO events (
-                            event_id, message_id, source_channels, extracted_at,
-                            action, object_id, object_name_raw, qualifiers, stroke, anchor,
-                            category, status, change_type, environment, severity,
-                            planned_start, planned_end, actual_start, actual_end,
-                            time_source, time_confidence,
-                            summary, why_it_matters, links, anchors, impact_area, impact_type,
-                            confidence, importance, cluster_key, dedup_key, source_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            str(event.event_id),
-                            event.message_id,
-                            json.dumps(event.source_channels),
-                            event.extracted_at.isoformat(),
-                            event.action.value,
-                            event.object_id,
-                            event.object_name_raw,
-                            json.dumps(event.qualifiers),
-                            event.stroke,
-                            event.anchor,
-                            event.category.value,
-                            event.status.value,
-                            event.change_type.value,
-                            event.environment.value,
-                            event.severity.value if event.severity else None,
-                            event.planned_start.isoformat()
-                            if event.planned_start
-                            else None,
-                            event.planned_end.isoformat()
-                            if event.planned_end
-                            else None,
-                            event.actual_start.isoformat()
-                            if event.actual_start
-                            else None,
-                            event.actual_end.isoformat() if event.actual_end else None,
-                            event.time_source.value,
-                            event.time_confidence,
-                            event.summary,
-                            event.why_it_matters,
-                            json.dumps(event.links),
-                            json.dumps(event.anchors),
-                            json.dumps(event.impact_area),
-                            json.dumps(event.impact_type),
-                            event.confidence,
-                            event.importance,
-                            event.cluster_key,
-                            event.dedup_key,
-                            event.source_id.value,
-                        ),
-                    )
-
-                # Save relations
+            relation_dtos: list[RelationDTO] = []
+            for event in events:
+                if not event.relations:
+                    continue
                 for relation in event.relations:
-                    cursor.execute(
-                        """
-                        INSERT OR IGNORE INTO event_relations
-                        (source_event_id, relation_type, target_event_id, created_at)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
+                    relation_dtos.append(
+                        RelationDTO.from_relation(
                             str(event.event_id),
-                            relation.relation_type.value,
-                            str(relation.target_event_id),
-                            datetime.now(tz=pytz.UTC).isoformat(),
-                        ),
+                            relation,
+                            backend=DatabaseBackend.SQLITE,
+                            connection=conn,
+                        )
                     )
 
-            conn.commit()
-            count = len(events)
-            conn.close()
-            return count
+            if relation_dtos:
+                upsert_event_relations_bulk(relation_dtos, chunk=self._bulk_chunk_size)
 
-        except sqlite3.Error as e:
-            raise RepositoryError(f"Failed to save events: {e}")
+            return len(events)
+        except sqlite3.Error as exc:
+            conn.rollback()
+            raise RepositoryError(f"Failed to save events: {exc}") from exc
+        finally:
+            conn.close()
 
     def get_events_in_window(self, start_dt: datetime, end_dt: datetime) -> list[Event]:
         """Get events within date window.

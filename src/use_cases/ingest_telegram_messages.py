@@ -100,6 +100,126 @@ def build_telegram_post_url(channel_id: str, message_id: str) -> str | None:
     return None
 
 
+def _extract_reply_reference(raw_msg: dict[str, Any]) -> str | None:
+    """Extract raw reply target identifier from Telegram payload."""
+
+    reply_to = raw_msg.get("reply_to_message_id") or raw_msg.get("reply_to_msg_id")
+    if reply_to:
+        return str(reply_to)
+
+    reply_block = raw_msg.get("reply_to")
+    if isinstance(reply_block, dict):
+        for key in ("reply_to_msg_id", "msg_id", "id"):
+            value = reply_block.get(key)
+            if value:
+                return str(value)
+
+    return None
+
+
+def _normalize_reactions(raw_reactions: Any) -> dict[str, int]:
+    """Convert heterogeneous Telegram reactions payload into a simple mapping."""
+
+    reactions: dict[str, int] = {}
+
+    def _add_reaction(label: str, count: int) -> None:
+        if not label:
+            return
+        reactions[label] = reactions.get(label, 0) + max(count, 0)
+
+    if raw_reactions is None:
+        return reactions
+
+    if isinstance(raw_reactions, dict):
+        results = raw_reactions.get("results")
+        if isinstance(results, list):
+            for entry in results:
+                if isinstance(entry, dict):
+                    emoji = entry.get("reaction") or entry.get("emoji")
+                    if isinstance(emoji, dict):
+                        emoji = emoji.get("emoticon") or emoji.get("emoji")
+                    count = entry.get("count") or entry.get("total_count") or 0
+                    if isinstance(count, int):
+                        _add_reaction(str(emoji or ""), count)
+            return reactions
+
+        for key, value in raw_reactions.items():
+            if isinstance(value, int):
+                _add_reaction(str(key), value)
+        return reactions
+
+    if isinstance(raw_reactions, list):
+        for entry in raw_reactions:
+            if isinstance(entry, dict):
+                emoji = entry.get("reaction") or entry.get("emoji")
+                if isinstance(emoji, dict):
+                    emoji = emoji.get("emoticon") or emoji.get("emoji")
+                count = entry.get("count") or entry.get("total_count") or 0
+                if isinstance(count, int):
+                    _add_reaction(str(emoji or ""), count)
+        return reactions
+
+    if isinstance(raw_reactions, str):
+        _add_reaction(raw_reactions, 1)
+    return reactions
+
+
+def _extract_file_mime(raw_msg: dict[str, Any]) -> str | None:
+    """Extract MIME type from Telegram payload if available."""
+
+    for key in ("file_mime", "mime_type", "mimeType"):
+        value = raw_msg.get(key)
+        if isinstance(value, str) and value:
+            return value
+
+    media = raw_msg.get("media") or raw_msg.get("document") or raw_msg.get("file")
+    if isinstance(media, dict):
+        for key in ("mime_type", "mimeType"):
+            value = media.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+    return None
+
+
+def _detect_has_file(
+    media_type: str | None,
+    file_mime: str | None,
+    raw_msg: dict[str, Any],
+) -> bool:
+    """Determine whether message contains a file attachment."""
+
+    if file_mime:
+        return True
+
+    if media_type and media_type.lower() not in {"", "text", "message"}:
+        return True
+
+    files = raw_msg.get("files") or raw_msg.get("media")
+    if isinstance(files, list) and files:
+        return True
+
+    return bool(raw_msg.get("has_media"))
+
+
+def _extract_bot_id(raw_msg: dict[str, Any]) -> str | None:
+    """Extract bot identifier as string if present."""
+
+    for key in ("via_bot_id", "bot_id", "sender_bot_id"):
+        value = raw_msg.get(key)
+        if value is None:
+            continue
+        return str(value)
+
+    bot_block = raw_msg.get("from_bot")
+    if isinstance(bot_block, dict):
+        bot_id = bot_block.get("id") or bot_block.get("bot_id")
+        if bot_id is not None:
+            return str(bot_id)
+
+    return None
+
+
 def process_telegram_message(
     raw_msg: dict[str, Any], channel_id: str
 ) -> TelegramMessage:
@@ -121,6 +241,7 @@ def process_telegram_message(
         message_date = datetime.utcnow().replace(tzinfo=pytz.UTC)
 
     sender_id = raw_msg.get("sender_id")
+    sender_name = raw_msg.get("sender_name")
     text = raw_msg.get("text", "")
 
     # Extract URLs from entities
@@ -152,6 +273,34 @@ def process_telegram_message(
     views = raw_msg.get("views", 0)
     reply_count = raw_msg.get("reply_count", 0)
 
+    reactions_map = _normalize_reactions(raw_msg.get("reactions"))
+    reactions_count = sum(reactions_map.values())
+
+    reply_reference = _extract_reply_reference(raw_msg)
+    reply_to_id = (
+        generate_telegram_message_id(channel_id, reply_reference)
+        if reply_reference
+        else None
+    )
+    thread_id = raw_msg.get("thread_id") or reply_to_id
+    is_reply = reply_to_id is not None
+
+    file_mime = _extract_file_mime(raw_msg)
+    has_file = _detect_has_file(media_type, file_mime, raw_msg)
+
+    bot_id = _extract_bot_id(raw_msg)
+    is_bot = bool(raw_msg.get("is_bot") or bot_id)
+
+    attachments_count = raw_msg.get("attachments_count", 0)
+    attachments_payload = raw_msg.get("attachments")
+    if isinstance(attachments_payload, list):
+        attachments_count = len(attachments_payload)
+
+    files_count = raw_msg.get("files_count", 0)
+    files_payload = raw_msg.get("files")
+    if isinstance(files_payload, list):
+        files_count = len(files_payload)
+
     # Generate deterministic message ID
     unique_id = generate_telegram_message_id(channel_id, message_id)
 
@@ -160,8 +309,12 @@ def process_telegram_message(
         channel=channel_id,
         message_date=message_date,
         sender_id=sender_id,
-        sender_name=None,  # Not extracted yet
-        is_bot=False,  # Not extracted yet
+        sender_name=sender_name,
+        bot_id=bot_id,
+        is_bot=is_bot,
+        reply_to_id=reply_to_id,
+        thread_id=thread_id,
+        is_reply=is_reply,
         text=text,
         text_norm=text_norm,
         blocks_text=text,  # Use text for scoring compatibility
@@ -173,8 +326,13 @@ def process_telegram_message(
         anchors=anchors,
         views=views,
         reply_count=reply_count,
-        reactions={},  # Not extracted yet
+        reactions=reactions_map,
+        reactions_count=reactions_count,
         post_url=post_url,
+        attachments_count=attachments_count,
+        files_count=files_count,
+        has_file=has_file,
+        file_mime=file_mime,
         ingested_at=datetime.utcnow().replace(tzinfo=pytz.UTC),
     )
 

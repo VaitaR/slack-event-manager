@@ -134,24 +134,20 @@ def extract_features(
     # Check for @channel/@here mentions (universal pattern)
     has_mention = bool(CHANNEL_MENTION_PATTERN.search(message.text_norm))
 
-    # For MessageRecord protocol, we don't have reply/reaction data
-    # This is a limitation of the current protocol design
-    # In the future, we could extend MessageRecord to include these fields
-    reply_count = 0
-    reaction_count = 0
+    # Reply and reaction data from extended protocol
+    reply_count = getattr(message, "reply_count", 0)
+    if getattr(message, "is_reply", False):
+        reply_count = max(reply_count, 1)
+    reaction_count = getattr(message, "reactions_count", 0)
 
     # Anchors and links from protocol
     anchor_count = len(message.anchors)
     link_count = len(message.links_norm)
 
-    # For file attachments, we don't have this info in MessageRecord
-    # This would need to be added to the protocol for full feature parity
-    has_files = False
-
-    # For bot detection, we also don't have this in MessageRecord
-    # This is another field that should be added to the protocol
-    is_bot = False
-    bot_id = None
+    # File attachments and bot metadata now exposed on protocol
+    has_files = getattr(message, "has_file", False)
+    is_bot = getattr(message, "is_bot", False)
+    bot_id = getattr(message, "bot_id", None)
 
     return ScoringFeatures(
         has_keywords=has_keywords,
