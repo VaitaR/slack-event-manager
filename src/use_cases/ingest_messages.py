@@ -11,6 +11,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timedelta
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Final
 
 import pytz
@@ -22,6 +23,8 @@ from src.config.settings import Settings
 from src.domain.exceptions import SlackAPIError
 from src.domain.models import IngestResult, SlackMessage
 from src.domain.protocols import RepositoryProtocol
+from src.observability.metrics import PIPELINE_STAGE_DURATION_SECONDS
+from src.observability.tracing import correlation_scope
 from src.services import link_extractor, text_normalizer
 
 if TYPE_CHECKING:
@@ -345,6 +348,8 @@ def ingest_messages_use_case(
     settings: Settings,
     lookback_hours: int | None = None,
     backfill_from_date: datetime | None = None,
+    *,
+    correlation_id: str | None = None,
 ) -> IngestResult:
     """Ingest messages from configured Slack channels.
 
@@ -376,229 +381,269 @@ def ingest_messages_use_case(
         >>> result.messages_saved
         42
     """
-    if lookback_hours is None:
-        lookback_hours = settings.lookback_hours_default
+    with correlation_scope(correlation_id) as bound_correlation_id:
+        stage_start = perf_counter()
+        result: IngestResult | None = None
+        logger.info("ingest_started", correlation_id=bound_correlation_id)
 
-    if lookback_hours < 0:
-        raise ValueError("lookback_hours must be non-negative")
+        if lookback_hours is None:
+            lookback_hours = settings.lookback_hours_default
 
-    total_fetched = 0
-    total_saved = 0
-    channels_processed: list[str] = []
-    errors: list[str] = []
+        if lookback_hours < 0:
+            raise ValueError("lookback_hours must be non-negative")
 
-    now = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    now_ts = now.timestamp()
-    state_store = SlackStateStore(_resolve_state_connection_factory(repository))
+        total_fetched = 0
+        total_saved = 0
+        channels_processed: list[str] = []
+        errors: list[str] = []
 
-    for channel_config in settings.slack_channels:
-        channel_id = channel_config.channel_id
+        now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+        now_ts = now.timestamp()
+        state_store = SlackStateStore(_resolve_state_connection_factory(repository))
+
+        def _execute_ingestion() -> IngestResult:
+            nonlocal total_fetched, total_saved
+
+            for channel_config in settings.slack_channels:
+                channel_id = channel_config.channel_id
+
+                try:
+                    state = state_store.get(channel_id)
+                    max_processed_raw = state.get("max_processed_ts", 0.0)
+                    max_processed = (
+                        float(max_processed_raw)
+                        if isinstance(max_processed_raw, int | float)
+                        else 0.0
+                    )
+                    resume_cursor_value = state.get("resume_cursor")
+                    resume_cursor = (
+                        resume_cursor_value
+                        if isinstance(resume_cursor_value, str) and resume_cursor_value
+                        else None
+                    )
+                    resume_min_raw = state.get("resume_min_ts")
+                    resume_min_ts = (
+                        float(resume_min_raw)
+                        if isinstance(resume_min_raw, int | float)
+                        else None
+                    )
+
+                    if max_processed == 0.0 and resume_cursor is None:
+                        legacy_ts = repository.get_last_processed_ts(channel_id)
+                        if legacy_ts is not None:
+                            max_processed = float(legacy_ts)
+
+                    baseline_ts: float | None = None
+                    oldest_ts: str | None
+
+                    if resume_cursor:
+                        baseline_ts = (
+                            resume_min_ts
+                            if resume_min_ts is not None
+                            else (max_processed if max_processed > 0 else None)
+                        )
+                        oldest_ts = (
+                            str(baseline_ts) if baseline_ts is not None else None
+                        )
+                        logger.info(
+                            "slack_ingestion_resume",
+                            channel_id=channel_id,
+                            resume_cursor=resume_cursor,
+                            oldest_ts=oldest_ts,
+                        )
+                    elif max_processed > 0:
+                        baseline_ts = max_processed
+                        oldest_ts = str(baseline_ts)
+                        logger.info(
+                            "slack_ingestion_incremental",
+                            channel_id=channel_id,
+                            oldest_ts=oldest_ts,
+                            strategy="incremental",
+                        )
+                    else:
+                        lookback_dt = now - timedelta(hours=lookback_hours)
+                        candidates: list[tuple[datetime, dict[str, object]]] = [
+                            (
+                                lookback_dt,
+                                {
+                                    "strategy": "lookback",
+                                    "lookback_hours": lookback_hours,
+                                },
+                            )
+                        ]
+
+                        if backfill_from_date:
+                            backfill_dt = _ensure_utc(backfill_from_date)
+                            candidates.append(
+                                (
+                                    backfill_dt,
+                                    {
+                                        "strategy": "explicit_backfill",
+                                        "backfill_date": backfill_dt.isoformat(),
+                                        "lookback_hours": lookback_hours,
+                                    },
+                                )
+                            )
+
+                        oldest_dt, log_context = min(
+                            candidates, key=lambda item: item[0]
+                        )
+                        baseline_ts = oldest_dt.timestamp()
+                        oldest_ts = str(baseline_ts)
+                        event_name = (
+                            "slack_ingestion_first_run"
+                            if log_context["strategy"] == "lookback"
+                            else "slack_ingestion_backfill"
+                        )
+                        logger.info(
+                            event_name,
+                            channel_id=channel_id,
+                            oldest_ts=oldest_ts,
+                            **log_context,
+                        )
+
+                    raw_messages, next_cursor, has_more = _fetch_slack_messages(
+                        slack_client,
+                        channel_id,
+                        oldest_ts=oldest_ts,
+                        cursor=resume_cursor,
+                        limit=settings.slack_max_messages_per_run,
+                        page_size=settings.slack_page_size,
+                    )
+
+                    total_fetched += len(raw_messages)
+
+                    if resume_cursor is None:
+                        threshold = max_processed
+                        raw_messages = [
+                            msg
+                            for msg in raw_messages
+                            if _parse_ts(msg.get("ts")) > threshold
+                        ]
+
+                    if not raw_messages:
+                        if resume_cursor:
+                            state_store.upsert(
+                                channel_id,
+                                max_processed_ts=max_processed,
+                                resume_cursor=None,
+                                resume_min_ts=None,
+                            )
+                        elif max_processed <= 0:
+                            state_store.upsert(
+                                channel_id,
+                                max_processed_ts=now_ts,
+                                resume_cursor=None,
+                                resume_min_ts=None,
+                            )
+                            logger.info(
+                                "slack_ingestion_state_initialized",
+                                channel_id=channel_id,
+                                reason="no_messages",
+                            )
+                        channels_processed.append(channel_id)
+                        continue
+
+                    raw_messages.sort(key=lambda item: _parse_ts(item.get("ts")))
+
+                    processed_messages: list[SlackMessage] = []
+                    for raw_msg in raw_messages:
+                        user_info = None
+                        user_id = raw_msg.get("user")
+                        if user_id and not raw_msg.get("bot_id"):
+                            try:
+                                user_info = slack_client.get_user_info(user_id)
+                            except Exception:
+                                pass
+
+                        permalink = None
+                        msg_ts = raw_msg.get("ts")
+                        if msg_ts:
+                            try:
+                                permalink = slack_client.get_permalink(
+                                    channel_id, msg_ts
+                                )
+                            except Exception:
+                                pass
+
+                        processed_msg = process_slack_message(
+                            raw_msg,
+                            channel_id,
+                            user_info=user_info,
+                            permalink=permalink,
+                        )
+                        processed_messages.append(processed_msg)
+
+                    saved_count = repository.save_messages(processed_messages)
+                    total_saved += saved_count
+
+                    limit_value = settings.slack_max_messages_per_run
+                    limit_hit = False
+                    if limit_value is not None and next_cursor is not None and has_more:
+                        limit_hit = len(processed_messages) >= limit_value
+
+                    resume_min_value = (
+                        baseline_ts
+                        if baseline_ts is not None
+                        else (max_processed if max_processed > 0 else None)
+                    )
+
+                    if limit_hit:
+                        state_store.upsert(
+                            channel_id,
+                            max_processed_ts=max_processed,
+                            resume_cursor=next_cursor,
+                            resume_min_ts=resume_min_value,
+                        )
+                        logger.info(
+                            "slack_ingestion_resume_checkpoint",
+                            channel_id=channel_id,
+                            resume_cursor=next_cursor,
+                            processed=len(processed_messages),
+                        )
+                    else:
+                        latest_ts_float = max(
+                            _parse_ts(msg.ts) for msg in processed_messages
+                        )
+                        new_max = max(max_processed, latest_ts_float)
+                        state_store.upsert(
+                            channel_id,
+                            max_processed_ts=new_max,
+                            resume_cursor=None,
+                            resume_min_ts=None,
+                        )
+                        logger.info(
+                            "slack_ingestion_state_updated",
+                            channel_id=channel_id,
+                            latest_ts=f"{latest_ts_float:.6f}",
+                            messages_saved=saved_count,
+                        )
+
+                    channels_processed.append(channel_id)
+                except Exception as e:
+                    error_msg = f"Channel {channel_id}: {str(e)}"
+                    errors.append(error_msg)
+
+            return IngestResult(
+                messages_fetched=total_fetched,
+                messages_saved=total_saved,
+                channels_processed=channels_processed,
+                errors=errors,
+            )
 
         try:
-            state = state_store.get(channel_id)
-            max_processed_raw = state.get("max_processed_ts", 0.0)
-            max_processed = (
-                float(max_processed_raw)
-                if isinstance(max_processed_raw, int | float)
-                else 0.0
-            )
-            resume_cursor_value = state.get("resume_cursor")
-            resume_cursor = (
-                resume_cursor_value
-                if isinstance(resume_cursor_value, str) and resume_cursor_value
-                else None
-            )
-            resume_min_raw = state.get("resume_min_ts")
-            resume_min_ts = (
-                float(resume_min_raw)
-                if isinstance(resume_min_raw, int | float)
-                else None
-            )
-
-            if max_processed == 0.0 and resume_cursor is None:
-                legacy_ts = repository.get_last_processed_ts(channel_id)
-                if legacy_ts is not None:
-                    max_processed = float(legacy_ts)
-
-            baseline_ts: float | None = None
-            oldest_ts: str | None
-
-            if resume_cursor:
-                baseline_ts = (
-                    resume_min_ts
-                    if resume_min_ts is not None
-                    else (max_processed if max_processed > 0 else None)
-                )
-                oldest_ts = str(baseline_ts) if baseline_ts is not None else None
+            result = _execute_ingestion()
+            return result
+        finally:
+            duration = perf_counter() - stage_start
+            PIPELINE_STAGE_DURATION_SECONDS.labels(stage="ingest").observe(duration)
+            if result is not None:
                 logger.info(
-                    "slack_ingestion_resume",
-                    channel_id=channel_id,
-                    resume_cursor=resume_cursor,
-                    oldest_ts=oldest_ts,
+                    "ingest_finished",
+                    correlation_id=bound_correlation_id,
+                    duration_seconds=duration,
+                    messages_fetched=total_fetched,
+                    messages_saved=total_saved,
+                    channels_processed=len(channels_processed),
+                    errors=len(errors),
                 )
-            elif max_processed > 0:
-                baseline_ts = max_processed
-                oldest_ts = str(baseline_ts)
-                logger.info(
-                    "slack_ingestion_incremental",
-                    channel_id=channel_id,
-                    oldest_ts=oldest_ts,
-                    strategy="incremental",
-                )
-            else:
-                lookback_dt = now - timedelta(hours=lookback_hours)
-                candidates: list[tuple[datetime, dict[str, object]]] = [
-                    (
-                        lookback_dt,
-                        {"strategy": "lookback", "lookback_hours": lookback_hours},
-                    )
-                ]
-
-                if backfill_from_date:
-                    backfill_dt = _ensure_utc(backfill_from_date)
-                    candidates.append(
-                        (
-                            backfill_dt,
-                            {
-                                "strategy": "explicit_backfill",
-                                "backfill_date": backfill_dt.isoformat(),
-                                "lookback_hours": lookback_hours,
-                            },
-                        )
-                    )
-
-                oldest_dt, log_context = min(candidates, key=lambda item: item[0])
-                baseline_ts = oldest_dt.timestamp()
-                oldest_ts = str(baseline_ts)
-                event_name = (
-                    "slack_ingestion_first_run"
-                    if log_context["strategy"] == "lookback"
-                    else "slack_ingestion_backfill"
-                )
-                logger.info(
-                    event_name,
-                    channel_id=channel_id,
-                    oldest_ts=oldest_ts,
-                    **log_context,
-                )
-
-            raw_messages, next_cursor, has_more = _fetch_slack_messages(
-                slack_client,
-                channel_id,
-                oldest_ts=oldest_ts,
-                cursor=resume_cursor,
-                limit=settings.slack_max_messages_per_run,
-                page_size=settings.slack_page_size,
-            )
-
-            total_fetched += len(raw_messages)
-
-            if resume_cursor is None:
-                threshold = max_processed
-                raw_messages = [
-                    msg for msg in raw_messages if _parse_ts(msg.get("ts")) > threshold
-                ]
-
-            if not raw_messages:
-                if resume_cursor:
-                    state_store.upsert(
-                        channel_id,
-                        max_processed_ts=max_processed,
-                        resume_cursor=None,
-                        resume_min_ts=None,
-                    )
-                elif max_processed <= 0:
-                    state_store.upsert(
-                        channel_id,
-                        max_processed_ts=now_ts,
-                        resume_cursor=None,
-                        resume_min_ts=None,
-                    )
-                    logger.info(
-                        "slack_ingestion_state_initialized",
-                        channel_id=channel_id,
-                        reason="no_messages",
-                    )
-                channels_processed.append(channel_id)
-                continue
-
-            raw_messages.sort(key=lambda item: _parse_ts(item.get("ts")))
-
-            processed_messages: list[SlackMessage] = []
-            for raw_msg in raw_messages:
-                user_info = None
-                user_id = raw_msg.get("user")
-                if user_id and not raw_msg.get("bot_id"):
-                    try:
-                        user_info = slack_client.get_user_info(user_id)
-                    except Exception:
-                        pass
-
-                permalink = None
-                msg_ts = raw_msg.get("ts")
-                if msg_ts:
-                    try:
-                        permalink = slack_client.get_permalink(channel_id, msg_ts)
-                    except Exception:
-                        pass
-
-                processed_msg = process_slack_message(
-                    raw_msg, channel_id, user_info=user_info, permalink=permalink
-                )
-                processed_messages.append(processed_msg)
-
-            saved_count = repository.save_messages(processed_messages)
-            total_saved += saved_count
-
-            limit_value = settings.slack_max_messages_per_run
-            limit_hit = False
-            if limit_value is not None and next_cursor is not None and has_more:
-                limit_hit = len(processed_messages) >= limit_value
-
-            resume_min_value = (
-                baseline_ts
-                if baseline_ts is not None
-                else (max_processed if max_processed > 0 else None)
-            )
-
-            if limit_hit:
-                state_store.upsert(
-                    channel_id,
-                    max_processed_ts=max_processed,
-                    resume_cursor=next_cursor,
-                    resume_min_ts=resume_min_value,
-                )
-                logger.info(
-                    "slack_ingestion_resume_checkpoint",
-                    channel_id=channel_id,
-                    resume_cursor=next_cursor,
-                    processed=len(processed_messages),
-                )
-            else:
-                latest_ts_float = max(_parse_ts(msg.ts) for msg in processed_messages)
-                new_max = max(max_processed, latest_ts_float)
-                state_store.upsert(
-                    channel_id,
-                    max_processed_ts=new_max,
-                    resume_cursor=None,
-                    resume_min_ts=None,
-                )
-                logger.info(
-                    "slack_ingestion_state_updated",
-                    channel_id=channel_id,
-                    latest_ts=f"{latest_ts_float:.6f}",
-                    messages_saved=saved_count,
-                )
-
-            channels_processed.append(channel_id)
-
-        except Exception as e:
-            error_msg = f"Channel {channel_id}: {str(e)}"
-            errors.append(error_msg)
-
-    return IngestResult(
-        messages_fetched=total_fetched,
-        messages_saved=total_saved,
-        channels_processed=channels_processed,
-        errors=errors,
-    )

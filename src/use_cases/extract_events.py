@@ -7,6 +7,7 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import pytz
@@ -36,6 +37,8 @@ from src.domain.validation_constants import (
     MAX_LINKS,
     MAX_QUALIFIERS,
 )
+from src.observability.metrics import PIPELINE_STAGE_DURATION_SECONDS
+from src.observability.tracing import correlation_scope
 from src.services import deduplicator
 from src.services.importance_scorer import ImportanceScorer
 from src.services.object_registry import ObjectRegistry
@@ -274,6 +277,8 @@ def extract_events_use_case(
     source_id: MessageSource | None = None,
     batch_size: int | None = 50,
     check_budget: bool = True,
+    *,
+    correlation_id: str | None = None,
 ) -> ExtractionResult:
     """Extract events from candidates using LLM.
 
@@ -306,325 +311,351 @@ def extract_events_use_case(
         >>> result.events_extracted
         45
     """
-    # Check budget
-    min_score = None
-    if check_budget:
-        today = datetime.now(tz=pytz.UTC)
-        daily_cost = repository.get_daily_llm_cost(today)
-
-        if daily_cost >= settings.llm_daily_budget_usd:
-            raise BudgetExceededError(
-                f"Daily budget ${settings.llm_daily_budget_usd} exceeded: ${daily_cost:.2f}"
-            )
-
-        remaining_budget = settings.llm_daily_budget_usd - daily_cost
-
-        # If budget is low (< 20%), only process high-score candidates
-        if remaining_budget < settings.llm_daily_budget_usd * 0.2:
-            # Calculate P90 score using CandidateQueryCriteria
-            criteria = CandidateQueryCriteria(
-                status="new",
-                order_by="score",
-                order_desc=True,
-                limit=1000,
-            )
-            all_candidates = repository.query_candidates(criteria)
-            if len(all_candidates) >= 10:
-                scores = [c.score for c in all_candidates]
-                scores.sort(reverse=True)
-                p90_idx = int(len(scores) * 0.1)
-                min_score = scores[p90_idx]
-
-    # Fetch candidates using Criteria pattern with source isolation
-    candidates = repository.get_candidates_for_extraction(
-        batch_size=batch_size, min_score=min_score, source_id=source_id
-    )
-
-    logger.info(
-        "event_extraction_started",
-        candidate_count=len(candidates),
-        source=source_id.value if source_id else None,
-        batch_size=batch_size,
-        min_score=min_score,
-        check_budget=check_budget,
-    )
-
-    if not candidates:
-        result = ExtractionResult(
-            events_extracted=0,
-            candidates_processed=0,
-            llm_calls=0,
-            cache_hits=0,
-            total_cost_usd=0.0,
-            errors=[],
-        )
+    with correlation_scope(correlation_id) as bound_correlation_id:
+        stage_start = perf_counter()
+        final_result: ExtractionResult | None = None
+        final_log_payload: dict[str, object] = {}
         logger.info(
-            "event_extraction_finished",
-            events_extracted=result.events_extracted,
-            candidates_processed=result.candidates_processed,
-            llm_calls=result.llm_calls,
-            cache_hits=result.cache_hits,
-            total_cost_usd=result.total_cost_usd,
-        )
-        return result
-
-    events_extracted = 0
-    candidates_processed = 0
-    llm_calls = 0
-    cache_hits = 0
-    total_cost = 0.0
-    errors: list[str] = []
-
-    for candidate in candidates:
-        candidates_processed += 1
-
-        # Get source-aware channel config using unified interface
-        candidate_source = getattr(candidate, "source_id", MessageSource.SLACK)
-        channel_config = settings.get_scoring_config(
-            candidate_source, candidate.channel
-        )
-        channel_name = (
-            channel_config.channel_name if channel_config else candidate.channel
-        )
-
-        logger.info(
-            "processing_candidate",
-            candidate_num=candidates_processed,
-            total_candidates=len(candidates),
-            message_id=candidate.message_id[:8],
-            source=candidate_source.value,
-            channel=channel_name,
+            "event_extraction_started",
+            correlation_id=bound_correlation_id,
+            source=source_id.value if source_id else None,
+            batch_size=batch_size,
+            check_budget=check_budget,
         )
 
         try:
-            limited_links = candidate.links_norm[:MAX_LINKS]
-            prompt_hash = _compute_prompt_hash(
-                llm_client=llm_client,
-                text=candidate.text_norm,
-                links=limited_links,
-                message_ts_dt=candidate.ts_dt,
-                channel_name=channel_name,
+            min_score = None
+            if check_budget:
+                today = datetime.now(tz=pytz.UTC)
+                daily_cost = repository.get_daily_llm_cost(today)
+
+                if daily_cost >= settings.llm_daily_budget_usd:
+                    raise BudgetExceededError(
+                        f"Daily budget ${settings.llm_daily_budget_usd} exceeded: ${daily_cost:.2f}"
+                    )
+
+                remaining_budget = settings.llm_daily_budget_usd - daily_cost
+
+                if remaining_budget < settings.llm_daily_budget_usd * 0.2:
+                    criteria = CandidateQueryCriteria(
+                        status="new",
+                        order_by="score",
+                        order_desc=True,
+                        limit=1000,
+                    )
+                    all_candidates = repository.query_candidates(criteria)
+                    if len(all_candidates) >= 10:
+                        scores = [c.score for c in all_candidates]
+                        scores.sort(reverse=True)
+                        p90_idx = int(len(scores) * 0.1)
+                        min_score = scores[p90_idx]
+
+            candidates = repository.get_candidates_for_extraction(
+                batch_size=batch_size, min_score=min_score, source_id=source_id
             )
 
-            llm_response: LLMResponse | None = None
-            cached_payload = repository.get_cached_llm_response(prompt_hash)
-            if isinstance(cached_payload, str) and cached_payload:
+            logger.info(
+                "candidate_batch_ready",
+                correlation_id=bound_correlation_id,
+                candidate_count=len(candidates),
+                min_score=min_score,
+            )
+
+            if not candidates:
+                final_result = ExtractionResult(
+                    events_extracted=0,
+                    candidates_processed=0,
+                    llm_calls=0,
+                    cache_hits=0,
+                    total_cost_usd=0.0,
+                    errors=[],
+                )
+                final_log_payload = {
+                    "events_extracted": final_result.events_extracted,
+                    "candidates_processed": final_result.candidates_processed,
+                    "llm_calls": final_result.llm_calls,
+                    "cache_hits": final_result.cache_hits,
+                    "total_cost_usd": final_result.total_cost_usd,
+                    "errors": len(final_result.errors),
+                }
+                return final_result
+
+            events_extracted = 0
+            candidates_processed = 0
+            llm_calls = 0
+            cache_hits = 0
+            total_cost = 0.0
+            errors: list[str] = []
+
+            for candidate in candidates:
+                candidates_processed += 1
+
+                candidate_source = getattr(candidate, "source_id", MessageSource.SLACK)
+                channel_config = settings.get_scoring_config(
+                    candidate_source, candidate.channel
+                )
+                channel_name = (
+                    channel_config.channel_name if channel_config else candidate.channel
+                )
+
+                logger.info(
+                    "processing_candidate",
+                    candidate_num=candidates_processed,
+                    total_candidates=len(candidates),
+                    message_id=candidate.message_id[:8],
+                    source=candidate_source.value,
+                    channel=channel_name,
+                )
+
                 try:
-                    llm_response = LLMResponse.model_validate_json(cached_payload)
-                except Exception as exc:  # noqa: BLE001 - surface parsing issues
-                    logger.warning(
-                        "llm_cache_deserialization_failed",
-                        prompt_hash=prompt_hash,
-                        error=str(exc),
-                    )
-                else:
-                    cache_hits += 1
-                    logger.info(
-                        "llm_cache_hit",
-                        message_id=candidate.message_id[:8],
-                        prompt_hash=prompt_hash[:12],
-                        events_count=len(llm_response.events)
-                        if llm_response.events
-                        else 0,
-                    )
-                    repository.save_llm_call(
-                        LLMCallMetadata(
-                            message_id=candidate.message_id,
-                            prompt_hash=prompt_hash,
-                            model=llm_client.model,
-                            tokens_in=0,
-                            tokens_out=0,
-                            cost_usd=0.0,
-                            latency_ms=0,
-                            cached=True,
-                        )
+                    limited_links = candidate.links_norm[:MAX_LINKS]
+                    prompt_hash = _compute_prompt_hash(
+                        llm_client=llm_client,
+                        text=candidate.text_norm,
+                        links=limited_links,
+                        message_ts_dt=candidate.ts_dt,
+                        channel_name=channel_name,
                     )
 
-            if llm_response is None:
-                logger.debug(
-                    "calling_llm_api",
-                    message_id=candidate.message_id[:8],
-                    text_length=len(candidate.text_norm),
-                    links_count=len(limited_links),
-                )
+                    llm_response: LLMResponse | None = None
+                    cached_payload = repository.get_cached_llm_response(prompt_hash)
+                    if isinstance(cached_payload, str) and cached_payload:
+                        try:
+                            llm_response = LLMResponse.model_validate_json(
+                                cached_payload
+                            )
+                        except Exception as exc:  # noqa: BLE001 - surface parsing issues
+                            logger.warning(
+                                "llm_cache_deserialization_failed",
+                                prompt_hash=prompt_hash,
+                                error=str(exc),
+                            )
+                        else:
+                            cache_hits += 1
+                            logger.info(
+                                "llm_cache_hit",
+                                message_id=candidate.message_id[:8],
+                                prompt_hash=prompt_hash[:12],
+                                events_count=len(llm_response.events)
+                                if llm_response.events
+                                else 0,
+                            )
+                            repository.save_llm_call(
+                                LLMCallMetadata(
+                                    message_id=candidate.message_id,
+                                    prompt_hash=prompt_hash,
+                                    model=llm_client.model,
+                                    tokens_in=0,
+                                    tokens_out=0,
+                                    cost_usd=0.0,
+                                    latency_ms=0,
+                                    cached=True,
+                                )
+                            )
 
-                llm_response = llm_client.extract_events_with_retry(
-                    text=candidate.text_norm,
-                    links=limited_links,
-                    message_ts_dt=candidate.ts_dt,
-                    channel_name=channel_name,
-                )
-
-                logger.info(
-                    "llm_response_received",
-                    message_id=candidate.message_id[:8],
-                    is_event=llm_response.is_event,
-                    events_count=len(llm_response.events) if llm_response.events else 0,
-                )
-
-                llm_calls += 1
-
-                call_metadata = llm_client.get_call_metadata()
-                call_metadata.message_id = candidate.message_id
-                call_metadata.prompt_hash = prompt_hash
-                call_metadata.cached = False
-                total_cost += call_metadata.cost_usd
-
-                repository.save_llm_call(call_metadata)
-                repository.save_llm_response(
-                    prompt_hash, llm_response.model_dump_json()
-                )
-
-            events_source = llm_response.events if llm_response.events else []
-            max_events_raw = getattr(settings, "llm_max_events_per_msg", 5)
-            try:
-                max_events = int(max_events_raw) if max_events_raw is not None else None
-            except (TypeError, ValueError):
-                max_events = 5
-
-            if max_events is not None:
-                llm_events = events_source[:max_events]
-            else:
-                llm_events = events_source
-
-            if len(events_source) > len(llm_events):
-                logger.info(
-                    "llm_response_truncated",
-                    message_id=candidate.message_id[:8],
-                    original_count=len(events_source),
-                    max_events=max_events,
-                )
-
-            if llm_response.is_event and llm_events:
-                events_to_save: list[Event] = []
-                validation_errors: list[str] = []
-
-                reaction_count = candidate.features.reaction_count
-                mention_count = 1 if candidate.features.has_mention else 0
-
-                validator = _get_event_validator()
-
-                for llm_event in llm_events:
-                    domain_event = convert_llm_event_to_domain(
-                        llm_event,
-                        candidate.message_id,
-                        candidate.ts_dt,
-                        channel_name,
-                        candidate_source,
-                        reaction_count=reaction_count,
-                        mention_count=mention_count,
-                    )
-
-                    # Validate event before saving - check for critical errors
-                    critical_errors = validator.get_critical_errors(domain_event)
-                    validation_summary = validator.get_validation_summary(domain_event)
-
-                    if critical_errors:
-                        # Critical errors block saving - log for audit and skip
-                        validation_errors.extend(
-                            [
-                                f"Event {llm_event.object_name_raw}: {error}"
-                                for error in critical_errors
-                            ]
-                        )
-                        logger.warning(
-                            "event_validation_failed",
-                            event_object=llm_event.object_name_raw,
-                            critical_errors=critical_errors,
-                            warnings_count=len(validation_summary["warnings"]),
-                            info_count=len(validation_summary["info"]),
-                            reason="domain_rule_violations",
+                    if llm_response is None:
+                        logger.debug(
+                            "calling_llm_api",
+                            message_id=candidate.message_id[:8],
+                            text_length=len(candidate.text_norm),
+                            links_count=len(limited_links),
                         )
 
-                        # Skip this event - don't save events with critical errors
-                        continue
+                        llm_response = llm_client.extract_events_with_retry(
+                            text=candidate.text_norm,
+                            links=limited_links,
+                            message_ts_dt=candidate.ts_dt,
+                            channel_name=channel_name,
+                        )
 
-                    # Event passed critical validation - save it
-                    events_to_save.append(domain_event)
-
-                    # Log warnings if present (non-blocking)
-                    if validation_summary["warnings"]:
                         logger.info(
-                            "event_validation_warnings",
-                            event_object=llm_event.object_name_raw,
-                            warnings=validation_summary["warnings"],
+                            "llm_response_received",
+                            message_id=candidate.message_id[:8],
+                            is_event=llm_response.is_event,
+                            events_count=len(llm_response.events)
+                            if llm_response.events
+                            else 0,
                         )
 
-                # Save events (without deduplication yet)
-                if events_to_save:
-                    repository.save_events(events_to_save)
-                    events_extracted += len(events_to_save)
+                        llm_calls += 1
 
-                # Log validation summary with audit trail
-                total_events_processed = len(events_source)
-                blocked_events = total_events_processed - len(events_to_save)
-                saved_events = len(events_to_save)
+                        call_metadata = llm_client.get_call_metadata()
+                        call_metadata.message_id = candidate.message_id
+                        call_metadata.prompt_hash = prompt_hash
+                        call_metadata.cached = False
+                        total_cost += call_metadata.cost_usd
 
+                        repository.save_llm_call(call_metadata)
+                        repository.save_llm_response(
+                            prompt_hash, llm_response.model_dump_json()
+                        )
+
+                    events_source = llm_response.events if llm_response.events else []
+                    max_events_raw = getattr(settings, "llm_max_events_per_msg", 5)
+                    try:
+                        max_events = (
+                            int(max_events_raw) if max_events_raw is not None else None
+                        )
+                    except (TypeError, ValueError):
+                        max_events = 5
+
+                    if max_events is not None:
+                        llm_events = events_source[:max_events]
+                    else:
+                        llm_events = events_source
+
+                    if len(events_source) > len(llm_events):
+                        logger.info(
+                            "llm_response_truncated",
+                            message_id=candidate.message_id[:8],
+                            original_count=len(events_source),
+                            max_events=max_events,
+                        )
+
+                    if llm_response.is_event and llm_events:
+                        events_to_save: list[Event] = []
+                        validation_errors: list[str] = []
+
+                        reaction_count = candidate.features.reaction_count
+                        mention_count = 1 if candidate.features.has_mention else 0
+
+                        validator = _get_event_validator()
+
+                        for llm_event in llm_events:
+                            domain_event = convert_llm_event_to_domain(
+                                llm_event,
+                                candidate.message_id,
+                                candidate.ts_dt,
+                                channel_name,
+                                candidate_source,
+                                reaction_count=reaction_count,
+                                mention_count=mention_count,
+                            )
+
+                            importance_scorer = _get_importance_scorer()
+                            importance_result = importance_scorer.calculate_importance(
+                                domain_event,
+                                llm_score=None,
+                                reaction_count=reaction_count,
+                                mention_count=mention_count,
+                                is_duplicate=False,
+                            )
+                            domain_event.importance = importance_result.final_score
+
+                            critical_errors = validator.get_critical_errors(
+                                domain_event
+                            )
+                            validation_summary = validator.get_validation_summary(
+                                domain_event
+                            )
+
+                            if critical_errors:
+                                validation_errors.extend(
+                                    [
+                                        f"Event {llm_event.object_name_raw}: {error}"
+                                        for error in critical_errors
+                                    ]
+                                )
+                                logger.warning(
+                                    "event_validation_failed",
+                                    event_object=llm_event.object_name_raw,
+                                    critical_errors=critical_errors,
+                                    warnings_count=len(validation_summary["warnings"]),
+                                    info_count=len(validation_summary["info"]),
+                                    reason="domain_rule_violations",
+                                )
+                                continue
+
+                            events_to_save.append(domain_event)
+
+                            if validation_summary["warnings"]:
+                                logger.info(
+                                    "event_validation_warnings",
+                                    event_object=llm_event.object_name_raw,
+                                    warnings=validation_summary["warnings"],
+                                )
+
+                        if events_to_save:
+                            repository.save_events(events_to_save)
+                            events_extracted += len(events_to_save)
+
+                        total_events_processed = len(events_source)
+                        blocked_events = total_events_processed - len(events_to_save)
+                        saved_events = len(events_to_save)
+
+                        logger.info(
+                            "validation_audit",
+                            message_id=candidate.message_id[:8],
+                            saved_events=saved_events,
+                            blocked_events=blocked_events,
+                            total_issues=len(validation_errors),
+                        )
+
+                        if validation_errors:
+                            critical_issues = len(
+                                [
+                                    error
+                                    for error in validation_errors
+                                    if "critical" in error.lower()
+                                    or "required" in error.lower()
+                                    or "missing" in error.lower()
+                                ]
+                            )
+                            logger.warning(
+                                "validation_errors_detected",
+                                message_id=candidate.message_id[:8],
+                                blocked_events=blocked_events,
+                                critical_issues=critical_issues,
+                                errors=validation_errors[:5],
+                            )
+
+                    repository.update_candidate_status(
+                        candidate.message_id, CandidateStatus.LLM_OK.value
+                    )
+
+                except (LLMAPIError, ValidationError) as exc:
+                    errors.append(f"Message {candidate.message_id}: {str(exc)}")
+                    repository.update_candidate_status(
+                        candidate.message_id, CandidateStatus.LLM_FAIL.value
+                    )
+                except BudgetExceededError:
+                    errors.append("Budget exceeded during processing")
+                    repository.update_candidate_status(
+                        candidate.message_id, CandidateStatus.NEW.value
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(
+                        f"Unexpected error for {candidate.message_id}: {str(exc)}"
+                    )
+                    repository.update_candidate_status(
+                        candidate.message_id, CandidateStatus.LLM_FAIL.value
+                    )
+
+            final_result = ExtractionResult(
+                events_extracted=events_extracted,
+                candidates_processed=candidates_processed,
+                llm_calls=llm_calls,
+                cache_hits=cache_hits,
+                total_cost_usd=total_cost,
+                errors=errors,
+            )
+            final_log_payload = {
+                "events_extracted": final_result.events_extracted,
+                "candidates_processed": final_result.candidates_processed,
+                "llm_calls": final_result.llm_calls,
+                "cache_hits": final_result.cache_hits,
+                "total_cost_usd": final_result.total_cost_usd,
+                "errors": len(final_result.errors),
+            }
+            return final_result
+        finally:
+            duration = perf_counter() - stage_start
+            PIPELINE_STAGE_DURATION_SECONDS.labels(stage="extract").observe(duration)
+            if final_result is not None:
                 logger.info(
-                    "validation_audit",
-                    message_id=candidate.message_id[:8],
-                    saved_events=saved_events,
-                    blocked_events=blocked_events,
-                    total_issues=len(validation_errors),
+                    "event_extraction_finished",
+                    correlation_id=bound_correlation_id,
+                    duration_seconds=duration,
+                    **final_log_payload,
                 )
-
-                if validation_errors:
-                    critical_issues = len(
-                        [
-                            e
-                            for e in validation_errors
-                            if "critical" in e.lower()
-                            or "required" in e.lower()
-                            or "missing" in e.lower()
-                        ]
-                    )
-                    logger.warning(
-                        "validation_errors_detected",
-                        message_id=candidate.message_id[:8],
-                        blocked_events=blocked_events,
-                        critical_issues=critical_issues,
-                        errors=validation_errors[:5],  # Log first 5 errors
-                    )
-
-            # Update candidate status
-            repository.update_candidate_status(
-                candidate.message_id, CandidateStatus.LLM_OK.value
-            )
-
-        except (LLMAPIError, ValidationError) as e:
-            errors.append(f"Message {candidate.message_id}: {str(e)}")
-            repository.update_candidate_status(
-                candidate.message_id, CandidateStatus.LLM_FAIL.value
-            )
-        except BudgetExceededError:
-            errors.append("Budget exceeded during processing")
-            repository.update_candidate_status(
-                candidate.message_id, CandidateStatus.NEW.value
-            )
-            break
-        except Exception as e:
-            errors.append(f"Unexpected error for {candidate.message_id}: {str(e)}")
-            repository.update_candidate_status(
-                candidate.message_id, CandidateStatus.LLM_FAIL.value
-            )
-
-    result = ExtractionResult(
-        events_extracted=events_extracted,
-        candidates_processed=candidates_processed,
-        llm_calls=llm_calls,
-        cache_hits=cache_hits,
-        total_cost_usd=total_cost,
-        errors=errors,
-    )
-
-    logger.info(
-        "event_extraction_finished",
-        events_extracted=result.events_extracted,
-        candidates_processed=result.candidates_processed,
-        llm_calls=result.llm_calls,
-        cache_hits=result.cache_hits,
-        total_cost_usd=result.total_cost_usd,
-        errors=len(result.errors),
-    )
-
-    return result
