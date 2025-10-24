@@ -1,7 +1,10 @@
-"""Tests for Slack ingestion lookback and backfill logic."""
+"""Tests for Slack ingestion lookback and backfill behavior."""
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import create_autospec
 
@@ -43,9 +46,50 @@ def base_settings(settings: Settings) -> Settings:
 def _make_clients() -> tuple[SlackClient, RepositoryProtocol]:
     slack_client = create_autospec(SlackClient, instance=True)
     slack_client.fetch_messages.return_value = []
+    slack_client._fetch_page_with_retries.return_value = {
+        "ok": True,
+        "messages": [],
+        "response_metadata": {},
+    }
     repository = create_autospec(RepositoryProtocol, instance=True)
     repository.save_messages.return_value = 0
     return slack_client, repository
+
+
+CREATE_STATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS slack_ingestion_state (
+  channel_id TEXT PRIMARY KEY,
+  max_processed_ts REAL NOT NULL DEFAULT 0,
+  resume_cursor TEXT,
+  resume_min_ts REAL,
+  updated_at TEXT
+);
+"""
+
+
+def _patch_state_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> sqlite3.Connection:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute(CREATE_STATE_TABLE_SQL)
+    connection.commit()
+
+    def _factory(
+        _: RepositoryProtocol,
+    ) -> Callable[[], AbstractContextManager[sqlite3.Connection]]:
+        @contextmanager
+        def _ctx() -> sqlite3.Connection:
+            yield connection
+
+        return _ctx
+
+    monkeypatch.setattr(
+        ingest_messages_module,
+        "_resolve_state_connection_factory",
+        _factory,
+    )
+    return connection
 
 
 def test_ingest_uses_explicit_lookback_when_no_state(
@@ -57,21 +101,42 @@ def test_ingest_uses_explicit_lookback_when_no_state(
     repository.get_last_processed_ts.return_value = None
 
     monkeypatch.setattr(ingest_messages_module, "datetime", _FixedDateTime)
+    captured: dict[str, object] = {}
+    state_conn = _patch_state_store(monkeypatch)
 
-    result = ingest_messages_module.ingest_messages_use_case(
-        slack_client=slack_client,
-        repository=repository,
-        settings=base_settings,
-        lookback_hours=6,
-    )
+    def _capture_fetch(
+        slack_client: SlackClient,
+        channel_id: str,
+        *,
+        oldest_ts: str | None,
+        cursor: str | None,
+        limit: int | None,
+        page_size: int,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        captured["oldest_ts"] = oldest_ts
+        captured["cursor"] = cursor
+        captured["limit"] = limit
+        captured["page_size"] = page_size
+        return [], None, False
 
-    assert result.messages_fetched == 0
+    monkeypatch.setattr(ingest_messages_module, "_fetch_slack_messages", _capture_fetch)
 
-    fetch_call = slack_client.fetch_messages.call_args
-    assert fetch_call is not None
-    oldest_ts = float(fetch_call.kwargs["oldest_ts"])
-    expected_oldest = (fixed_now - timedelta(hours=6)).timestamp()
-    assert oldest_ts == pytest.approx(expected_oldest)
+    try:
+        result = ingest_messages_module.ingest_messages_use_case(
+            slack_client=slack_client,
+            repository=repository,
+            settings=base_settings,
+            lookback_hours=6,
+        )
+
+        assert result.messages_fetched == 0
+        oldest_value = captured["oldest_ts"]
+        assert isinstance(oldest_value, str)
+        oldest_ts = float(oldest_value)
+        expected_oldest = (fixed_now - timedelta(hours=6)).timestamp()
+        assert oldest_ts == pytest.approx(expected_oldest)
+    finally:
+        state_conn.close()
 
 
 def test_ingest_prefers_backfill_date_over_lookback(
@@ -85,21 +150,42 @@ def test_ingest_prefers_backfill_date_over_lookback(
     repository.get_last_processed_ts.return_value = None
 
     monkeypatch.setattr(ingest_messages_module, "datetime", _FixedDateTime)
+    captured: dict[str, object] = {}
+
+    def _capture_fetch(
+        slack_client: SlackClient,
+        channel_id: str,
+        *,
+        oldest_ts: str | None,
+        cursor: str | None,
+        limit: int | None,
+        page_size: int,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        captured["oldest_ts"] = oldest_ts
+        return [], None, False
+
+    monkeypatch.setattr(ingest_messages_module, "_fetch_slack_messages", _capture_fetch)
 
     backfill_from_date = fixed_now - timedelta(days=3)
-    result = ingest_messages_module.ingest_messages_use_case(
-        slack_client=slack_client,
-        repository=repository,
-        settings=base_settings,
-        lookback_hours=6,
-        backfill_from_date=backfill_from_date,
-    )
+    state_conn = _patch_state_store(monkeypatch)
 
-    assert result.messages_fetched == 0
+    try:
+        result = ingest_messages_module.ingest_messages_use_case(
+            slack_client=slack_client,
+            repository=repository,
+            settings=base_settings,
+            lookback_hours=6,
+            backfill_from_date=backfill_from_date,
+        )
 
-    oldest_ts = float(slack_client.fetch_messages.call_args.kwargs["oldest_ts"])
-    expected_oldest = (fixed_now - timedelta(days=3)).timestamp()
-    assert oldest_ts == pytest.approx(expected_oldest)
+        assert result.messages_fetched == 0
+        oldest_value = captured["oldest_ts"]
+        assert isinstance(oldest_value, str)
+        oldest_ts = float(oldest_value)
+        expected_oldest = (fixed_now - timedelta(days=3)).timestamp()
+        assert oldest_ts == pytest.approx(expected_oldest)
+    finally:
+        state_conn.close()
 
 
 def test_ingest_uses_state_timestamp_when_available(
@@ -112,16 +198,36 @@ def test_ingest_uses_state_timestamp_when_available(
     repository.get_last_processed_ts.return_value = last_ts_dt.timestamp()
 
     monkeypatch.setattr(ingest_messages_module, "datetime", _FixedDateTime)
+    captured: dict[str, object] = {}
+    state_conn = _patch_state_store(monkeypatch)
 
-    result = ingest_messages_module.ingest_messages_use_case(
-        slack_client=slack_client,
-        repository=repository,
-        settings=base_settings,
-        lookback_hours=6,
-    )
+    def _capture_fetch(
+        slack_client: SlackClient,
+        channel_id: str,
+        *,
+        oldest_ts: str | None,
+        cursor: str | None,
+        limit: int | None,
+        page_size: int,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        captured["oldest_ts"] = oldest_ts
+        return [], None, False
 
-    assert result.messages_fetched == 0
+    monkeypatch.setattr(ingest_messages_module, "_fetch_slack_messages", _capture_fetch)
 
-    oldest_ts = float(slack_client.fetch_messages.call_args.kwargs["oldest_ts"])
-    expected_oldest = last_ts_dt.timestamp()
-    assert oldest_ts == pytest.approx(expected_oldest)
+    try:
+        result = ingest_messages_module.ingest_messages_use_case(
+            slack_client=slack_client,
+            repository=repository,
+            settings=base_settings,
+            lookback_hours=6,
+        )
+
+        assert result.messages_fetched == 0
+        oldest_value = captured["oldest_ts"]
+        assert isinstance(oldest_value, str)
+        oldest_ts = float(oldest_value)
+        expected_oldest = last_ts_dt.timestamp()
+        assert oldest_ts == pytest.approx(expected_oldest)
+    finally:
+        state_conn.close()
