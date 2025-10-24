@@ -29,9 +29,11 @@ from src.adapters.slack_client import SlackClient
 from src.config.settings import get_settings
 from src.domain.models import MessageSource
 from src.domain.protocols import RepositoryProtocol
+from src.services.importance_scorer import ImportanceScorer
+from src.services.object_registry import ObjectRegistry
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import build_object_registry, extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
 from src.use_cases.publish_digest import publish_digest_use_case
 
@@ -68,6 +70,8 @@ def run_single_iteration(
     repository: RepositoryProtocol,
     llm_client: LLMClient,
     settings: object,
+    object_registry: ObjectRegistry,
+    importance_scorer: ImportanceScorer,
     args: argparse.Namespace,
     backfill_from_date: datetime | None = None,
 ) -> None:
@@ -121,6 +125,8 @@ def run_single_iteration(
             source_id=MessageSource.SLACK,  # Legacy Slack-only processing
             batch_size=50,
             check_budget=True,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
         print(f"✓ Candidates processed: {extraction_result.candidates_processed}")
         print(f"✓ Events extracted: {extraction_result.events_extracted}")
@@ -266,6 +272,8 @@ Examples:
             temperature=settings.llm_temperature,
             timeout=settings.llm_timeout_seconds,
         )
+        object_registry = build_object_registry(settings)
+        importance_scorer = ImportanceScorer()
     except Exception as e:
         logger.error(f"Failed to initialize clients: {e}")
         return 1
@@ -294,6 +302,8 @@ Examples:
                 repository=repository,
                 llm_client=llm_client,
                 settings=settings,
+                object_registry=object_registry,
+                importance_scorer=importance_scorer,
                 args=args,
                 backfill_from_date=backfill_from_date,
             )

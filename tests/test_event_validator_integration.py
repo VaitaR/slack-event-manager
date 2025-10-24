@@ -18,9 +18,13 @@ from src.domain.models import (
     EventStatus,
     MessageSource,
 )
+from src.services.importance_scorer import ImportanceScorer
 from src.services.validators import EventValidator
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import (
+    build_object_registry,
+    extract_events_use_case,
+)
 from src.use_cases.publish_digest import publish_digest_use_case
 
 
@@ -47,7 +51,17 @@ def mock_settings():
     settings.tz_default = "Europe/Amsterdam"
     settings.dedup_date_window_hours = 48
     settings.dedup_title_similarity = 0.8
+    settings.object_registry_path = "config/defaults/object_registry.example.yaml"
     return settings
+
+
+def _make_llm_client() -> MagicMock:
+    client = MagicMock()
+    client.model = "gpt-5-nano"
+    client.system_prompt_hash = "prompt-hash"
+    client.prompt_token_budget = 3000
+    client.prompt_version = "v1"
+    return client
 
 
 def test_extract_events_use_case_emits_structured_logs(mock_settings) -> None:
@@ -57,7 +71,9 @@ def test_extract_events_use_case_emits_structured_logs(mock_settings) -> None:
     repository.get_candidates_for_extraction.return_value = []
     repository.get_daily_llm_cost.return_value = 0.0
 
-    llm_client = MagicMock()
+    llm_client = _make_llm_client()
+    object_registry = build_object_registry(mock_settings)
+    importance_scorer = ImportanceScorer()
 
     with capture_logs() as logs:
         result = extract_events_use_case(
@@ -67,6 +83,8 @@ def test_extract_events_use_case_emits_structured_logs(mock_settings) -> None:
             source_id=MessageSource.SLACK,
             batch_size=5,
             check_budget=False,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
 
     assert result.events_extracted == 0
@@ -161,7 +179,7 @@ class TestEventValidatorIntegration:
     def test_validator_integration_extract_events(self, mock_settings, sample_event):
         """Test EventValidator integration in extract_events_use_case."""
         # Create mock LLM client and repository
-        llm_client = MagicMock()
+        llm_client = _make_llm_client()
         repository = MagicMock()
 
         # Mock successful LLM response
@@ -182,6 +200,9 @@ class TestEventValidatorIntegration:
         # Mock daily cost for budget check
         repository.get_daily_llm_cost.return_value = 0.0
 
+        object_registry = build_object_registry(mock_settings)
+        importance_scorer = ImportanceScorer()
+
         # Run use case - should not raise validation errors for valid events
         result = extract_events_use_case(
             llm_client=llm_client,
@@ -189,6 +210,8 @@ class TestEventValidatorIntegration:
             settings=mock_settings,
             source_id=MessageSource.SLACK,  # Test integration - Slack only
             batch_size=10,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
 
         # Should complete without errors
@@ -329,7 +352,7 @@ class TestEventValidatorIntegration:
 
     def test_extract_events_blocks_critical_validation_errors(self, mock_settings):
         """Test that extract_events_use_case blocks events with critical validation errors."""
-        llm_client = MagicMock()
+        llm_client = _make_llm_client()
         repository = MagicMock()
 
         # Mock LLM response with events that have critical errors
@@ -392,6 +415,9 @@ class TestEventValidatorIntegration:
         mock_settings.get_channel_config.return_value = channel_config
         mock_settings.get_scoring_config.return_value = channel_config
 
+        object_registry = build_object_registry(mock_settings)
+        importance_scorer = ImportanceScorer()
+
         # Run use case
         result = extract_events_use_case(
             llm_client=llm_client,
@@ -399,6 +425,8 @@ class TestEventValidatorIntegration:
             settings=mock_settings,
             source_id=MessageSource.SLACK,  # Test critical errors - Slack only
             batch_size=10,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
 
         # Verify no events were saved (blocked due to critical errors)

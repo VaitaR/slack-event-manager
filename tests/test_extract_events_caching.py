@@ -1,6 +1,7 @@
 """Tests for LLM response caching within the extraction use case."""
 
 from datetime import UTC, datetime
+from itertools import chain, repeat
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,7 +16,12 @@ from src.domain.models import (
     MessageSource,
     ScoringFeatures,
 )
-from src.use_cases.extract_events import extract_events_use_case
+from src.services import token_budget
+from src.services.importance_scorer import ImportanceScorer
+from src.use_cases.extract_events import (
+    build_object_registry,
+    extract_events_use_case,
+)
 
 
 @pytest.fixture
@@ -28,15 +34,20 @@ def extraction_settings() -> MagicMock:
     settings.get_scoring_config.return_value = None
     settings.dedup_date_window_hours = 48
     settings.dedup_title_similarity = 0.8
+    settings.object_registry_path = "config/defaults/object_registry.example.yaml"
     return settings
 
 
-def _make_candidate(source: MessageSource = MessageSource.SLACK) -> EventCandidate:
+def _make_candidate(
+    source: MessageSource = MessageSource.SLACK,
+    *,
+    text: str = "release shipped",
+) -> EventCandidate:
     return EventCandidate(
         message_id="msg-1",
         channel="general",
         ts_dt=datetime.now(tz=UTC),
-        text_norm="release shipped",
+        text_norm=text,
         links_norm=["https://example.com/changelog"],
         anchors=["ABC-123"],
         score=0.9,
@@ -89,6 +100,11 @@ def test_extract_events_use_case_uses_cached_response(
     llm_client = MagicMock()
     llm_client.model = "gpt-5-nano"
     llm_client.system_prompt_hash = "prompt-hash"
+    llm_client.prompt_token_budget = 3000
+    llm_client.prompt_version = "v1"
+
+    object_registry = build_object_registry(extraction_settings)
+    importance_scorer = ImportanceScorer()
 
     result = extract_events_use_case(
         llm_client=llm_client,
@@ -97,6 +113,8 @@ def test_extract_events_use_case_uses_cached_response(
         source_id=MessageSource.TELEGRAM,
         batch_size=5,
         check_budget=False,
+        object_registry=object_registry,
+        importance_scorer=importance_scorer,
     )
 
     assert result.events_extracted == 1
@@ -138,6 +156,8 @@ def test_extract_events_use_case_persists_llm_response(
     llm_client = MagicMock()
     llm_client.model = "gpt-5-nano"
     llm_client.system_prompt_hash = "prompt-hash"
+    llm_client.prompt_token_budget = 3000
+    llm_client.prompt_version = "v1"
     llm_client.extract_events_with_retry.return_value = llm_response
     llm_client.get_call_metadata.return_value = LLMCallMetadata(
         message_id="",
@@ -150,6 +170,9 @@ def test_extract_events_use_case_persists_llm_response(
         cached=False,
     )
 
+    object_registry = build_object_registry(extraction_settings)
+    importance_scorer = ImportanceScorer()
+
     result = extract_events_use_case(
         llm_client=llm_client,
         repository=repository,
@@ -157,6 +180,8 @@ def test_extract_events_use_case_persists_llm_response(
         source_id=MessageSource.SLACK,
         batch_size=5,
         check_budget=False,
+        object_registry=object_registry,
+        importance_scorer=importance_scorer,
     )
 
     assert result.events_extracted == extraction_settings.llm_max_events_per_msg
@@ -176,3 +201,76 @@ def test_extract_events_use_case_persists_llm_response(
     assert metadata.cached is False
     assert metadata.prompt_hash == repository.save_llm_response.call_args[0][0]
     assert metadata.cost_usd == 1.23
+
+
+def test_cache_hit_across_chunks(extraction_settings: MagicMock) -> None:
+    """Chunked candidates should reuse cached responses per chunk."""
+
+    long_text = " ".join(["release"] * 120)
+    candidate = _make_candidate(text=long_text)
+
+    cached_response = LLMResponse(is_event=True, events=[_make_llm_event()])
+    live_event = _make_llm_event()
+    live_event.anchor = "XYZ-789"
+    live_response = LLMResponse(is_event=True, events=[live_event])
+
+    llm_client = MagicMock()
+    llm_client.model = "gpt-5-nano"
+    llm_client.system_prompt_hash = "prompt-hash"
+    llm_client.prompt_token_budget = 10
+    llm_client.prompt_version = "v1"
+
+    char_budget = token_budget.characters_for_tokens(
+        llm_client.prompt_token_budget, llm_client.model
+    )
+    text_chunks = token_budget.truncate_or_chunk(long_text, char_budget)
+
+    repository = MagicMock()
+    repository.get_candidates_for_extraction.return_value = [candidate]
+    repository.get_cached_llm_response.side_effect = chain(
+        [cached_response.model_dump_json()], repeat(None)
+    )
+    repository.update_candidate_status.return_value = None
+    llm_client.extract_events_with_retry.return_value = live_response
+    llm_client.get_call_metadata.return_value = LLMCallMetadata(
+        message_id="",
+        prompt_hash="prompt-hash-live",
+        model="gpt-5-nano",
+        tokens_in=120,
+        tokens_out=40,
+        cost_usd=2.5,
+        latency_ms=250,
+        cached=False,
+    )
+
+    object_registry = build_object_registry(extraction_settings)
+    importance_scorer = ImportanceScorer()
+
+    result = extract_events_use_case(
+        llm_client=llm_client,
+        repository=repository,
+        settings=extraction_settings,
+        source_id=MessageSource.SLACK,
+        batch_size=5,
+        check_budget=False,
+        object_registry=object_registry,
+        importance_scorer=importance_scorer,
+    )
+
+    assert result.events_extracted == extraction_settings.llm_max_events_per_msg
+    assert result.llm_calls == len(text_chunks) - 1
+    assert result.cache_hits == 1
+
+    assert llm_client.extract_events_with_retry.call_count == len(text_chunks) - 1
+    for index, (_, kwargs) in enumerate(
+        llm_client.extract_events_with_retry.call_args_list, 1
+    ):
+        assert kwargs["chunk_index"] == index
+
+    assert repository.get_cached_llm_response.call_count == len(text_chunks)
+    assert repository.save_llm_call.call_count == len(text_chunks)
+    assert repository.save_llm_response.call_count == len(text_chunks) - 1
+
+    saved_events = repository.save_events.call_args[0][0]
+    assert len(saved_events) == extraction_settings.llm_max_events_per_msg
+    assert {event.anchor for event in saved_events} == {"ABC-123", "XYZ-789"}

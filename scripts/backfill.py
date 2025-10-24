@@ -18,9 +18,10 @@ from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
 from src.config.settings import get_settings
 from src.domain.models import MessageSource
+from src.services.importance_scorer import ImportanceScorer
 from src.use_cases.build_candidates import build_candidates_use_case
 from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
+from src.use_cases.extract_events import build_object_registry, extract_events_use_case
 from src.use_cases.ingest_messages import ingest_messages_use_case
 
 
@@ -85,6 +86,8 @@ def main() -> None:
         temperature=settings.llm_temperature,
         timeout=settings.llm_timeout_seconds,
     )
+    object_registry = build_object_registry(settings)
+    importance_scorer = ImportanceScorer()
 
     # Process day by day
     current_date = start_date
@@ -129,6 +132,8 @@ def main() -> None:
             source_id=MessageSource.SLACK,  # Backfill script - Slack only
             batch_size=50,
             check_budget=True,
+            object_registry=object_registry,
+            importance_scorer=importance_scorer,
         )
         total_events += extraction_result.events_extracted
         total_cost += extraction_result.total_cost_usd
