@@ -17,6 +17,7 @@ pyyaml>=6.0.0
 jsonschema>=4.20.0
 types-jsonschema>=4.20.0
 structlog>=24.1.0
+prometheus-client>=0.20.0
 
 # Testing
 pytest>=8.0.0

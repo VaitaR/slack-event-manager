@@ -6,34 +6,46 @@ This app provides a visual interface for the Slack Event Manager pipeline,
 allowing users to configure settings, run the pipeline, and visualize results.
 """
 
+import hmac
+import os
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final
+from uuid import uuid4
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.adapters.llm_client import LLMClient
 from src.adapters.repository_factory import create_repository
-from src.adapters.slack_client import SlackClient
 from src.config.settings import get_settings
-from src.domain.models import MessageSource
-from src.use_cases.build_candidates import build_candidates_use_case
+from src.domain.protocols import RepositoryProtocol
+from src.observability.metrics import ensure_metrics_exporter
+from src.presentation.streamlit_orchestration import (
+    RateLimitExceededError,
+    job_result,
+    job_status,
+    submit_ingest_extract_job,
+)
 from src.use_cases.dashboard_queries import (
     fetch_recent_candidates,
     fetch_recent_events,
     fetch_recent_messages,
 )
-from src.use_cases.deduplicate_events import deduplicate_events_use_case
-from src.use_cases.extract_events import extract_events_use_case
-from src.use_cases.ingest_messages import process_slack_message
+from src.use_cases.pipeline_orchestrator import PipelineParams
 
 # UI Constants
-MAX_MESSAGE_LENGTH = 150
-MAX_CANDIDATE_TEXT_LENGTH = 200
+MAX_MESSAGE_LENGTH: Final[int] = 150
+MAX_CANDIDATE_TEXT_LENGTH: Final[int] = 200
+AUTH_TOKEN_ENV: Final[str] = "STREAMLIT_AUTH_TOKEN"
+SESSION_AUTH_KEY: Final[str] = "auth_verified"
+SESSION_ID_KEY: Final[str] = "session_id"
+SESSION_JOB_ID_KEY: Final[str] = "active_job_id"
+SESSION_JOB_RESULT_KEY: Final[str] = "last_job_result"
+SESSION_STATUS_MESSAGE_KEY: Final[str] = "job_status_message"
+POLL_INTERVAL_MS: Final[int] = 1500
 
 
-def get_repository():
+def get_repository() -> RepositoryProtocol:
     """Get repository instance based on settings.
 
     Returns:
@@ -41,6 +53,100 @@ def get_repository():
     """
     settings = get_settings()
     return create_repository(settings)
+
+
+def _ensure_session_defaults() -> None:
+    if SESSION_ID_KEY not in st.session_state:
+        st.session_state[SESSION_ID_KEY] = str(uuid4())
+    st.session_state.setdefault(SESSION_JOB_ID_KEY, None)
+    st.session_state.setdefault(SESSION_JOB_RESULT_KEY, None)
+    st.session_state.setdefault(SESSION_STATUS_MESSAGE_KEY, "")
+
+
+def _require_auth() -> str:
+    expected = os.getenv(AUTH_TOKEN_ENV)
+    if not expected:
+        st.error("Access is disabled until STREAMLIT_AUTH_TOKEN is configured.")
+        st.stop()
+
+    if st.session_state.get(SESSION_AUTH_KEY):
+        return str(st.session_state[SESSION_ID_KEY])
+
+    st.warning("Authentication required to run the pipeline.")
+    with st.form("auth_form", clear_on_submit=False):
+        provided = st.text_input("Access Token", type="password")
+        submit = st.form_submit_button("Sign In")
+
+    if not submit:
+        st.stop()
+
+    if not provided or not hmac.compare_digest(provided, expected):
+        st.error("Invalid access token.")
+        st.stop()
+
+    st.session_state[SESSION_AUTH_KEY] = True
+    return str(st.session_state[SESSION_ID_KEY])
+
+
+def _submit_pipeline_job(message_limit: int, channels: list[str], user_id: str) -> str:
+    params = PipelineParams(message_limit=message_limit, channel_ids=channels)
+    job_id = submit_ingest_extract_job(params, user_id)
+    st.session_state[SESSION_JOB_ID_KEY] = job_id
+    st.session_state[SESSION_JOB_RESULT_KEY] = None
+    st.session_state[SESSION_STATUS_MESSAGE_KEY] = "Job submitted"
+    return job_id
+
+
+def _render_job_status(job_id: str) -> None:
+    status = job_status(job_id)
+    progress_value = float(status.get("progress", 0.0))
+    st.progress(progress_value)
+    status_raw = str(status.get("status", "unknown")).lower()
+    status_text = status_raw.capitalize()
+    message = status.get("message") or ""
+    st.info(f"Status: {status_text} {message}")
+
+    if status_raw in {"succeeded", "failed"}:
+        final = job_result(job_id)
+        st.session_state[SESSION_JOB_RESULT_KEY] = final
+        st.session_state[SESSION_JOB_ID_KEY] = None
+        st.session_state[SESSION_STATUS_MESSAGE_KEY] = status_text
+        if status_raw == "failed":
+            error_msg = status.get("error") or "Pipeline failed"
+            st.error(error_msg)
+        else:
+            st.success("Pipeline completed successfully")
+
+
+def _render_job_summary(result: dict[str, object]) -> None:
+    st.subheader("Latest Pipeline Run")
+    correlation_id = result.get("correlation_id")
+    if correlation_id:
+        st.caption(f"Correlation ID: {correlation_id}")
+
+    ingest = result.get("ingest", {})
+    extract = result.get("extract", {})
+    dedup = result.get("dedup", {})
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(
+            "Messages Saved",
+            ingest.get("messages_saved", 0),
+            help="Total messages persisted during ingestion",
+        )
+    with col2:
+        st.metric(
+            "Events Extracted",
+            extract.get("events_extracted", 0),
+            help="Events produced by the extraction stage",
+        )
+    with col3:
+        st.metric(
+            "Final Events",
+            dedup.get("total_events", 0),
+            help="Events remaining after deduplication",
+        )
 
 
 # Page configuration
@@ -76,6 +182,10 @@ st.markdown(
 
 def main():
     """Main application function."""
+
+    ensure_metrics_exporter()
+    _ensure_session_defaults()
+    user_id = _require_auth()
 
     # Header
     st.markdown(
@@ -122,7 +232,9 @@ def main():
         # Show database info
         if settings.database_type == "postgres":
             st.info(
-                f"🐘 PostgreSQL: {settings.postgres_user}@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database}"
+                "🐘 PostgreSQL: "
+                f"{settings.postgres_user}@{settings.postgres_host}:"
+                f"{settings.postgres_port}/{settings.postgres_database}"
             )
         else:
             st.info(f"📁 SQLite: {settings.db_path}")
@@ -132,15 +244,29 @@ def main():
             "🚀 Run Pipeline", type="primary", use_container_width=True
         )
 
-    # Main content
-    if run_pipeline:
-        run_full_pipeline(message_limit, channels)
+        if run_pipeline:
+            try:
+                job_id = _submit_pipeline_job(message_limit, channels, user_id)
+                st.success(f"Pipeline job submitted (ID: {job_id[:8]}…)")
+            except RateLimitExceededError as exc:
+                st.error(str(exc))
+
+    active_job_id = st.session_state.get(SESSION_JOB_ID_KEY)
+    if active_job_id:
+        st.autorefresh(interval=POLL_INTERVAL_MS, key=f"poll_{active_job_id}")
+        _render_job_status(active_job_id)
     else:
-        show_database_inspection()
+        latest_result = st.session_state.get(SESSION_JOB_RESULT_KEY)
+        if isinstance(latest_result, dict):
+            _render_job_summary(latest_result)
+        elif st.session_state.get(SESSION_STATUS_MESSAGE_KEY):
+            st.info(st.session_state[SESSION_STATUS_MESSAGE_KEY])
+
+    show_database_inspection()
 
 
 def fetch_channel_messages(
-    slack_client: SlackClient, *, channels: list[str], limit: int | None
+    slack_client: Any, *, channels: list[str], limit: int | None
 ) -> list[tuple[str, dict[str, Any]]]:
     """Fetch messages for each channel while preserving attribution."""
 
@@ -149,139 +275,6 @@ def fetch_channel_messages(
         messages = slack_client.fetch_messages(channel_id=channel, limit=limit)
         channel_messages.extend((channel, message) for message in messages)
     return channel_messages
-
-
-def run_full_pipeline(message_limit: int, channels: list[str]):
-    """Run the complete pipeline and show results."""
-
-    with st.spinner("Running pipeline... This may take a few minutes."):
-        try:
-            # Initialize components
-            settings = get_settings()
-            slack_client = SlackClient(
-                bot_token=settings.slack_bot_token.get_secret_value()
-            )
-
-            # gpt-5-nano requires temperature=1.0 (cannot be changed)
-            temperature = (
-                1.0 if settings.llm_model == "gpt-5-nano" else settings.llm_temperature
-            )
-
-            llm_client = LLMClient(
-                api_key=settings.openai_api_key.get_secret_value(),
-                model=settings.llm_model,
-                temperature=temperature,
-                timeout=30,
-                verbose=False,  # Disable verbose for demo
-            )
-
-            # Create repository (works for both SQLite and PostgreSQL)
-            repo = create_repository(settings)
-
-            # Progress tracking
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            # Step 1: Fetch messages
-            status_text.text("📨 Fetching messages from Slack...")
-            progress_bar.progress(10)
-
-            all_messages = fetch_channel_messages(
-                slack_client, channels=channels, limit=message_limit
-            )
-
-            # Step 2: Process and save messages
-            status_text.text("💾 Processing and saving messages...")
-            progress_bar.progress(30)
-
-            processed_messages = []
-            for channel, msg in all_messages:
-                # Get user info if available
-                user_info = None
-                user_id = msg.get("user")
-                if user_id and not msg.get("bot_id"):
-                    try:
-                        user_info = slack_client.get_user_info(user_id)
-                    except Exception:
-                        pass  # Continue without user info
-
-                # Get permalink
-                permalink = None
-                permalink = None
-                msg_ts = msg.get("ts")
-                if msg_ts:
-                    try:
-                        permalink = slack_client.get_permalink(channel, msg_ts)
-                    except Exception:
-                        pass  # Continue without permalink
-
-                processed_msg = process_slack_message(
-                    msg, channel, user_info=user_info, permalink=permalink
-                )
-                processed_messages.append(processed_msg)
-
-            saved_count = repo.save_messages(processed_messages)
-
-            # Step 3: Build candidates
-            status_text.text("🎯 Building event candidates...")
-            progress_bar.progress(50)
-
-            candidate_result = build_candidates_use_case(
-                repository=repo,
-                settings=settings,
-            )
-
-            # Step 4: Extract events with LLM
-            status_text.text("🤖 Extracting events with AI...")
-            progress_bar.progress(70)
-
-            extraction_result = extract_events_use_case(
-                llm_client=llm_client,
-                repository=repo,
-                settings=settings,
-                source_id=MessageSource.SLACK,  # Streamlit UI - Slack only
-                batch_size=None,  # Process all candidates
-                check_budget=False,
-            )
-
-            # Step 5: Deduplicate events
-            status_text.text("🔄 Deduplicating events...")
-            progress_bar.progress(90)
-
-            dedup_result = deduplicate_events_use_case(
-                repository=repo,
-                settings=settings,
-                lookback_days=7,
-            )
-
-            # Complete
-            progress_bar.progress(100)
-            status_text.text("✅ Pipeline completed!")
-
-            # Show results
-            st.success("Pipeline completed successfully!")
-
-            # Metrics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Messages", saved_count)
-            with col2:
-                st.metric("Candidates", candidate_result.candidates_created)
-            with col3:
-                st.metric("Events", extraction_result.events_extracted)
-            with col4:
-                st.metric("Final Events", dedup_result.total_events)
-
-            # Cost information
-            if extraction_result.total_cost_usd > 0:
-                st.info(f"💰 Total LLM cost: ${extraction_result.total_cost_usd:.6f}")
-
-        except Exception as e:
-            st.error(f"Pipeline failed: {str(e)}")
-            return
-
-    # Show detailed results
-    show_pipeline_results()
 
 
 def show_pipeline_results():
@@ -335,7 +328,9 @@ def show_messages_table():
 
         if settings.database_type == "postgres":
             st.caption(
-                f"🐘 Source: PostgreSQL ({settings.postgres_host}:{settings.postgres_port}/{settings.postgres_database})"
+                "🐘 Source: PostgreSQL ("
+                f"{settings.postgres_host}:{settings.postgres_port}/"
+                f"{settings.postgres_database})"
             )
         else:
             st.caption(f"📁 Source: SQLite ({settings.db_path})")

@@ -51,6 +51,7 @@ module = [
     "rapidfuzz.*",
     "psycopg2.*",
     "alembic.*",
+    "prometheus_client.*",
 ]
 ignore_missing_imports = true
 
