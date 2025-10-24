@@ -6,7 +6,7 @@ builders to create queries in a type-safe, testable way.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from src.domain.models import EventCategory
@@ -365,7 +365,7 @@ def recent_events_criteria(days: int = 7) -> EventQueryCriteria:
     """
     from datetime import timedelta
 
-    now = datetime.utcnow()
+    now = datetime.now(tz=UTC)
     return EventQueryCriteria(
         extracted_after=now - timedelta(days=days),
         order_by="extracted_at",

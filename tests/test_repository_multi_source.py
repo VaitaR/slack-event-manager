@@ -1,13 +1,13 @@
 """Tests for repository multi-source support."""
 
+import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
-import pytz
 
 from src.adapters.repository_factory import create_repository
 from src.config.settings import Settings
@@ -48,7 +48,7 @@ def create_test_candidate(
     return EventCandidate(
         message_id=message_id,
         channel=channel,
-        ts_dt=kwargs.get("message_date", datetime.now(tz=pytz.UTC)),
+        ts_dt=kwargs.get("message_date", datetime.now(tz=UTC)),
         text_norm=kwargs.get("text_normalized", "test text"),
         links_norm=kwargs.get("links_norm", []),
         anchors=kwargs.get("anchors", []),
@@ -72,7 +72,7 @@ def create_test_event(
         event_id=kwargs.get("event_id", uuid4()),
         message_id=message_id,
         source_channels=[channel],
-        extracted_at=kwargs.get("extracted_at", datetime.utcnow()),
+        extracted_at=kwargs.get("extracted_at", datetime.now(tz=UTC)),
         action=kwargs.get("action", ActionType.LAUNCH),
         object_id=kwargs.get("object_id", None),
         object_name_raw=kwargs.get("title", "Test Event"),
@@ -176,7 +176,7 @@ class TestSaveTelegramMessages:
             TelegramMessage(
                 message_id="123",
                 channel="test_channel",
-                message_date=datetime.utcnow(),
+                message_date=datetime.now(tz=UTC),
                 sender_id="user123",
                 sender_name="Test User",
                 text="Test message",
@@ -204,7 +204,7 @@ class TestSaveTelegramMessages:
             TelegramMessage(
                 message_id="456",
                 channel="test_channel",
-                message_date=datetime.utcnow(),
+                message_date=datetime.now(tz=UTC),
                 sender_id="user456",
                 sender_name="User 456",
                 text="Forwarded message",
@@ -241,7 +241,7 @@ class TestSaveTelegramMessages:
             TelegramMessage(
                 message_id=str(i),
                 channel="test_channel",
-                message_date=datetime.utcnow(),
+                message_date=datetime.now(tz=UTC),
                 text=f"Message {i}",
                 text_norm=f"message {i}",
             )
@@ -273,7 +273,7 @@ class TestGetTelegramMessages:
             TelegramMessage(
                 message_id=str(i),
                 channel="test_channel",
-                message_date=datetime.utcnow() + timedelta(minutes=i),
+                message_date=datetime.now(tz=UTC) + timedelta(minutes=i),
                 text=f"Message {i}",
                 text_norm=f"message {i}",
             )
@@ -297,7 +297,7 @@ class TestGetTelegramMessages:
             TelegramMessage(
                 message_id=str(i),
                 channel="test_channel",
-                message_date=datetime.utcnow() + timedelta(minutes=i),
+                message_date=datetime.now(tz=UTC) + timedelta(minutes=i),
                 text=f"Message {i}",
             )
             for i in range(10)
@@ -319,7 +319,7 @@ class TestGetTelegramMessages:
             TelegramMessage(
                 message_id=f"a{i}",
                 channel="channel_a",
-                message_date=datetime.utcnow(),
+                message_date=datetime.now(tz=UTC),
                 text=f"Message A{i}",
             )
             for i in range(3)
@@ -328,7 +328,7 @@ class TestGetTelegramMessages:
             TelegramMessage(
                 message_id=f"b{i}",
                 channel="channel_b",
-                message_date=datetime.utcnow(),
+                message_date=datetime.now(tz=UTC),
                 text=f"Message B{i}",
             )
             for i in range(2)
@@ -520,6 +520,42 @@ class TestCandidatesAndEventsSourceTracking:
 
         assert source_id == MessageSource.TELEGRAM.value
 
+    def test_save_events_merges_source_channels_on_update(self, temp_db: Path) -> None:
+        """Updating an existing event should persist the union of source channels."""
+
+        repo = make_repository(temp_db)
+
+        initial_event = create_test_event(
+            message_id="union",
+            channel="channel-a",
+            source_id=MessageSource.TELEGRAM,
+            dedup_key="union-key",
+            cluster_key="union-cluster",
+        )
+        repo.save_events([initial_event])
+
+        merged_event = initial_event.model_copy(
+            update={
+                "source_channels": ["channel-a", "channel-b"],
+                "source_id": MessageSource.TELEGRAM,
+            }
+        )
+
+        repo.save_events([merged_event])
+
+        with sqlite3.connect(str(temp_db)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT source_channels, source_id FROM events WHERE dedup_key = ?",
+                ("union-key",),
+            )
+            row = cursor.fetchone()
+
+        assert row is not None
+        stored_channels = set(json.loads(row[0]))
+        assert stored_channels == {"channel-a", "channel-b"}
+        assert row[1] == MessageSource.TELEGRAM.value
+
     def test_get_candidates_filters_by_source(self, temp_db: Path) -> None:
         """Test retrieving candidates filtered by source_id."""
 
@@ -637,7 +673,7 @@ class TestDashboardQueries:
 
         repo = make_repository(temp_db)
 
-        base_time = datetime.utcnow()
+        base_time = datetime.now(tz=UTC)
         older_event = create_test_event(
             message_id="older",
             channel="test",
@@ -700,7 +736,7 @@ class TestCandidateLeasing:
         )
         repo.save_candidates([candidate])
 
-        stale_started_at = datetime.now(tz=pytz.UTC) - timedelta(hours=2)
+        stale_started_at = datetime.now(tz=UTC) - timedelta(hours=2)
         with sqlite3.connect(str(temp_db)) as conn:
             cursor = conn.cursor()
             cursor.execute(

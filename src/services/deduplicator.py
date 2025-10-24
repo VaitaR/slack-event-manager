@@ -245,6 +245,7 @@ def merge_events(event1: Event, event2: Event) -> Event:
         message_id=event1.message_id,
         source_channels=merged_channels,
         extracted_at=event1.extracted_at,
+        source_id=event1.source_id,
         # Title slots (keep event1's)
         action=event1.action,
         object_id=event1.object_id,

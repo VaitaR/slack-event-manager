@@ -587,7 +587,7 @@ class SQLiteRepository:
                 INSERT OR REPLACE INTO channel_watermarks (channel, committed_ts, processing_ts)
                 VALUES (?, ?, ?)
                 """,
-                (channel, ts, datetime.utcnow().isoformat()),
+                (channel, ts, datetime.now(tz=pytz.UTC).isoformat()),
             )
 
             conn.commit()
@@ -968,6 +968,7 @@ class SQLiteRepository:
                     cursor.execute(
                         """
                         UPDATE events SET
+                            source_channels = ?,
                             action = ?,
                             object_id = ?,
                             object_name_raw = ?,
@@ -993,10 +994,12 @@ class SQLiteRepository:
                             impact_type = ?,
                             confidence = ?,
                             importance = ?,
-                            cluster_key = ?
+                            cluster_key = ?,
+                            source_id = ?
                         WHERE dedup_key = ?
                         """,
                         (
+                            json.dumps(event.source_channels),
                             event.action.value,
                             event.object_id,
                             event.object_name_raw,
@@ -1029,6 +1032,7 @@ class SQLiteRepository:
                             event.confidence,
                             event.importance,
                             event.cluster_key,
+                            event.source_id.value,
                             event.dedup_key,
                         ),
                     )
@@ -1100,7 +1104,7 @@ class SQLiteRepository:
                             str(event.event_id),
                             relation.relation_type.value,
                             str(relation.target_event_id),
-                            datetime.utcnow().isoformat(),
+                            datetime.now(tz=pytz.UTC).isoformat(),
                         ),
                     )
 
@@ -1516,6 +1520,14 @@ class SQLiteRepository:
             TimeSource,
         )
 
+        def _parse_dt(value: str | None) -> datetime | None:
+            if not value:
+                return None
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=pytz.UTC)
+            return parsed.astimezone(pytz.UTC)
+
         # Get source_id with backward compatibility
         try:
             source_id_str = row["source_id"]
@@ -1525,14 +1537,16 @@ class SQLiteRepository:
             MessageSource(source_id_str) if source_id_str else MessageSource.SLACK
         )
 
+        extracted_at = _parse_dt(row["extracted_at"])
+        if extracted_at is None:
+            raise RepositoryError("Event row missing extracted_at timestamp")
+
         return Event(
             # Identification
             event_id=UUID(row["event_id"]),
             message_id=row["message_id"],
             source_channels=json.loads(row["source_channels"] or "[]"),
-            extracted_at=datetime.fromisoformat(row["extracted_at"]).replace(
-                tzinfo=pytz.UTC
-            ),
+            extracted_at=extracted_at,
             # Title slots
             action=ActionType(row["action"]),
             object_id=row["object_id"],
@@ -1547,26 +1561,10 @@ class SQLiteRepository:
             environment=Environment(row["environment"]),
             severity=Severity(row["severity"]) if row["severity"] else None,
             # Time fields
-            planned_start=(
-                datetime.fromisoformat(row["planned_start"]).replace(tzinfo=pytz.UTC)
-                if row["planned_start"]
-                else None
-            ),
-            planned_end=(
-                datetime.fromisoformat(row["planned_end"]).replace(tzinfo=pytz.UTC)
-                if row["planned_end"]
-                else None
-            ),
-            actual_start=(
-                datetime.fromisoformat(row["actual_start"]).replace(tzinfo=pytz.UTC)
-                if row["actual_start"]
-                else None
-            ),
-            actual_end=(
-                datetime.fromisoformat(row["actual_end"]).replace(tzinfo=pytz.UTC)
-                if row["actual_end"]
-                else None
-            ),
+            planned_start=_parse_dt(row["planned_start"]),
+            planned_end=_parse_dt(row["planned_end"]),
+            actual_start=_parse_dt(row["actual_start"]),
+            actual_end=_parse_dt(row["actual_end"]),
             time_source=TimeSource(row["time_source"]),
             time_confidence=float(row["time_confidence"]),
             # Content

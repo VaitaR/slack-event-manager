@@ -404,6 +404,11 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def save_llm_response(self, prompt_hash: str, response_json: str) -> None:
+        """Persist LLM response payload for reuse."""
+
+        ...
+
     def save_telegram_messages(self, messages: list[TelegramMessage]) -> int:
         """Save Telegram messages for candidate generation."""
 
