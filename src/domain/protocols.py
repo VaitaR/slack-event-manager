@@ -34,6 +34,17 @@ class MessageRecord(Protocol):
     links_norm: list[str]
     anchors: list[str]
     source_id: MessageSource
+    reply_count: int
+    reactions: dict[str, int]
+    is_reply: bool
+    reply_to_id: str | None
+    reactions_count: int
+    is_bot: bool
+    has_file: bool
+    file_mime: str | None
+    forwarded_from: str | None
+    thread_id: str | None
+    bot_id: str | None
 
 
 class MessageClientProtocol(Protocol):

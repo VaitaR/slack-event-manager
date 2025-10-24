@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.domain.validation_constants import MAX_IMPACT_AREAS, MAX_LINKS, MAX_QUALIFIERS
 
@@ -276,6 +276,23 @@ class SlackMessage(BaseModel):
     )
     total_reactions: int = Field(default=0, description="Total number of reactions")
     reply_count: int = Field(default=0, description="Number of thread replies")
+    is_reply: bool = Field(default=False, description="Whether message is a reply")
+    reply_to_id: str | None = Field(
+        default=None, description="Parent message identifier if threaded"
+    )
+    thread_id: str | None = Field(default=None, description="Thread identifier")
+    reactions_count: int = Field(
+        default=0, description="Total reaction count for scoring compatibility"
+    )
+    has_file: bool = Field(
+        default=False, description="Whether any attachments or files are present"
+    )
+    file_mime: str | None = Field(
+        default=None, description="Primary MIME type for associated file if available"
+    )
+    forwarded_from: str | None = Field(
+        default=None, description="Forwarded source identifier (unused for Slack)"
+    )
     permalink: str | None = Field(default=None, description="Permanent link to message")
     edited_ts: str | None = Field(default=None, description="Edit timestamp if edited")
     edited_user: str | None = Field(default=None, description="User who edited")
@@ -285,6 +302,15 @@ class SlackMessage(BaseModel):
     source_id: MessageSource = Field(
         default=MessageSource.SLACK, description="Message source (always slack)"
     )
+
+    @model_validator(mode="after")
+    def _synchronize_derived_fields(self) -> "SlackMessage":
+        """Ensure derived attributes match persisted counters."""
+
+        self.reactions_count = max(self.reactions_count, self.total_reactions)
+        if self.attachments_count > 0 or self.files_count > 0:
+            self.has_file = True
+        return self
 
 
 class TelegramMessage(BaseModel):
@@ -298,6 +324,13 @@ class TelegramMessage(BaseModel):
     user: str | None = Field(default=None, description="User ID")
     bot_id: str | None = Field(default=None, description="Bot identifier")
     is_bot: bool = Field(default=False, description="Whether sender is a bot")
+    reply_to_id: str | None = Field(
+        default=None, description="Normalized identifier of the replied-to message"
+    )
+    thread_id: str | None = Field(
+        default=None, description="Conversation thread identifier"
+    )
+    is_reply: bool = Field(default=False, description="Whether this message is a reply")
     text: str = Field(default="", description="Raw message text")
     text_norm: str = Field(default="", description="Normalized text")
     blocks_text: str = Field(
@@ -318,9 +351,16 @@ class TelegramMessage(BaseModel):
     views: int = Field(default=0, description="View count")
     reply_count: int = Field(default=0, description="Reply/comment count")
     reactions: dict[str, int] = Field(default_factory=dict, description="Reactions")
+    reactions_count: int = Field(
+        default=0, description="Total number of recorded reactions"
+    )
     post_url: str | None = Field(default=None, description="Direct link to the post")
     attachments_count: int = Field(default=0, description="Number of attachments")
     files_count: int = Field(default=0, description="Number of files")
+    has_file: bool = Field(default=False, description="Whether message includes a file")
+    file_mime: str | None = Field(
+        default=None, description="MIME type of associated file if available"
+    )
     ingested_at: datetime = Field(
         default_factory=_utcnow, description="Ingestion timestamp"
     )
@@ -332,6 +372,12 @@ class TelegramMessage(BaseModel):
     def ts_dt(self) -> datetime:
         """Alias for message_date for compatibility with SlackMessage."""
         return self.message_date
+
+    @property
+    def forwarded_from(self) -> str | None:
+        """Provide alias for forwarded-from information to satisfy MessageRecord."""
+
+        return self.forward_from_channel
 
 
 class NormalizedMessage(BaseModel):

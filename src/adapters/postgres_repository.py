@@ -12,6 +12,13 @@ from psycopg2 import extensions
 from psycopg2 import pool as psycopg2_pool
 from psycopg2.extras import RealDictCursor
 
+from src.adapters.bulk_persistence import (
+    DatabaseBackend,
+    EventDTO,
+    RelationDTO,
+    upsert_event_relations_bulk,
+    upsert_events_bulk,
+)
 from src.config.logging_config import get_logger
 from src.domain.candidate_constants import CANDIDATE_LEASE_TIMEOUT
 from src.domain.exceptions import RepositoryError
@@ -63,6 +70,9 @@ class PostgresRepository:
         self._user = user
         self._password = password
         self._settings = settings
+        self._bulk_chunk_size = settings.bulk_upsert_chunk_size if settings else 500
+        if self._bulk_chunk_size <= 0:
+            raise RepositoryError("bulk_upsert_chunk_size must be positive")
 
         self._statement_timeout_ms = (
             settings.postgres_statement_timeout_ms if settings else 10_000
@@ -814,156 +824,45 @@ class PostgresRepository:
                 conn.commit()
 
     def save_events(self, events: list[Event]) -> int:
-        """Save events with versioning (upsert by dedup_key).
+        """Save events with versioning (upsert by dedup_key)."""
 
-        Args:
-            events: List of events
-
-        Returns:
-            Number of events saved
-
-        Raises:
-            RepositoryError: On storage errors
-        """
         if not events:
             return 0
 
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                for event in events:
-                    # Check if dedup_key exists
-                    cur.execute(
-                        "SELECT event_id FROM events WHERE dedup_key = %s",
-                        (event.dedup_key,),
+        try:
+            with self._get_connection() as conn:
+                dtos = [
+                    EventDTO.from_event(
+                        event,
+                        backend=DatabaseBackend.POSTGRES,
+                        connection=conn,
                     )
-                    existing = cur.fetchone()
+                    for event in events
+                ]
+                upsert_events_bulk(dtos, chunk=self._bulk_chunk_size)
 
-                    if existing:
-                        # Update existing event
-                        cur.execute(
-                            """
-                            UPDATE events SET
-                                message_id = %s,
-                                source_channels = %s,
-                                extracted_at = %s,
-                                source_id = %s,
-                                action = %s,
-                                object_id = %s,
-                                object_name_raw = %s,
-                                qualifiers = %s,
-                                stroke = %s,
-                                anchor = %s,
-                                category = %s,
-                                status = %s,
-                                change_type = %s,
-                                environment = %s,
-                                severity = %s,
-                                planned_start = %s,
-                                planned_end = %s,
-                                actual_start = %s,
-                                actual_end = %s,
-                                time_source = %s,
-                                time_confidence = %s,
-                                summary = %s,
-                                why_it_matters = %s,
-                                impact_area = %s,
-                                impact_type = %s,
-                                links = %s,
-                                anchors = %s,
-                                confidence = %s,
-                                importance = %s,
-                                cluster_key = %s
-                            WHERE dedup_key = %s
-                            """,
-                            (
-                                event.message_id,
-                                json.dumps(event.source_channels),
-                                event.extracted_at,
-                                event.source_id.value,
-                                event.action.value,
-                                event.object_id,
-                                event.object_name_raw,
-                                json.dumps(event.qualifiers),
-                                event.stroke,
-                                event.anchor,
-                                event.category.value,
-                                event.status.value,
-                                event.change_type.value,
-                                event.environment.value,
-                                event.severity.value if event.severity else None,
-                                event.planned_start,
-                                event.planned_end,
-                                event.actual_start,
-                                event.actual_end,
-                                event.time_source.value,
-                                event.time_confidence,
-                                event.summary,
-                                event.why_it_matters,
-                                json.dumps(event.impact_area),
-                                json.dumps(event.impact_type),
-                                json.dumps(event.links),
-                                json.dumps(event.anchors),
-                                event.confidence,
-                                event.importance,
-                                event.cluster_key,
-                                event.dedup_key,
-                            ),
-                        )
-                    else:
-                        # Insert new event
-                        cur.execute(
-                            """
-                            INSERT INTO events (
-                                event_id, message_id, source_channels, extracted_at, source_id,
-                                action, object_id, object_name_raw, qualifiers, stroke, anchor,
-                                category, status, change_type, environment, severity,
-                                planned_start, planned_end, actual_start, actual_end,
-                                time_source, time_confidence,
-                                summary, why_it_matters, impact_area, impact_type, links, anchors,
-                                confidence, importance, cluster_key, dedup_key
-                            ) VALUES (
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                            )
-                            """,
-                            (
+                relation_dtos: list[RelationDTO] = []
+                for event in events:
+                    if not event.relations:
+                        continue
+                    for relation in event.relations:
+                        relation_dtos.append(
+                            RelationDTO.from_relation(
                                 str(event.event_id),
-                                event.message_id,
-                                json.dumps(event.source_channels),
-                                event.extracted_at,
-                                event.source_id.value,
-                                event.action.value,
-                                event.object_id,
-                                event.object_name_raw,
-                                json.dumps(event.qualifiers),
-                                event.stroke,
-                                event.anchor,
-                                event.category.value,
-                                event.status.value,
-                                event.change_type.value,
-                                event.environment.value,
-                                event.severity.value if event.severity else None,
-                                event.planned_start,
-                                event.planned_end,
-                                event.actual_start,
-                                event.actual_end,
-                                event.time_source.value,
-                                event.time_confidence,
-                                event.summary,
-                                event.why_it_matters,
-                                json.dumps(event.impact_area),
-                                json.dumps(event.impact_type),
-                                json.dumps(event.links),
-                                json.dumps(event.anchors),
-                                event.confidence,
-                                event.importance,
-                                event.cluster_key,
-                                event.dedup_key,
-                            ),
+                                relation,
+                                backend=DatabaseBackend.POSTGRES,
+                                connection=conn,
+                            )
                         )
-                conn.commit()
-        return len(events)
+
+                if relation_dtos:
+                    upsert_event_relations_bulk(
+                        relation_dtos, chunk=self._bulk_chunk_size
+                    )
+
+                return len(events)
+        except PsycopgError as exc:  # pragma: no cover - defensive logging
+            raise RepositoryError(f"Failed to save events: {exc}") from exc
 
     def get_events_in_window(self, start_dt: datetime, end_dt: datetime) -> list[Event]:
         """Get events within date window.
@@ -1373,8 +1272,13 @@ class PostgresRepository:
                                 message_id, channel, message_date, sender_id, sender_name,
                                 text, text_norm, forward_from_channel, forward_from_message_id,
                                 media_type, links_raw, links_norm, anchors, views, reply_count,
-                                reactions, post_url, ingested_at
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                reactions, reactions_count, post_url, attachments_count,
+                                files_count, bot_id, is_bot, reply_to_id, thread_id, has_file,
+                                file_mime, ingested_at
+                            ) VALUES (
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            )
                             ON CONFLICT (message_id) DO UPDATE SET
                                 channel = EXCLUDED.channel,
                                 message_date = EXCLUDED.message_date,
@@ -1391,7 +1295,16 @@ class PostgresRepository:
                                 views = EXCLUDED.views,
                                 reply_count = EXCLUDED.reply_count,
                                 reactions = EXCLUDED.reactions,
+                                reactions_count = EXCLUDED.reactions_count,
                                 post_url = EXCLUDED.post_url,
+                                attachments_count = EXCLUDED.attachments_count,
+                                files_count = EXCLUDED.files_count,
+                                bot_id = EXCLUDED.bot_id,
+                                is_bot = EXCLUDED.is_bot,
+                                reply_to_id = EXCLUDED.reply_to_id,
+                                thread_id = EXCLUDED.thread_id,
+                                has_file = EXCLUDED.has_file,
+                                file_mime = EXCLUDED.file_mime,
                                 ingested_at = EXCLUDED.ingested_at
                             """,
                             (
@@ -1411,7 +1324,16 @@ class PostgresRepository:
                                 msg.views,
                                 msg.reply_count,
                                 json.dumps(msg.reactions),
+                                msg.reactions_count,
                                 msg.post_url,
+                                msg.attachments_count,
+                                msg.files_count,
+                                msg.bot_id,
+                                msg.is_bot,
+                                msg.reply_to_id,
+                                msg.thread_id,
+                                msg.has_file,
+                                msg.file_mime,
                                 msg.ingested_at,
                             ),
                         )
@@ -1479,6 +1401,13 @@ class PostgresRepository:
         Returns:
             TelegramMessage instance
         """
+        reactions_data_raw = row["reactions"] if row["reactions"] else {}
+        if isinstance(reactions_data_raw, str):
+            reactions_data = json.loads(reactions_data_raw)
+        else:
+            reactions_data = reactions_data_raw
+        reactions_count = row.get("reactions_count") or sum(reactions_data.values())
+
         return TelegramMessage(
             message_id=row["message_id"],
             channel=row["channel"],
@@ -1495,7 +1424,17 @@ class PostgresRepository:
             anchors=row["anchors"] if row["anchors"] else [],
             views=row["views"] or 0,
             reply_count=row["reply_count"] or 0,
-            reactions=row["reactions"] if row["reactions"] else {},
+            reactions=reactions_data,
+            reactions_count=reactions_count,
             post_url=row["post_url"],
+            attachments_count=row.get("attachments_count") or 0,
+            files_count=row.get("files_count") or 0,
+            bot_id=row.get("bot_id"),
+            is_bot=bool(row.get("is_bot")),
+            reply_to_id=row.get("reply_to_id"),
+            thread_id=row.get("thread_id"),
+            is_reply=bool(row.get("reply_to_id")),
+            has_file=bool(row.get("has_file")),
+            file_mime=row.get("file_mime"),
             ingested_at=row["ingested_at"],
         )
