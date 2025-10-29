@@ -242,7 +242,7 @@ class Settings(BaseSettings):
     @field_validator("slack_bot_token", "openai_api_key", mode="before")
     @classmethod
     def _ensure_secret(
-        cls, value: SecretStr | str | None, info: ValidationInfo
+        cls, value: SecretStr | str | None, info: ValidationInfo[Any]
     ) -> SecretStr:
         if value is None:
             raise ValueError(f"{info.field_name} must be provided")
@@ -386,37 +386,64 @@ class Settings(BaseSettings):
             )
 
         # Multi-source configuration with auto-migration
+        message_sources = []
+
         if "message_sources" in config:
             # New format: explicit message_sources
-            message_sources = []
             for source_config in config["message_sources"]:
                 message_sources.append(MessageSourceConfig(**source_config))
-            data.setdefault("message_sources", message_sources)
-        elif "channels" in config and len(config["channels"]) > 0:
-            # Legacy format: auto-migrate from slack_channels
-            logger.info(
-                "Auto-migrating legacy 'channels' config to 'message_sources' format"
-            )
-            channel_ids = [ch["channel_id"] for ch in config["channels"]]
-            slack_source = MessageSourceConfig(
-                source_id=MessageSource.SLACK,
-                enabled=True,
-                bot_token_env="SLACK_BOT_TOKEN",
-                raw_table="raw_slack_messages",
-                state_table="ingestion_state_slack",
-                prompt_file="config/prompts/slack.yaml",
-                llm_settings={
-                    "temperature": config.get("llm", {}).get("temperature", 1.0),
-                    "timeout_seconds": config.get("llm", {}).get(
-                        "timeout_seconds", 120
-                    ),
-                },
-                channels=channel_ids,
-            )
-            data.setdefault("message_sources", [slack_source])
         else:
-            # No sources configured - empty list
-            data.setdefault("message_sources", [])
+            # Legacy format: auto-migrate from channels and telegram_channels
+
+            # Add Slack source if channels exist
+            if "channels" in config and len(config["channels"]) > 0:
+                logger.info(
+                    "Auto-migrating legacy 'channels' config to 'message_sources' format"
+                )
+                channel_ids = [ch["channel_id"] for ch in config["channels"]]
+                slack_source = MessageSourceConfig(
+                    source_id=MessageSource.SLACK,
+                    enabled=True,
+                    bot_token_env="SLACK_BOT_TOKEN",
+                    raw_table="raw_slack_messages",
+                    state_table="slack_ingestion_state",
+                    prompt_file="config/prompts/slack.yaml",
+                    llm_settings={
+                        "temperature": config.get("llm", {}).get("temperature", 1.0),
+                        "timeout_seconds": config.get("llm", {}).get(
+                            "timeout_seconds", 120
+                        ),
+                    },
+                    channels=channel_ids,
+                )
+                message_sources.append(slack_source)
+
+            # Add Telegram source if telegram_channels exist
+            if "telegram_channels" in config and len(config["telegram_channels"]) > 0:
+                logger.info(
+                    "Auto-migrating 'telegram_channels' config to 'message_sources' format"
+                )
+                telegram_channel_ids = [
+                    ch["channel_id"] for ch in config["telegram_channels"]
+                ]
+                telegram_source = MessageSourceConfig(
+                    source_id=MessageSource.TELEGRAM,
+                    enabled=True,
+                    bot_token_env="TELEGRAM_API_ID",  # Not used for user client
+                    raw_table="raw_telegram_messages",
+                    state_table="ingestion_state_telegram",
+                    prompt_file="config/prompts/telegram.yaml",
+                    llm_settings={
+                        "temperature": config.get("llm", {}).get("temperature", 1.0),
+                        "timeout_seconds": config.get("llm", {}).get(
+                            "timeout_seconds", 120
+                        ),
+                    },
+                    channels=telegram_channel_ids,
+                )
+                message_sources.append(telegram_source)
+
+        data.setdefault("message_sources", message_sources)
 
         if "importance" in config:
             data.setdefault(
@@ -704,8 +731,8 @@ class Settings(BaseSettings):
         description="List of Telegram channels to monitor (loaded from config.yaml)",
     )
     telegram_session_path: str = Field(
-        default="data/telegram_session",
-        description="Path to Telethon session file (without .session extension)",
+        default="data/telegram_session.session",
+        description="Path to Telethon session file (with .session extension)",
     )
     telegram_page_size: int = Field(
         default=TELEGRAM_FETCH_PAGE_SIZE_DEFAULT,

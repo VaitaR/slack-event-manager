@@ -6,8 +6,6 @@ This app provides a visual interface for the Slack Event Manager pipeline,
 allowing users to configure settings, run the pipeline, and visualize results.
 """
 
-import hmac
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 from uuid import uuid4
@@ -36,8 +34,6 @@ from src.use_cases.pipeline_orchestrator import PipelineParams
 # UI Constants
 MAX_MESSAGE_LENGTH: Final[int] = 150
 MAX_CANDIDATE_TEXT_LENGTH: Final[int] = 200
-AUTH_TOKEN_ENV: Final[str] = "STREAMLIT_AUTH_TOKEN"
-SESSION_AUTH_KEY: Final[str] = "auth_verified"
 SESSION_ID_KEY: Final[str] = "session_id"
 SESSION_JOB_ID_KEY: Final[str] = "active_job_id"
 SESSION_JOB_RESULT_KEY: Final[str] = "last_job_result"
@@ -64,27 +60,9 @@ def _ensure_session_defaults() -> None:
 
 
 def _require_auth() -> str:
-    expected = os.getenv(AUTH_TOKEN_ENV)
-    if not expected:
-        st.error("Access is disabled until STREAMLIT_AUTH_TOKEN is configured.")
-        st.stop()
-
-    if st.session_state.get(SESSION_AUTH_KEY):
-        return str(st.session_state[SESSION_ID_KEY])
-
-    st.warning("Authentication required to run the pipeline.")
-    with st.form("auth_form", clear_on_submit=False):
-        provided = st.text_input("Access Token", type="password")
-        submit = st.form_submit_button("Sign In")
-
-    if not submit:
-        st.stop()
-
-    if not provided or not hmac.compare_digest(provided, expected):
-        st.error("Invalid access token.")
-        st.stop()
-
-    st.session_state[SESSION_AUTH_KEY] = True
+    """No authentication required - return a default user ID."""
+    if not st.session_state.get(SESSION_ID_KEY):
+        st.session_state[SESSION_ID_KEY] = str(uuid4())
     return str(st.session_state[SESSION_ID_KEY])
 
 

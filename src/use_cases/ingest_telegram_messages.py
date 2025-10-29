@@ -377,10 +377,9 @@ async def ingest_telegram_messages_use_case_async(
     channels_processed: list[str] = []
     errors: list[str] = []
 
-    now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+    datetime.utcnow().replace(tzinfo=pytz.UTC)
 
     # Default backfill window: 1 day (as per requirements)
-    default_backfill_days = 1
 
     # Get Telegram channels from config
     telegram_channels = getattr(settings, "telegram_channels", [])
@@ -402,12 +401,12 @@ async def ingest_telegram_messages_use_case_async(
         if isinstance(channel_config, dict):
             channel_id = channel_config.get("channel_id", "")
             enabled = channel_config.get("enabled", True)
-            from_date_str = channel_config.get("from_date")
+            channel_config.get("from_date")
         else:
             # TelegramChannelConfig object
             channel_id = getattr(channel_config, "username", "")
             enabled = getattr(channel_config, "enabled", True)
-            from_date_str = getattr(channel_config, "from_date", None)
+            getattr(channel_config, "from_date", None)
 
         if not enabled:
             logger.info(
@@ -436,40 +435,26 @@ async def ingest_telegram_messages_use_case_async(
                 # For Telegram, we'll fetch all and filter by message_id
                 # Telethon doesn't support min_id in iter_messages easily
                 backfill_date = None
-            elif backfill_from_date:
-                # First run with explicit backfill date
+            # First run: determine backfill date
+            elif backfill_from_date is not None:
                 backfill_date = backfill_from_date
                 logger.info(
-                    "Telegram channel backfill from date",
-                    extra={
-                        "channel_id": channel_id,
-                        "backfill_date": backfill_from_date.isoformat(),
-                        "strategy": "explicit_backfill",
-                    },
-                )
-            elif from_date_str:
-                # Use from_date from config
-                backfill_date = datetime.fromisoformat(
-                    from_date_str.replace("Z", "+00:00")
-                )
-                logger.info(
-                    "Telegram channel backfill from config",
+                    "Telegram channel first run with backfill date",
                     extra={
                         "channel_id": channel_id,
                         "backfill_date": backfill_date.isoformat(),
-                        "strategy": "config_backfill",
+                        "strategy": "first_run_with_backfill",
                     },
                 )
             else:
-                # First run: default 1 day
-                backfill_date = now - timedelta(days=default_backfill_days)
+                # Default: 1 day ago
+                backfill_date = datetime.now(pytz.UTC) - timedelta(days=1)
                 logger.info(
-                    "Telegram channel first run backfill",
+                    "Telegram channel first run (default 1 day backfill)",
                     extra={
                         "channel_id": channel_id,
                         "backfill_date": backfill_date.isoformat(),
-                        "strategy": "default_backfill",
-                        "backfill_days": default_backfill_days,
+                        "strategy": "first_run_default",
                     },
                 )
 
@@ -487,6 +472,14 @@ async def ingest_telegram_messages_use_case_async(
                 page_size=settings.telegram_page_size,
             )
 
+            logger.info(
+                "Telegram messages fetched",
+                extra={
+                    "channel_id": channel_id,
+                    "raw_count": len(raw_messages),
+                    "min_message_id": min_message_id_int,
+                },
+            )
             total_fetched += len(raw_messages)
 
             if not raw_messages:
@@ -503,22 +496,82 @@ async def ingest_telegram_messages_use_case_async(
                 continue
 
             # Filter messages by date if backfill_date is set
+            # Telegram messages are returned newest first, so we need to process them in reverse order
+            # to handle backfill_date correctly
             filtered_messages = []
-            for raw_msg in raw_messages:
-                msg_date = raw_msg.get("date")
-                if isinstance(msg_date, datetime):
-                    if backfill_date and msg_date < backfill_date:
-                        # Stop processing older messages
-                        break
-                    filtered_messages.append(raw_msg)
+            if raw_messages:
+                first_msg_date = raw_messages[0].get("date")
+                last_msg_date = raw_messages[-1].get("date")
+                logger.info(
+                    "Telegram message date range",
+                    extra={
+                        "channel_id": channel_id,
+                        "backfill_date": backfill_date.isoformat()
+                        if backfill_date is not None
+                        else None,
+                        "first_msg_date": first_msg_date.isoformat()
+                        if isinstance(first_msg_date, datetime)
+                        else str(first_msg_date),
+                        "last_msg_date": last_msg_date.isoformat()
+                        if isinstance(last_msg_date, datetime)
+                        else str(last_msg_date),
+                        "total_raw": len(raw_messages),
+                    },
+                )
+
+            # Process messages in reverse order (oldest first) when backfill_date is set
+            # This allows us to find the cutoff point correctly
+            if backfill_date:
+                messages_to_check = reversed(raw_messages)
+
+                for raw_msg in messages_to_check:
+                    msg_date = raw_msg.get("date")
+                    if isinstance(msg_date, datetime):
+                        if msg_date < backfill_date:
+                            # Stop processing older messages
+                            logger.info(
+                                "Stopping date filter (message too old)",
+                                extra={
+                                    "channel_id": channel_id,
+                                    "msg_date": msg_date.isoformat(),
+                                    "backfill_date": backfill_date.isoformat()
+                                    if backfill_date is not None
+                                    else None,
+                                },
+                            )
+                            break
+                        filtered_messages.append(raw_msg)
+
+                # Restore original order
+                filtered_messages.reverse()
+            else:
+                # No date filter - accept all messages
+                filtered_messages = raw_messages
+
+            logger.info(
+                "Telegram messages after date filter",
+                extra={
+                    "channel_id": channel_id,
+                    "filtered_count": len(filtered_messages),
+                },
+            )
 
             # Filter by last_message_id if incremental (defensive double-check)
             if min_message_id_int is not None:
+                before_filter = len(filtered_messages)
                 filtered_messages = [
                     msg
                     for msg in filtered_messages
                     if int(msg.get("message_id", "0")) > min_message_id_int
                 ]
+                logger.info(
+                    "Telegram messages after ID filter",
+                    extra={
+                        "channel_id": channel_id,
+                        "before": before_filter,
+                        "after": len(filtered_messages),
+                    },
+                )
 
             if not filtered_messages:
                 logger.info(
@@ -534,8 +587,23 @@ async def ingest_telegram_messages_use_case_async(
                 processed_msg = process_telegram_message(raw_msg, channel_id)
                 processed_messages.append(processed_msg)
 
+            logger.info(
+                "Telegram messages processed, attempting save",
+                extra={
+                    "channel_id": channel_id,
+                    "processed_count": len(processed_messages),
+                },
+            )
+
             # Save to repository
             saved_count = repository.save_telegram_messages(processed_messages)
+            logger.info(
+                "Telegram messages saved",
+                extra={
+                    "channel_id": channel_id,
+                    "saved_count": saved_count,
+                },
+            )
             total_saved += saved_count
 
             # Update ingestion_state to latest message ID

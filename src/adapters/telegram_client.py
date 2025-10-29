@@ -134,7 +134,15 @@ class TelegramClient:
             return
 
         client = self._get_client()
-        await client.start()
+        # Connect without starting (to avoid phone number prompt)
+        await client.connect()
+
+        # Check if already authorized
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telegram session not authorized. Please run: python scripts/telegram_qr_auth.py"
+            )
+
         self._is_connected = True
         logger.info("Telegram client connected successfully")
 

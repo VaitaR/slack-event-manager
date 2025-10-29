@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Any, Final
 
 from src.config.logging_config import get_logger
 
@@ -15,7 +15,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing aid
     from prometheus_client import Histogram as PromHistogram
 
 try:  # pragma: no cover - optional dependency
-    from prometheus_client import Counter, Histogram, start_http_server
+    from prometheus_client import (
+        Counter as PromCounter,
+    )
+    from prometheus_client import (
+        Histogram as PromHistogram,
+    )
+    from prometheus_client import (
+        start_http_server,
+    )
 except ImportError:  # pragma: no cover - fallback for offline environments
     from typing import Any
 
@@ -69,28 +77,28 @@ except ImportError:  # pragma: no cover - fallback for offline environments
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(str(args[0]), "histogram")
 
-    def start_http_server(port: int) -> None:
+    def start_http_server(port: int) -> None:  # type: ignore[misc]
         logger.warning("prometheus_client_unavailable", port=port)
 
-    Counter = cast("type[PromCounter]", _FallbackCounter)
-    Histogram = cast("type[PromHistogram]", _FallbackHistogram)
+    CounterClass: Any = _FallbackCounter
+    HistogramClass: Any = _FallbackHistogram
 else:
-    Counter = cast("type[PromCounter]", Counter)
-    Histogram = cast("type[PromHistogram]", Histogram)
+    CounterClass = PromCounter
+    HistogramClass = PromHistogram
 
-JOBS_SUBMITTED_TOTAL: Final[Counter] = Counter(
+JOBS_SUBMITTED_TOTAL: Final[Any] = CounterClass(
     "pipeline_jobs_submitted_total",
     "Total number of pipeline jobs submitted",
     labelnames=("job",),
 )
 
-JOB_DURATION_SECONDS: Final[Histogram] = Histogram(
+JOB_DURATION_SECONDS: Final[Any] = HistogramClass(
     "pipeline_job_duration_seconds",
     "Duration of pipeline jobs in seconds",
     labelnames=("job",),
 )
 
-PIPELINE_STAGE_DURATION_SECONDS: Final[Histogram] = Histogram(
+PIPELINE_STAGE_DURATION_SECONDS: Final[Any] = HistogramClass(
     "pipeline_stage_duration_seconds",
     "Duration of pipeline stages in seconds",
     labelnames=("stage",),

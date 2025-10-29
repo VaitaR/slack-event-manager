@@ -116,7 +116,7 @@ class EventQueryCriteria:
             >>> criteria = EventQueryCriteria(start_date=datetime(...))
             >>> where, params = criteria.to_where_clause()
             >>> where
-            'COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) >= ?'
+            'COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) >= %s'
             >>> params
             ['2025-10-01T00:00:00+00:00']
         """
@@ -127,38 +127,38 @@ class EventQueryCriteria:
         # Primary time: COALESCE(actual_start, actual_end, planned_start, planned_end)
         if self.start_date:
             conditions.append(
-                "COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) >= ?"
+                "COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) >= %s"
             )
             params.append(self.start_date.isoformat())
 
         if self.end_date:
             conditions.append(
-                "COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) <= ?"
+                "COALESCE(actual_start, actual_end, planned_start, planned_end, extracted_at) <= %s"
             )
             params.append(self.end_date.isoformat())
 
         # Extraction time filters
         if self.extracted_after:
-            conditions.append("extracted_at >= ?")
+            conditions.append("extracted_at >= %s")
             params.append(self.extracted_after.isoformat())
 
         if self.extracted_before:
-            conditions.append("extracted_at <= ?")
+            conditions.append("extracted_at <= %s")
             params.append(self.extracted_before.isoformat())
 
         # Category filter (OR logic)
         if self.categories:
-            placeholders = ",".join("?" * len(self.categories))
+            placeholders = ",".join("%s" * len(self.categories))
             conditions.append(f"category IN ({placeholders})")
             params.extend([cat.value for cat in self.categories])
 
         # Confidence filters
         if self.min_confidence is not None:
-            conditions.append("confidence >= ?")
+            conditions.append("confidence >= %s")
             params.append(self.min_confidence)
 
         if self.max_confidence is not None:
-            conditions.append("confidence <= ?")
+            conditions.append("confidence <= %s")
             params.append(self.max_confidence)
 
         # Channel filter (JSON array search)
@@ -167,30 +167,30 @@ class EventQueryCriteria:
             # Works for both SQLite (TEXT JSON) and PostgreSQL (JSONB)
             channel_conditions = []
             for channel in self.source_channels:
-                channel_conditions.append("source_channels LIKE ?")
+                channel_conditions.append("source_channels LIKE %s")
                 params.append(f'%"{channel}"%')
             conditions.append(f"({' OR '.join(channel_conditions)})")
 
         # Source filter
         if self.source_id:
-            conditions.append("source_id = ?")
+            conditions.append("source_id = %s")
             params.append(self.source_id)
 
         # Message ID filter
         if self.message_ids:
-            placeholders = ",".join("?" * len(self.message_ids))
+            placeholders = ",".join("%s" * len(self.message_ids))
             conditions.append(f"message_id IN ({placeholders})")
             params.extend(self.message_ids)
 
         # Title search - REMOVED (title column no longer exists)
         # Use object_name_raw or summary for text search instead
         # if self.title_contains:
-        #     conditions.append("LOWER(title) LIKE ?")
+        #     conditions.append("LOWER(title) LIKE %s")
         #     params.append(f"%{self.title_contains.lower()}%")
 
         # Version filter - REMOVED (version column no longer exists)
         # if self.min_version is not None:
-        #     conditions.append("version >= ?")
+        #     conditions.append("version >= %s")
         #     params.append(self.min_version)
 
         # Build WHERE clause
@@ -222,14 +222,14 @@ class EventQueryCriteria:
             >>> criteria = EventQueryCriteria(limit=10, offset=20)
             >>> clause, params = criteria.to_limit_clause()
             >>> clause
-            'LIMIT ? OFFSET ?'
+            'LIMIT %s OFFSET %s'
             >>> params
             [10, 20]
         """
         if self.limit is None:
             return "", []
 
-        return "LIMIT ? OFFSET ?", [self.limit, self.offset]
+        return "LIMIT %s OFFSET %s", [self.limit, self.offset]
 
 
 @dataclass
@@ -297,30 +297,30 @@ class CandidateQueryCriteria:
 
         # Score filters
         if self.min_score is not None:
-            conditions.append("score >= ?")
+            conditions.append("score >= %s")
             params.append(self.min_score)
 
         if self.max_score is not None:
-            conditions.append("score <= ?")
+            conditions.append("score <= %s")
             params.append(self.max_score)
 
         # Status filter
         if self.status:
-            conditions.append("status = ?")
+            conditions.append("status = %s")
             params.append(self.status)
 
         # Channel filter
         if self.channel:
-            conditions.append("channel = ?")
+            conditions.append("channel = %s")
             params.append(self.channel)
 
         # Date filters
         if self.created_after:
-            conditions.append("ts_dt >= ?")
+            conditions.append("ts_dt >= %s")
             params.append(self.created_after.isoformat())
 
         if self.created_before:
-            conditions.append("ts_dt <= ?")
+            conditions.append("ts_dt <= %s")
             params.append(self.created_before.isoformat())
 
         # Feature filters
@@ -348,7 +348,7 @@ class CandidateQueryCriteria:
         """Build SQL LIMIT/OFFSET clause."""
         if self.limit is None:
             return "", []
-        return "LIMIT ? OFFSET ?", [self.limit, self.offset]
+        return "LIMIT %s OFFSET %s", [self.limit, self.offset]
 
 
 # Helper functions for common queries
