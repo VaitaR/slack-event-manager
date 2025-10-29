@@ -242,7 +242,7 @@ class Settings(BaseSettings):
     @field_validator("slack_bot_token", "openai_api_key", mode="before")
     @classmethod
     def _ensure_secret(
-        cls, value: SecretStr | str | None, info: ValidationInfo
+        cls, value: SecretStr | str | None, info: ValidationInfo[Any]
     ) -> SecretStr:
         if value is None:
             raise ValueError(f"{info.field_name} must be provided")

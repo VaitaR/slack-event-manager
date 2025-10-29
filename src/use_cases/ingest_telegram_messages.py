@@ -5,7 +5,7 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 """
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytz
@@ -435,14 +435,26 @@ async def ingest_telegram_messages_use_case_async(
                 # For Telegram, we'll fetch all and filter by message_id
                 # Telethon doesn't support min_id in iter_messages easily
                 backfill_date = None
-            else:
-                # First run: no date filter, accept all messages
-                backfill_date = None
+            # First run: determine backfill date
+            elif backfill_from_date is not None:
+                backfill_date = backfill_from_date
                 logger.info(
-                    "Telegram channel first run (no date filter)",
+                    "Telegram channel first run with backfill date",
                     extra={
                         "channel_id": channel_id,
-                        "strategy": "first_run_no_filter",
+                        "backfill_date": backfill_date.isoformat(),
+                        "strategy": "first_run_with_backfill",
+                    },
+                )
+            else:
+                # Default: 1 day ago
+                backfill_date = datetime.now(pytz.UTC) - timedelta(days=1)
+                logger.info(
+                    "Telegram channel first run (default 1 day backfill)",
+                    extra={
+                        "channel_id": channel_id,
+                        "backfill_date": backfill_date.isoformat(),
+                        "strategy": "first_run_default",
                     },
                 )
 
@@ -495,7 +507,7 @@ async def ingest_telegram_messages_use_case_async(
                     extra={
                         "channel_id": channel_id,
                         "backfill_date": backfill_date.isoformat()
-                        if backfill_date
+                        if backfill_date is not None
                         else None,
                         "first_msg_date": first_msg_date.isoformat()
                         if isinstance(first_msg_date, datetime)
@@ -522,7 +534,9 @@ async def ingest_telegram_messages_use_case_async(
                                 extra={
                                     "channel_id": channel_id,
                                     "msg_date": msg_date.isoformat(),
-                                    "backfill_date": backfill_date.isoformat(),
+                                    "backfill_date": backfill_date.isoformat()
+                                    if backfill_date is not None
+                                    else None,
                                 },
                             )
                             break
