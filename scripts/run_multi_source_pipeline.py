@@ -32,7 +32,6 @@ from src.adapters.llm_client import LLMClient
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.repository_factory import create_repository
 from src.adapters.slack_client import SlackClient
-from src.adapters.sqlite_repository import SQLiteRepository
 from src.adapters.telegram_client import TelegramClient
 from src.config.logging_config import get_logger, setup_logging
 from src.config.settings import Settings, get_settings
@@ -71,7 +70,7 @@ def signal_handler(signum: int, frame: object) -> None:
     global _shutdown_requested
     sig_name = signal.Signals(signum).name
     logger = get_logger(__name__)
-    logger.warning("shutdown_signal_received", signal=sig_name)
+    logger.warning(f"shutdown_signal_received: {sig_name}")
     _shutdown_requested = True
 
 
@@ -136,17 +135,10 @@ def run_source_pipeline(
         return stats
 
     if not source_config.enabled:
-        logger.info(
-            "source_disabled",
-            source_id=source_id.value,
-            reason="disabled_in_config",
-        )
+        logger.info(f"source_disabled: {source_id.value} (disabled_in_config)")
         return stats
 
-    logger.info(
-        "source_processing_started",
-        source_id=source_id.value,
-    )
+    logger.info(f"source_processing_started: {source_id.value}")
 
     # Get bot token from environment
     bot_token_env = (
@@ -209,10 +201,7 @@ def run_source_pipeline(
 
     # STEP 1: Ingest messages
     logger.info(
-        "pipeline_step_started",
-        step=1,
-        step_name="ingest_messages",
-        source_id=source_id.value,
+        f"pipeline_step_started: step=1, step_name=ingest_messages, source_id={source_id.value}"
     )
     try:
         if isinstance(message_client, SlackClient):
@@ -225,22 +214,13 @@ def run_source_pipeline(
                 backfill_from_date=backfill_from_date,
             )
         elif isinstance(message_client, TelegramClient):
-            # Telegram ingestion - requires SQLiteRepository
-            sqlite_repo = (
-                repository if isinstance(repository, SQLiteRepository) else None
-            )
-            if sqlite_repo is None:
-                logger.error("❌ Telegram ingestion requires SQLiteRepository")
-                stats["errors"].append("Telegram ingestion requires SQLiteRepository")
-                return stats
-
-            # Use async version for production-ready async-first approach
+            # Telegram ingestion - supports both SQLite and PostgreSQL
             import asyncio
 
             ingest_result = asyncio.run(
                 ingest_telegram_messages_use_case_async(
                     telegram_client=telegram_client,
-                    repository=sqlite_repo,
+                    repository=repository,
                     settings=settings,
                     backfill_from_date=backfill_from_date,
                 )
@@ -251,17 +231,12 @@ def run_source_pipeline(
         stats["messages_fetched"] = ingest_result.messages_fetched
         stats["messages_saved"] = ingest_result.messages_saved
         logger.info(
-            "ingestion_completed",
-            source_id=source_id.value,
-            messages_fetched=ingest_result.messages_fetched,
-            messages_saved=ingest_result.messages_saved,
-            channels=ingest_result.channels_processed,
-            errors_count=len(ingest_result.errors),
+            f"ingestion_completed: source_id={source_id.value}, messages_fetched={ingest_result.messages_fetched}, messages_saved={ingest_result.messages_saved}, channels={ingest_result.channels_processed}, errors_count={len(ingest_result.errors)}"
         )
         if ingest_result.errors:
             for error in ingest_result.errors:
                 logger.warning(
-                    "ingestion_error", source_id=source_id.value, error=error
+                    f"ingestion_error: source_id={source_id.value}, error={error}"
                 )
     except Exception as e:
         logger.error(f"❌ Ingestion failed for {source_id.value}: {e}", exc_info=True)
@@ -269,10 +244,7 @@ def run_source_pipeline(
 
     # STEP 2: Build candidates
     logger.info(
-        "pipeline_step_started",
-        step=2,
-        step_name="build_candidates",
-        source_id=source_id.value,
+        f"pipeline_step_started: step=2, step_name=build_candidates, source_id={source_id.value}"
     )
     try:
         # Build candidates for the specific source
@@ -283,11 +255,7 @@ def run_source_pipeline(
         )
         stats["candidates_created"] = candidate_result.candidates_created
         logger.info(
-            "candidates_built",
-            source_id=source_id.value,
-            messages_processed=candidate_result.messages_processed,
-            candidates_created=candidate_result.candidates_created,
-            average_score=round(candidate_result.average_score, 2),
+            f"candidates_built: source_id={source_id.value}, messages_processed={candidate_result.messages_processed}, candidates_created={candidate_result.candidates_created}, average_score={round(candidate_result.average_score, 2)}"
         )
     except Exception as e:
         logger.error(
@@ -298,10 +266,7 @@ def run_source_pipeline(
     # STEP 3: Extract events with LLM (source-specific prompt)
     if not args.skip_llm:
         logger.info(
-            "pipeline_step_started",
-            step=3,
-            step_name="extract_events",
-            source_id=source_id.value,
+            f"pipeline_step_started: step=3, step_name=extract_events, source_id={source_id.value}"
         )
         try:
             extraction_result = extract_events_use_case(
@@ -318,19 +283,18 @@ def run_source_pipeline(
             stats["llm_calls"] = extraction_result.llm_calls
             stats["total_cost_usd"] = extraction_result.total_cost_usd
             logger.info(
-                "events_extracted",
-                source_id=source_id.value,
-                candidates_processed=extraction_result.candidates_processed,
-                events_extracted=extraction_result.events_extracted,
-                llm_calls=extraction_result.llm_calls,
-                cache_hits=extraction_result.cache_hits,
-                total_cost_usd=round(extraction_result.total_cost_usd, 4),
-                errors_count=len(extraction_result.errors),
+                f"events_extracted: source_id={source_id.value}, "
+                f"candidates_processed={extraction_result.candidates_processed}, "
+                f"events_extracted={extraction_result.events_extracted}, "
+                f"llm_calls={extraction_result.llm_calls}, "
+                f"cache_hits={extraction_result.cache_hits}, "
+                f"total_cost_usd={round(extraction_result.total_cost_usd, 4)}, "
+                f"errors_count={len(extraction_result.errors)}"
             )
             if extraction_result.errors:
                 for error in extraction_result.errors[:5]:  # Log first 5
                     logger.warning(
-                        "extraction_error", source_id=source_id.value, error=error
+                        f"extraction_error: source_id={source_id.value}, error={error}"
                     )
         except Exception as e:
             logger.error(
@@ -340,10 +304,7 @@ def run_source_pipeline(
 
         # STEP 4: Deduplicate events (strict source isolation)
         logger.info(
-            "pipeline_step_started",
-            step=4,
-            step_name="deduplicate_events",
-            source_id=source_id.value,
+            f"pipeline_step_started: step=4, step_name=deduplicate_events, source_id={source_id.value}"
         )
         try:
             dedup_result = deduplicate_events_use_case(
@@ -354,11 +315,10 @@ def run_source_pipeline(
             )
             stats["events_merged"] = dedup_result.merged_events
             logger.info(
-                "events_deduplicated",
-                source_id=source_id.value,
-                new_events=dedup_result.new_events,
-                merged_events=dedup_result.merged_events,
-                total_events=dedup_result.total_events,
+                f"events_deduplicated: source_id={source_id.value}, "
+                f"new_events={dedup_result.new_events}, "
+                f"merged_events={dedup_result.merged_events}, "
+                f"total_events={dedup_result.total_events}"
             )
         except Exception as e:
             logger.error(
@@ -417,8 +377,7 @@ def run_single_iteration(
             return
 
     logger.info(
-        "pipeline_sources_selected",
-        sources=[s.source_id.value for s in enabled_sources],
+        f"pipeline_sources_selected: {[s.source_id.value for s in enabled_sources]}"
     )
 
     # Aggregate statistics across all sources
@@ -461,25 +420,21 @@ def run_single_iteration(
 
     # Log aggregate statistics
     logger.info(
-        "pipeline_aggregate_statistics",
-        messages_fetched=total_stats["messages_fetched"],
-        messages_saved=total_stats["messages_saved"],
-        candidates_created=total_stats["candidates_created"],
-        events_extracted=total_stats["events_extracted"],
-        events_merged=total_stats["events_merged"],
-        llm_calls=total_stats["llm_calls"],
-        total_cost_usd=round(total_stats["total_cost_usd"], 4),
-        channels_processed=total_stats["channels_processed"],
-        errors_count=len(total_stats["errors"]),
+        f"pipeline_aggregate_statistics: messages_fetched={total_stats['messages_fetched']}, "
+        f"messages_saved={total_stats['messages_saved']}, "
+        f"candidates_created={total_stats['candidates_created']}, "
+        f"events_extracted={total_stats['events_extracted']}, "
+        f"events_merged={total_stats['events_merged']}, "
+        f"llm_calls={total_stats['llm_calls']}, "
+        f"total_cost_usd={round(total_stats['total_cost_usd'], 4)}, "
+        f"channels_processed={total_stats['channels_processed']}, "
+        f"errors_count={len(total_stats['errors'])}"
     )
 
     # STEP 5: Publish digest (optional, across all sources)
     if args.publish:
         logger.info(
-            "pipeline_step_started",
-            step=5,
-            step_name="publish_digest",
-            dry_run=args.dry_run,
+            f"pipeline_step_started: step=5, step_name=publish_digest, dry_run={args.dry_run}"
         )
         try:
             # Create Slack client for digest posting
@@ -498,14 +453,13 @@ def run_single_iteration(
                 dry_run=args.dry_run,
             )
             logger.info(
-                "digest_published",
-                events_included=digest_result.events_included,
-                messages_posted=digest_result.messages_posted,
-                channel=digest_result.channel,
-                dry_run=args.dry_run,
+                f"digest_published: events_included={digest_result.events_included}, "
+                f"messages_posted={digest_result.messages_posted}, "
+                f"channel={digest_result.channel}, "
+                f"dry_run={args.dry_run}"
             )
         except Exception as e:
-            logger.error("digest_publishing_failed", error=str(e), exc_info=True)
+            logger.error(f"digest_publishing_failed: {str(e)}", exc_info=True)
 
 
 def main() -> int:

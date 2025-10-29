@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from src.config.settings import Settings
 
 
-DEFAULT_STATE_TABLE: Final[str] = "ingestion_state"
+DEFAULT_STATE_TABLE: Final[str] = "slack_ingestion_state"
 TELEGRAM_STATE_TABLE: Final[str] = "ingestion_state_telegram"
 STATE_TABLE_FALLBACK_BY_SOURCE: Final[dict[MessageSource, str]] = {
     MessageSource.SLACK: DEFAULT_STATE_TABLE,
@@ -1027,6 +1027,7 @@ class PostgresRepository:
         """
         # Use source-specific state table name from configuration
         table_name = self._get_state_table_name(source_id)
+        logger.debug(f"Using state table: {table_name} for source: {source_id}")
 
         row: dict[str, Any] | None = None
         with self._get_connection() as conn:
@@ -1195,10 +1196,12 @@ class PostgresRepository:
                         WHERE {where_clause}
                         ORDER BY {order_clause}
                         {limit_clause}
-                    """
+                    """.strip()
 
                     # Execute with all parameters
                     all_params = where_params + limit_params
+                    logger.debug(f"Executing query: {query}")
+                    logger.debug(f"Parameters: {all_params}")
                     cur.execute(query, all_params)
 
                     rows = cur.fetchall()
@@ -1277,7 +1280,7 @@ class PostgresRepository:
                                 file_mime, ingested_at
                             ) VALUES (
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                             )
                             ON CONFLICT (message_id) DO UPDATE SET
                                 channel = EXCLUDED.channel,
