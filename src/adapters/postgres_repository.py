@@ -1034,7 +1034,7 @@ class PostgresRepository:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
-                        f"SELECT last_processed_ts FROM {table_name} WHERE channel_id = %s",
+                        f"SELECT max_processed_ts FROM {table_name} WHERE channel_id = %s",
                         (channel,),
                     )
                     row = cur.fetchone()
@@ -1048,7 +1048,7 @@ class PostgresRepository:
         if not row:
             return None
 
-        last_ts = row.get("last_processed_ts")
+        last_ts = row.get("max_processed_ts")
         return float(last_ts) if last_ts is not None else None
 
     def update_last_processed_ts(
@@ -1072,10 +1072,10 @@ class PostgresRepository:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""
-                        INSERT INTO {table_name} (channel_id, last_processed_ts, updated_at)
+                        INSERT INTO {table_name} (channel_id, max_processed_ts, updated_at)
                         VALUES (%s, %s, NOW())
                         ON CONFLICT (channel_id) DO UPDATE SET
-                            last_processed_ts = EXCLUDED.last_processed_ts,
+                            max_processed_ts = EXCLUDED.max_processed_ts,
                             updated_at = EXCLUDED.updated_at
                         """,
                         (channel, ts),
@@ -1154,10 +1154,10 @@ class PostgresRepository:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""
-                        INSERT INTO {table_name} (channel_id, last_processed_ts, last_processed_message_id, updated_at)
+                        INSERT INTO {table_name} (channel_id, max_processed_ts, last_processed_message_id, updated_at)
                         VALUES (%s, 0, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (channel_id) DO UPDATE SET
-                            last_processed_ts = 0,
+                            max_processed_ts = 0,
                             last_processed_message_id = %s,
                             updated_at = CURRENT_TIMESTAMP
                         """,
@@ -1184,7 +1184,7 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                with conn.cursor(cursor_factory=extensions.cursor) as cur:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Build query parts
                     where_clause, where_params = criteria.to_where_clause()
                     order_clause = criteria.to_order_clause()
@@ -1226,7 +1226,7 @@ class PostgresRepository:
         """
         try:
             with self._get_connection() as conn:
-                with conn.cursor(cursor_factory=extensions.cursor) as cur:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # Build query parts
                     where_clause, where_params = criteria.to_where_clause()
                     order_clause = criteria.to_order_clause()
