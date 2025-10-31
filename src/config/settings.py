@@ -423,8 +423,17 @@ class Settings(BaseSettings):
                 logger.info(
                     "Auto-migrating 'telegram_channels' config to 'message_sources' format"
                 )
-                telegram_channel_ids = [
-                    ch["channel_id"] for ch in config["telegram_channels"]
+                # Convert raw config dicts to TelegramChannelConfig objects
+                from src.domain.models import TelegramChannelConfig
+
+                telegram_channels = [
+                    TelegramChannelConfig(
+                        username=ch["channel_id"],
+                        channel_name=ch.get("channel_name", ch["channel_id"]),
+                        from_date=ch.get("from_date"),
+                        enabled=ch.get("enabled", True),
+                    )
+                    for ch in config["telegram_channels"]
                 ]
                 telegram_source = MessageSourceConfig(
                     source_id=MessageSource.TELEGRAM,
@@ -439,7 +448,7 @@ class Settings(BaseSettings):
                             "timeout_seconds", 120
                         ),
                     },
-                    channels=telegram_channel_ids,
+                    channels=telegram_channels,
                 )
                 message_sources.append(telegram_source)
 
