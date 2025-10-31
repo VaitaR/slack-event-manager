@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "rename_telegram_ts"
-down_revision = None  # Will be set by alembic
+down_revision = "202510251200"
 
 
 def upgrade() -> None:

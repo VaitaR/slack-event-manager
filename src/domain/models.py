@@ -50,8 +50,9 @@ class MessageSourceConfig(BaseModel):
         default_factory=dict,
         description="Per-source LLM settings (temperature, timeout)",
     )
-    channels: list[str] = Field(
-        default_factory=list, description="List of channel IDs to monitor"
+    channels: list[str] | list[Any] = Field(
+        default_factory=list,
+        description="List of channel IDs (str) or channel config objects",
     )
 
 
@@ -223,6 +224,10 @@ class TelegramChannelConfig(BaseModel):
     prompt_file: str = Field(
         default="",
         description="Path to LLM prompt template file (empty = use source default)",
+    )
+    from_date: str | None = Field(
+        default=None,
+        description="Start date for backfill (ISO format: 2025-09-01T00:00:00Z), used only on first run",
     )
     enabled: bool = Field(
         default=True,

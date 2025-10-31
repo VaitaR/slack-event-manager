@@ -381,8 +381,12 @@ async def ingest_telegram_messages_use_case_async(
 
     # Default backfill window: 1 day (as per requirements)
 
-    # Get Telegram channels from config
-    telegram_channels = getattr(settings, "telegram_channels", [])
+    # Get Telegram channels from message_sources (post-migration format)
+    telegram_source = next(
+        (s for s in settings.message_sources if s.source_id == MessageSource.TELEGRAM),
+        None,
+    )
+    telegram_channels = telegram_source.channels if telegram_source else []
 
     if not telegram_channels:
         logger.warning(
@@ -401,12 +405,14 @@ async def ingest_telegram_messages_use_case_async(
         if isinstance(channel_config, dict):
             channel_id = channel_config.get("channel_id", "")
             enabled = channel_config.get("enabled", True)
-            channel_config.get("from_date")
+            from_date = channel_config.get("from_date")
         else:
-            # TelegramChannelConfig object
-            channel_id = getattr(channel_config, "username", "")
-            enabled = getattr(channel_config, "enabled", True)
-            getattr(channel_config, "from_date", None)
+            # TelegramChannelConfig object (from settings.message_sources)
+            channel_id = (
+                channel_config.username
+            )  # TelegramChannelConfig uses username field
+            enabled = channel_config.enabled
+            from_date = channel_config.from_date
 
         if not enabled:
             logger.info(
@@ -436,6 +442,22 @@ async def ingest_telegram_messages_use_case_async(
                 # Telethon doesn't support min_id in iter_messages easily
                 backfill_date = None
             # First run: determine backfill date
+            elif from_date is not None:
+                # Parse from_date if it's a string
+                if isinstance(from_date, str):
+                    backfill_date = datetime.fromisoformat(
+                        from_date.replace("Z", "+00:00")
+                    )
+                else:
+                    backfill_date = from_date
+                logger.info(
+                    "Telegram channel first run with from_date from config",
+                    extra={
+                        "channel_id": channel_id,
+                        "backfill_date": backfill_date.isoformat(),
+                        "strategy": "first_run_from_config",
+                    },
+                )
             elif backfill_from_date is not None:
                 backfill_date = backfill_from_date
                 logger.info(
