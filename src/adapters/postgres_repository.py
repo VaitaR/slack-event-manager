@@ -4,6 +4,8 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from threading import Lock
+from time import sleep
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytz
@@ -48,6 +50,13 @@ STATE_TABLE_FALLBACK_BY_SOURCE: Final[dict[MessageSource, str]] = {
     MessageSource.TELEGRAM: TELEGRAM_STATE_TABLE,
 }
 
+DEFAULT_POOL_MIN_CONNECTIONS: Final[int] = 20
+DEFAULT_POOL_MAX_CONNECTIONS: Final[int] = 50
+POOL_ACQUIRE_MAX_ATTEMPTS_DEFAULT: Final[int] = 5
+POOL_ACQUIRE_BASE_DELAY_SECONDS: Final[float] = 0.1
+POOL_ACQUIRE_MAX_DELAY_SECONDS: Final[float] = 2.0
+POOL_USAGE_WARNING_THRESHOLD: Final[float] = 0.8
+
 logger = get_logger(__name__)
 
 
@@ -84,12 +93,25 @@ class PostgresRepository:
             settings.postgres_application_name if settings else "slack_event_manager"
         )
         self._pool_min_connections = (
-            settings.postgres_min_connections if settings else 1
+            settings.postgres_min_connections
+            if settings
+            else DEFAULT_POOL_MIN_CONNECTIONS
         )
         self._pool_max_connections = (
-            settings.postgres_max_connections if settings else 10
+            settings.postgres_max_connections
+            if settings
+            else DEFAULT_POOL_MAX_CONNECTIONS
         )
         self._ssl_mode = settings.postgres_ssl_mode if settings else None
+
+        self._pool_acquire_max_attempts = POOL_ACQUIRE_MAX_ATTEMPTS_DEFAULT
+        self._pool_acquire_base_delay_seconds = POOL_ACQUIRE_BASE_DELAY_SECONDS
+        self._pool_acquire_max_delay_seconds = POOL_ACQUIRE_MAX_DELAY_SECONDS
+        self._pool_usage_warning_threshold = POOL_USAGE_WARNING_THRESHOLD
+        self._pool_in_use_count = 0
+        self._pool_high_watermark = 0
+        self._pool_usage_warning_emitted = False
+        self._pool_lock = Lock()
 
         if self._pool_min_connections <= 0:
             raise RepositoryError("postgres_min_connections must be positive")
@@ -100,7 +122,7 @@ class PostgresRepository:
 
         self._pool = self._create_pool()
 
-    def _create_pool(self) -> psycopg2_pool.SimpleConnectionPool:
+    def _create_pool(self) -> psycopg2_pool.ThreadedConnectionPool:
         """Create a PostgreSQL connection pool with validation."""
         options_parts: list[str] = [
             f"-c statement_timeout={self._statement_timeout_ms}",
@@ -121,7 +143,7 @@ class PostgresRepository:
             conn_kwargs["sslmode"] = self._ssl_mode
 
         try:
-            pool = psycopg2_pool.SimpleConnectionPool(
+            pool = psycopg2_pool.ThreadedConnectionPool(
                 self._pool_min_connections,
                 self._pool_max_connections,
                 **conn_kwargs,
@@ -153,10 +175,114 @@ class PostgresRepository:
         )
         return pool
 
+    def _acquire_connection_with_retry(self) -> extensions.connection:
+        """Acquire a connection from the pool with exponential backoff."""
+        attempt = 0
+        delay = self._pool_acquire_base_delay_seconds
+        while True:
+            attempt += 1
+            try:
+                conn = self._pool.getconn()
+            except psycopg2_pool.PoolError as exc:
+                if attempt >= self._pool_acquire_max_attempts:
+                    logger.error(
+                        "postgres_pool_acquire_failed",
+                        attempts=attempt,
+                        max_attempts=self._pool_acquire_max_attempts,
+                        max_connections=self._pool_max_connections,
+                        in_use=self._pool_in_use_count,
+                    )
+                    raise RepositoryError(
+                        "Failed to acquire PostgreSQL connection from pool"
+                    ) from exc
+
+                logger.warning(
+                    "postgres_pool_exhausted_retry",
+                    attempt=attempt,
+                    wait_seconds=delay,
+                    max_attempts=self._pool_acquire_max_attempts,
+                    max_connections=self._pool_max_connections,
+                    in_use=self._pool_in_use_count,
+                )
+                sleep(delay)
+                delay = min(delay * 2, self._pool_acquire_max_delay_seconds)
+                continue
+
+            self._register_connection_checkout()
+            return conn
+
+    def _register_connection_checkout(self) -> None:
+        """Update pool usage counters after a checkout."""
+        with self._pool_lock:
+            self._pool_in_use_count += 1
+            if self._pool_in_use_count > self._pool_high_watermark:
+                self._pool_high_watermark = self._pool_in_use_count
+                logger.info(
+                    "postgres_pool_high_watermark",
+                    high_watermark=self._pool_high_watermark,
+                    max_connections=self._pool_max_connections,
+                )
+
+            usage_ratio = self._pool_in_use_count / self._pool_max_connections
+            if usage_ratio >= self._pool_usage_warning_threshold:
+                if not self._pool_usage_warning_emitted:
+                    self._pool_usage_warning_emitted = True
+                    logger.warning(
+                        "postgres_pool_usage_high",
+                        in_use=self._pool_in_use_count,
+                        max_connections=self._pool_max_connections,
+                        threshold=self._pool_usage_warning_threshold,
+                    )
+
+    def _register_connection_checkin(self) -> None:
+        """Update pool usage counters after a checkin."""
+        with self._pool_lock:
+            if self._pool_in_use_count > 0:
+                self._pool_in_use_count -= 1
+
+            usage_ratio = self._pool_in_use_count / self._pool_max_connections
+            if usage_ratio < self._pool_usage_warning_threshold:
+                self._pool_usage_warning_emitted = False
+
+    def _release_connection(
+        self,
+        conn: extensions.connection,
+        *,
+        close: bool,
+        reason: str | None,
+    ) -> None:
+        """Return a connection to the pool and update usage metrics."""
+        try:
+            self._pool.putconn(conn, close=close)
+        except PsycopgError:
+            logger.warning(
+                "postgres_putconn_failed",
+                database=self._database,
+                close=close,
+                reason=reason,
+                exc_info=True,
+            )
+        finally:
+            self._register_connection_checkin()
+            if close and reason:
+                logger.warning(
+                    "postgres_connection_closed",
+                    reason=reason,
+                    max_connections=self._pool_max_connections,
+                    in_use=self._pool_in_use_count,
+                )
+
     def close(self) -> None:
         """Close all connections in the pool."""
         self._pool.closeall()
-        logger.info("postgres_pool_closed", database=self._database)
+        with self._pool_lock:
+            self._pool_in_use_count = 0
+            self._pool_usage_warning_emitted = False
+        logger.info(
+            "postgres_pool_closed",
+            database=self._database,
+            high_watermark=self._pool_high_watermark,
+        )
 
     def _get_state_table_name(self, source_id: MessageSource | None) -> str:
         """Get state table name for the given source."""
@@ -175,7 +301,7 @@ class PostgresRepository:
         """Borrow a connection from the pool and ensure cleanup."""
         conn: extensions.connection | None = None
         try:
-            conn = self._pool.getconn()
+            conn = self._acquire_connection_with_retry()
             conn.autocommit = False
             yield conn
         except PsycopgError as exc:
@@ -189,7 +315,7 @@ class PostgresRepository:
                         exc_info=True,
                     )
                 finally:
-                    self._pool.putconn(conn, close=True)
+                    self._release_connection(conn, close=True, reason="rollback_error")
                     conn = None
             raise RepositoryError(f"PostgreSQL connection error: {exc}") from exc
         finally:
@@ -207,9 +333,9 @@ class PostgresRepository:
                         database=self._database,
                         exc_info=True,
                     )
-                    self._pool.putconn(conn, close=True)
+                    self._release_connection(conn, close=True, reason="cleanup_error")
                 else:
-                    self._pool.putconn(conn)
+                    self._release_connection(conn, close=False, reason=None)
 
     def _row_to_message(self, row: dict[str, Any]) -> SlackMessage:
         """Convert database row to SlackMessage.
