@@ -5,19 +5,67 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 """
 
 import hashlib
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, TypeAlias
 
 import pytz
 
 from src.adapters.telegram_client import TelegramClient
 from src.config.logging_config import get_logger
 from src.config.settings import Settings
-from src.domain.models import IngestResult, MessageSource, TelegramMessage
+from src.domain.models import (
+    IngestResult,
+    MessageSource,
+    TelegramChannelConfig,
+    TelegramMessage,
+)
 from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
 
 logger = get_logger(__name__)
+
+TelegramChannelInput: TypeAlias = TelegramChannelConfig | Mapping[str, Any]
+
+
+def _normalize_telegram_channel_configs(
+    raw_channels: Sequence[Any],
+) -> list[TelegramChannelInput]:
+    """Normalize Telegram channel configurations for ingestion.
+
+    Args:
+        raw_channels: Sequence of raw channel configurations (objects, dicts, or strings).
+
+    Returns:
+        List of Telegram channel inputs with a consistent shape for processing.
+    """
+
+    normalized: list[TelegramChannelInput] = []
+    for raw_channel in raw_channels:
+        if isinstance(raw_channel, TelegramChannelConfig):
+            normalized.append(raw_channel)
+            continue
+        if isinstance(raw_channel, Mapping):
+            normalized.append(raw_channel)
+            continue
+        if isinstance(raw_channel, str):
+            normalized.append(
+                {
+                    "channel_id": raw_channel,
+                    "username": raw_channel,
+                    "enabled": True,
+                }
+            )
+            continue
+
+        logger.warning(
+            "telegram_ingestion_invalid_channel_config",
+            reason="unsupported_channel_config_type",
+            config_type=type(raw_channel).__name__,
+        )
+
+    return normalized
+
 
 # Import Telegram types conditionally to avoid runtime errors
 try:
@@ -386,7 +434,8 @@ async def ingest_telegram_messages_use_case_async(
         (s for s in settings.message_sources if s.source_id == MessageSource.TELEGRAM),
         None,
     )
-    telegram_channels = telegram_source.channels if telegram_source else []
+    raw_channels: Sequence[Any] = telegram_source.channels if telegram_source else ()
+    telegram_channels = _normalize_telegram_channel_configs(raw_channels)
 
     if not telegram_channels:
         logger.warning(
@@ -401,16 +450,16 @@ async def ingest_telegram_messages_use_case_async(
         )
 
     for channel_config in telegram_channels:
-        # Handle both dict and object formats
-        if isinstance(channel_config, dict):
-            channel_id = channel_config.get("channel_id", "")
-            enabled = channel_config.get("enabled", True)
-            from_date = channel_config.get("from_date")
+        if isinstance(channel_config, Mapping):
+            channel_id_value = channel_config.get("channel_id") or channel_config.get(
+                "username"
+            )
+            channel_id = str(channel_id_value) if channel_id_value is not None else ""
+            enabled = bool(channel_config.get("enabled", True))
+            from_date_raw = channel_config.get("from_date")
+            from_date = str(from_date_raw) if isinstance(from_date_raw, str) else None
         else:
-            # TelegramChannelConfig object (from settings.message_sources)
-            channel_id = (
-                channel_config.username
-            )  # TelegramChannelConfig uses username field
+            channel_id = channel_config.username
             enabled = channel_config.enabled
             from_date = channel_config.from_date
 
