@@ -37,6 +37,7 @@ POSTGRES_APPLICATION_NAME_DEFAULT: Final[str] = "slack_event_manager"
 
 SLACK_FETCH_PAGE_SIZE_DEFAULT: Final[int] = 200
 SLACK_RATE_LIMIT_DELAY_SECONDS_DEFAULT: Final[float] = 0.5
+LLM_CACHE_TTL_DAYS_DEFAULT: Final[int] = 21
 
 TELEGRAM_FETCH_PAGE_SIZE_DEFAULT: Final[int] = 200
 TELEGRAM_RATE_LIMIT_DELAY_SECONDS_DEFAULT: Final[float] = 1.0
@@ -273,6 +274,10 @@ class Settings(BaseSettings):
             )
             data.setdefault(
                 "llm_max_events_per_msg", config["llm"].get("max_events_per_msg", 5)
+            )
+            data.setdefault(
+                "llm_cache_ttl_days",
+                config["llm"].get("cache_ttl_days", LLM_CACHE_TTL_DAYS_DEFAULT),
             )
 
         if "database" in config:
@@ -575,6 +580,12 @@ class Settings(BaseSettings):
     )
     llm_max_events_per_msg: int = Field(
         default=5, description="Maximum events to extract per message"
+    )
+    llm_cache_ttl_days: int = Field(
+        default=LLM_CACHE_TTL_DAYS_DEFAULT,
+        ge=1,
+        le=90,
+        description="Time-to-live for cached LLM responses (days)",
     )
     llm_temperature: float = Field(
         default=1.0, description="LLM temperature (1.0 for gpt-5-nano)"

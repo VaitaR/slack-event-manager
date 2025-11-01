@@ -119,6 +119,7 @@ def test_extract_events_use_case_uses_injected_dependencies(
     ]
     repository.get_daily_llm_cost.return_value = 0.0
     repository.get_cached_llm_response.return_value = None
+    repository.invalidate_llm_cache_entry.return_value = None
     repository.save_llm_response.return_value = None
     repository.save_llm_call.return_value = None
     repository.save_events.return_value = None
@@ -128,6 +129,7 @@ def test_extract_events_use_case_uses_injected_dependencies(
     settings.llm_daily_budget_usd = 100.0
     settings.llm_model = "test-model"
     settings.llm_max_events_per_msg = 5
+    settings.llm_cache_ttl_days = 21
     settings.get_scoring_config.return_value = None
     settings.dedup_date_window_hours = 48
     settings.dedup_title_similarity = 0.8

@@ -6,14 +6,19 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 
 import hashlib
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytz
 
 from src.adapters.telegram_client import TelegramClient
 from src.config.logging_config import get_logger
 from src.config.settings import Settings
-from src.domain.models import IngestResult, MessageSource, TelegramMessage
+from src.domain.models import (
+    IngestResult,
+    MessageSource,
+    TelegramChannelConfig,
+    TelegramMessage,
+)
 from src.domain.protocols import RepositoryProtocol
 from src.services import link_extractor, text_normalizer
 
@@ -408,11 +413,10 @@ async def ingest_telegram_messages_use_case_async(
             from_date = channel_config.get("from_date")
         else:
             # TelegramChannelConfig object (from settings.message_sources)
-            channel_id = (
-                channel_config.username
-            )  # TelegramChannelConfig uses username field
-            enabled = channel_config.enabled
-            from_date = channel_config.from_date
+            config_obj = cast(TelegramChannelConfig, channel_config)
+            channel_id = config_obj.username
+            enabled = config_obj.enabled
+            from_date = config_obj.from_date
 
         if not enabled:
             logger.info(
