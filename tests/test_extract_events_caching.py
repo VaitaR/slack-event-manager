@@ -31,6 +31,7 @@ def extraction_settings() -> MagicMock:
     settings = MagicMock(spec=Settings)
     settings.llm_daily_budget_usd = 100.0
     settings.llm_max_events_per_msg = 2
+    settings.llm_cache_ttl_days = 21
     settings.get_scoring_config.return_value = None
     settings.dedup_date_window_hours = 48
     settings.dedup_title_similarity = 0.8
@@ -135,6 +136,10 @@ def test_extract_events_use_case_uses_cached_response(
     assert metadata.tokens_in == 0
     assert metadata.tokens_out == 0
     assert metadata.prompt_hash == repository.get_cached_llm_response.call_args[0][0]
+    cache_kwargs = repository.get_cached_llm_response.call_args.kwargs
+    assert (
+        cache_kwargs["max_age"].days == extraction_settings.llm_cache_ttl_days
+    )
 
 
 def test_extract_events_use_case_persists_llm_response(

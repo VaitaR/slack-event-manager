@@ -11,6 +11,8 @@ class _FakeLLMClient:
     def __init__(self, model: str, version: str | None) -> None:
         self.model = model
         self.prompt_version = version
+        version_tag = version or "inline"
+        self.system_prompt_hash = f"{model}:{version_tag}:prompt"
 
 
 def test_prompt_hash_stability_across_runs() -> None:
