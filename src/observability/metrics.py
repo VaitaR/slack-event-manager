@@ -70,10 +70,17 @@ def _fallback_start_http_server(port: int) -> None:
 
 
 # Try to import prometheus_client, fall back to our implementations
+# Declare variables with Any type before assignment
+CounterClass: Any
+HistogramClass: Any
+_start_http_server: Any
+
 try:  # pragma: no cover - optional dependency
-    from prometheus_client import Counter as CounterClass
-    from prometheus_client import Histogram as HistogramClass
-    from prometheus_client import start_http_server as _start_http_server
+    from prometheus_client import Counter, Histogram, start_http_server
+
+    CounterClass = Counter
+    HistogramClass = Histogram
+    _start_http_server = start_http_server
 except ImportError:  # pragma: no cover - fallback for offline environments
     CounterClass = _FallbackCounter
     HistogramClass = _FallbackHistogram
