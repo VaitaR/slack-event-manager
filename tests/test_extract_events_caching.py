@@ -137,9 +137,7 @@ def test_extract_events_use_case_uses_cached_response(
     assert metadata.tokens_out == 0
     assert metadata.prompt_hash == repository.get_cached_llm_response.call_args[0][0]
     cache_kwargs = repository.get_cached_llm_response.call_args.kwargs
-    assert (
-        cache_kwargs["max_age"].days == extraction_settings.llm_cache_ttl_days
-    )
+    assert cache_kwargs["max_age"].days == extraction_settings.llm_cache_ttl_days
 
 
 def test_extract_events_use_case_persists_llm_response(

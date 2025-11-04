@@ -7,7 +7,7 @@ Similar to Slack ingestion but adapted for Telegram's message structure.
 import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 import pytz
 
@@ -460,7 +460,7 @@ async def ingest_telegram_messages_use_case_async(
             from_date = str(from_date_raw) if isinstance(from_date_raw, str) else None
         else:
             # TelegramChannelConfig object (from settings.message_sources)
-            config_obj = cast(TelegramChannelConfig, channel_config)
+            config_obj = channel_config
             channel_id = config_obj.username
             enabled = config_obj.enabled
             from_date = config_obj.from_date

@@ -77,7 +77,7 @@ except ImportError:  # pragma: no cover - fallback for offline environments
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(str(args[0]), "histogram")
 
-    def start_http_server(port: int) -> None:  # type: ignore[misc]
+    def start_http_server(port: int) -> None:
         logger.warning("prometheus_client_unavailable", port=port)
 
     CounterClass: Any = _FallbackCounter
