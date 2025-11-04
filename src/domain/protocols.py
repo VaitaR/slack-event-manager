@@ -3,7 +3,7 @@
 These abstract interfaces define contracts that adapters must implement.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
 from src.domain.models import (
@@ -401,11 +401,14 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
-    def get_cached_llm_response(self, prompt_hash: str) -> str | None:
+    def get_cached_llm_response(
+        self, prompt_hash: str, *, max_age: timedelta | None = None
+    ) -> str | None:
         """Get cached LLM response by prompt hash.
 
         Args:
             prompt_hash: SHA256 hash of prompt
+            max_age: Optional TTL window; entries older than this should be ignored
 
         Returns:
             Cached JSON response or None
@@ -417,6 +420,11 @@ class RepositoryProtocol(Protocol):
 
     def save_llm_response(self, prompt_hash: str, response_json: str) -> None:
         """Persist LLM response payload for reuse."""
+
+        ...
+
+    def invalidate_llm_cache_entry(self, prompt_hash: str) -> None:
+        """Remove cached payload for a prompt hash without deleting call history."""
 
         ...
 

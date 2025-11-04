@@ -3,10 +3,10 @@
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from time import sleep
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytz
 from psycopg2 import Error as PsycopgError
@@ -1088,11 +1088,14 @@ class PostgresRepository:
                 row = cur.fetchone()
                 return float(row[0]) if row else 0.0
 
-    def get_cached_llm_response(self, prompt_hash: str) -> str | None:
+    def get_cached_llm_response(
+        self, prompt_hash: str, *, max_age: timedelta | None = None
+    ) -> str | None:
         """Get cached LLM response by prompt hash.
 
         Args:
             prompt_hash: SHA256 hash of prompt
+            max_age: Optional TTL duration
 
         Returns:
             Cached JSON response or None
@@ -1104,7 +1107,7 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT response_json
+                    SELECT response_json, created_at
                     FROM llm_calls
                     WHERE prompt_hash = %s AND response_json IS NOT NULL
                     ORDER BY created_at DESC
@@ -1112,8 +1115,34 @@ class PostgresRepository:
                     """,
                     (prompt_hash,),
                 )
-                row = cur.fetchone()
-                return row[0] if row else None
+                row = cast(tuple[str, datetime | None] | None, cur.fetchone())
+                if not row:
+                    return None
+
+                response_json, created_at = row
+
+                if max_age is not None:
+                    if created_at is None:
+                        logger.warning(
+                            "llm_cache_missing_timestamp",
+                            prompt_hash=prompt_hash[:12],
+                        )
+                        self.invalidate_llm_cache_entry(prompt_hash)
+                        return None
+
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=UTC)
+
+                    if created_at < datetime.now(tz=UTC) - max_age:
+                        logger.info(
+                            "llm_cache_entry_expired",
+                            prompt_hash=prompt_hash[:12],
+                            cached_at=created_at.isoformat(),
+                        )
+                        self.invalidate_llm_cache_entry(prompt_hash)
+                        return None
+
+                return response_json
 
     def save_llm_response(self, prompt_hash: str, response_json: str) -> None:
         """Persist structured LLM response for caching reuse."""
@@ -1133,6 +1162,21 @@ class PostgresRepository:
                     )
                     """,
                     (response_json, prompt_hash),
+                )
+                conn.commit()
+
+    def invalidate_llm_cache_entry(self, prompt_hash: str) -> None:
+        """Clear cached payload without removing call records."""
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE llm_calls
+                    SET response_json = NULL
+                    WHERE prompt_hash = %s
+                """,
+                    (prompt_hash,),
                 )
                 conn.commit()
 

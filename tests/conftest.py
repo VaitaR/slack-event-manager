@@ -277,6 +277,7 @@ def mock_repository() -> Mock:
     mock.save_llm_call.return_value = None
     mock.get_daily_llm_cost.return_value = 0.0
     mock.get_cached_llm_response.return_value = None
+    mock.invalidate_llm_cache_entry.return_value = None
     mock.save_telegram_messages.return_value = 0
     mock.get_telegram_messages.return_value = []
     return mock
