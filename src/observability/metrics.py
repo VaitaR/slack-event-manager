@@ -4,84 +4,80 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import TYPE_CHECKING, Any, Final
+from typing import Any, Final
 
 from src.config.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-if TYPE_CHECKING:  # pragma: no cover - typing aid
-    from prometheus_client import Counter as PromCounter
-    from prometheus_client import Histogram as PromHistogram
 
-try:  # pragma: no cover - optional dependency
-    from prometheus_client import Counter as PromCounter
-    from prometheus_client import Histogram as PromHistogram
-    from prometheus_client import start_http_server as _start_http_server
+class _FallbackMetric:
+    def __init__(self, name: str, metric_type: str) -> None:
+        self._name = name
+        self._metric_type = metric_type
+        self._storage: dict[tuple[tuple[str, str], ...], float] = {}
 
-    _PROMETHEUS_AVAILABLE = True
-except ImportError:  # pragma: no cover - fallback for offline environments
-    _PROMETHEUS_AVAILABLE = False
+    def labels(self, **labels: str) -> _FallbackMetricInstance:
+        key = tuple(sorted(labels.items()))
+        return _FallbackMetricInstance(self, key)
 
-    class _FallbackMetric:
-        def __init__(self, name: str, metric_type: str) -> None:
-            self._name = name
-            self._metric_type = metric_type
-            self._storage: dict[tuple[tuple[str, str], ...], float] = {}
+    def _increment(self, key: tuple[tuple[str, str], ...], amount: float) -> None:
+        self._storage[key] = self._storage.get(key, 0.0) + amount
 
-        def labels(self, **labels: str) -> _FallbackMetricInstance:
-            key = tuple(sorted(labels.items()))
-            return _FallbackMetricInstance(self, key)
-
-        def _increment(self, key: tuple[tuple[str, str], ...], amount: float) -> None:
-            self._storage[key] = self._storage.get(key, 0.0) + amount
-
-        def collect(self) -> list[Any]:
-            metric_name = (
-                f"{self._name}_count"
-                if self._metric_type == "histogram"
-                else f"{self._name}_total"
+    def collect(self) -> list[Any]:
+        metric_name = (
+            f"{self._name}_count"
+            if self._metric_type == "histogram"
+            else f"{self._name}_total"
+        )
+        samples = [
+            type(
+                "Sample",
+                (),
+                {"name": metric_name, "labels": dict(labels), "value": value},
             )
-            samples = [
-                type(
-                    "Sample",
-                    (),
-                    {"name": metric_name, "labels": dict(labels), "value": value},
-                )
-                for labels, value in self._storage.items()
-            ]
-            return [type("Metric", (), {"samples": samples})]
+            for labels, value in self._storage.items()
+        ]
+        return [type("Metric", (), {"samples": samples})]
 
-    class _FallbackMetricInstance:
-        def __init__(
-            self, metric: _FallbackMetric, key: tuple[tuple[str, str], ...]
-        ) -> None:
-            self._metric = metric
-            self._key = key
 
-        def inc(self, amount: float = 1.0) -> None:
-            self._metric._increment(self._key, amount)
+class _FallbackMetricInstance:
+    def __init__(
+        self, metric: _FallbackMetric, key: tuple[tuple[str, str], ...]
+    ) -> None:
+        self._metric = metric
+        self._key = key
 
-        def observe(self, value: float) -> None:  # noqa: ARG002 - value unused
-            self._metric._increment(self._key, 1.0)
+    def inc(self, amount: float = 1.0) -> None:
+        self._metric._increment(self._key, amount)
 
-    class _FallbackCounter(_FallbackMetric):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            super().__init__(str(args[0]), "counter")
+    def observe(self, value: float) -> None:  # noqa: ARG002 - value unused
+        self._metric._increment(self._key, 1.0)
 
-    class _FallbackHistogram(_FallbackMetric):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            super().__init__(str(args[0]), "histogram")
 
-    def _start_http_server(port: int) -> None:
-        logger.warning("prometheus_client_unavailable", port=port)
+class _FallbackCounter(_FallbackMetric):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(str(args[0]), "counter")
 
-    PromCounter = _FallbackCounter
-    PromHistogram = _FallbackHistogram
 
-# Set the classes to use based on availability
-CounterClass: Any = PromCounter
-HistogramClass: Any = PromHistogram
+class _FallbackHistogram(_FallbackMetric):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(str(args[0]), "histogram")
+
+
+def _fallback_start_http_server(port: int) -> None:
+    logger.warning("prometheus_client_unavailable", port=port)
+
+
+# Try to import prometheus_client, fall back to our implementations
+try:  # pragma: no cover - optional dependency
+    from prometheus_client import Counter as CounterClass
+    from prometheus_client import Histogram as HistogramClass
+    from prometheus_client import start_http_server as _start_http_server
+except ImportError:  # pragma: no cover - fallback for offline environments
+    CounterClass = _FallbackCounter
+    HistogramClass = _FallbackHistogram
+    _start_http_server = _fallback_start_http_server
 
 JOBS_SUBMITTED_TOTAL: Final[Any] = CounterClass(
     "pipeline_jobs_submitted_total",

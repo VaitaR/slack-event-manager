@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.domain.models import TelegramChannelConfig
 from src.use_cases.ingest_telegram_messages import _normalize_telegram_channel_configs
@@ -22,7 +22,7 @@ def test_normalize_mixed_channel_configurations() -> None:
     }
 
     with patch(
-        "src.use_cases.ingest_telegram_messages.logger", autospec=True
+        "src.use_cases.ingest_telegram_messages.logger", MagicMock()
     ) as mock_logger:
         normalized = _normalize_telegram_channel_configs(
             [config_obj, mapping_config, "@legacy_channel", 123]
