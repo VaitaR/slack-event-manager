@@ -5,7 +5,7 @@ Uses LLM to extract structured events from candidate messages.
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -15,7 +15,7 @@ import pytz
 from src.adapters.llm_client import LLMClient
 from src.adapters.query_builders import CandidateQueryCriteria
 from src.config.logging_config import get_logger
-from src.config.settings import Settings
+from src.config.settings import LLM_CACHE_TTL_DAYS_DEFAULT, Settings
 from src.domain.exceptions import BudgetExceededError, LLMAPIError, ValidationError
 from src.domain.models import (
     ActionType,
@@ -117,10 +117,12 @@ def _compute_prompt_hash(
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     normalized_content_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
     template_version = llm_client.prompt_version or "inline"
+    prompt_fingerprint = llm_client.system_prompt_hash
     hash_input = "|".join(
         [
             llm_client.model,
             template_version,
+            prompt_fingerprint,
             str(chunk_index),
             normalized_content_hash,
         ]
@@ -370,6 +372,13 @@ def extract_events_use_case(
             cache_hits = 0
             total_cost = 0.0
             errors: list[str] = []
+            cache_ttl: timedelta | None = None
+            cache_ttl_days = getattr(settings, "llm_cache_ttl_days", 0)
+            try:
+                if cache_ttl_days:
+                    cache_ttl = timedelta(days=int(cache_ttl_days))
+            except (TypeError, ValueError):
+                cache_ttl = timedelta(days=LLM_CACHE_TTL_DAYS_DEFAULT)
             validator = event_validator or _get_event_validator()
 
             for candidate in candidates:
@@ -424,7 +433,9 @@ def extract_events_use_case(
                         )
 
                         llm_response: LLMResponse | None = None
-                        cached_payload = repository.get_cached_llm_response(prompt_hash)
+                        cached_payload = repository.get_cached_llm_response(
+                            prompt_hash, max_age=cache_ttl
+                        )
                         if isinstance(cached_payload, str) and cached_payload:
                             try:
                                 llm_response = LLMResponse.model_validate_json(
@@ -436,6 +447,7 @@ def extract_events_use_case(
                                     prompt_hash=prompt_hash,
                                     error=str(exc),
                                 )
+                                repository.invalidate_llm_cache_entry(prompt_hash)
                             else:
                                 cache_hits += 1
                                 logger.info(

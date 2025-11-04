@@ -5,9 +5,9 @@ Implements RepositoryProtocol with SQLite backend.
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pytz
@@ -1281,11 +1281,14 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get daily cost: {e}")
 
-    def get_cached_llm_response(self, prompt_hash: str) -> str | None:
+    def get_cached_llm_response(
+        self, prompt_hash: str, *, max_age: timedelta | None = None
+    ) -> str | None:
         """Get cached LLM response by prompt hash.
 
         Args:
             prompt_hash: SHA256 hash of prompt
+            max_age: Optional TTL duration
 
         Returns:
             Cached JSON response or None
@@ -1296,7 +1299,7 @@ class SQLiteRepository:
 
             cursor.execute(
                 """
-                SELECT response_json FROM llm_calls
+                SELECT response_json, ts FROM llm_calls
                 WHERE prompt_hash = ? AND response_json IS NOT NULL
                 ORDER BY ts DESC
                 LIMIT 1
@@ -1307,7 +1310,44 @@ class SQLiteRepository:
             row = cursor.fetchone()
             conn.close()
 
-            return row["response_json"] if row else None
+            if not row:
+                return None
+
+            response_json = cast(str, row["response_json"])
+            cached_ts_raw = cast(str | None, row["ts"])
+
+            if max_age is not None:
+                if not cached_ts_raw:
+                    logger.warning(
+                        "llm_cache_missing_timestamp",
+                        prompt_hash=prompt_hash[:12],
+                    )
+                    self.invalidate_llm_cache_entry(prompt_hash)
+                    return None
+                try:
+                    cached_ts = datetime.fromisoformat(cached_ts_raw)
+                except ValueError:
+                    logger.warning(
+                        "llm_cache_invalid_timestamp",
+                        prompt_hash=prompt_hash[:12],
+                        ts=cached_ts_raw,
+                    )
+                    self.invalidate_llm_cache_entry(prompt_hash)
+                    return None
+
+                if cached_ts.tzinfo is None:
+                    cached_ts = cached_ts.replace(tzinfo=UTC)
+
+                if cached_ts < datetime.now(tz=UTC) - max_age:
+                    logger.info(
+                        "llm_cache_entry_expired",
+                        prompt_hash=prompt_hash[:12],
+                        cached_at=cached_ts.isoformat(),
+                    )
+                    self.invalidate_llm_cache_entry(prompt_hash)
+                    return None
+
+            return response_json
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get cached response: {e}")
@@ -1339,6 +1379,25 @@ class SQLiteRepository:
 
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to save LLM response: {e}")
+
+    def invalidate_llm_cache_entry(self, prompt_hash: str) -> None:
+        """Clear cached payload for a prompt hash."""
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE llm_calls
+                SET response_json = NULL
+                WHERE prompt_hash = ?
+            """,
+                (prompt_hash,),
+            )
+            conn.commit()
+            conn.close()
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to invalidate cached response: {e}")
 
     def _row_to_message(self, row: sqlite3.Row) -> SlackMessage:
         """Convert database row to SlackMessage."""
