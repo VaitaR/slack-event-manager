@@ -15,17 +15,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing aid
     from prometheus_client import Histogram as PromHistogram
 
 try:  # pragma: no cover - optional dependency
-    from prometheus_client import (
-        Counter as PromCounter,
-    )
-    from prometheus_client import (
-        Histogram as PromHistogram,
-    )
-    from prometheus_client import (
-        start_http_server,
-    )
+    from prometheus_client import Counter as PromCounter
+    from prometheus_client import Histogram as PromHistogram
+    from prometheus_client import start_http_server as _start_http_server
+
+    _PROMETHEUS_AVAILABLE = True
 except ImportError:  # pragma: no cover - fallback for offline environments
-    from typing import Any
+    _PROMETHEUS_AVAILABLE = False
 
     class _FallbackMetric:
         def __init__(self, name: str, metric_type: str) -> None:
@@ -77,14 +73,15 @@ except ImportError:  # pragma: no cover - fallback for offline environments
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(str(args[0]), "histogram")
 
-    def start_http_server(port: int) -> None:
+    def _start_http_server(port: int) -> None:
         logger.warning("prometheus_client_unavailable", port=port)
 
-    CounterClass: Any = _FallbackCounter
-    HistogramClass: Any = _FallbackHistogram
-else:
-    CounterClass = PromCounter
-    HistogramClass = PromHistogram
+    PromCounter = _FallbackCounter
+    PromHistogram = _FallbackHistogram
+
+# Set the classes to use based on availability
+CounterClass: Any = PromCounter
+HistogramClass: Any = PromHistogram
 
 JOBS_SUBMITTED_TOTAL: Final[Any] = CounterClass(
     "pipeline_jobs_submitted_total",
@@ -124,7 +121,7 @@ def ensure_metrics_exporter() -> None:
             logger.warning("invalid_metrics_port", port=port_raw)
             port = _DEFAULT_METRICS_PORT
 
-        start_http_server(port)
+        _start_http_server(port)
         _EXPORTER_STARTED = True
         logger.info("metrics_exporter_started", port=port)
 
