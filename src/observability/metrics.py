@@ -1,4 +1,28 @@
-"""Metrics helpers for pipeline observability."""
+"""Metrics helpers for pipeline observability.
+
+Architecture Decision:
+----------------------
+This module uses a pragmatic approach to handle optional prometheus_client dependency:
+
+1. Variables declared with `Any` type before try/except to avoid mypy redefinition errors
+2. Fallback classes provide minimal interface compatibility
+3. Works both with and without prometheus_client installed
+
+Why not Protocol-based approach?
+- Simpler implementation, less code to maintain
+- Direct compatibility with existing tests
+- Lower risk for production deployment
+- Sufficient for current observability needs
+
+Trade-offs accepted:
+- Loss of type safety (using `Any`)
+- Implicit interface contracts (no Protocol definitions)
+
+When to refactor:
+- If we need strict type checking for metrics
+- If fallback metrics need to track actual values
+- If we add complex metric operations
+"""
 
 from __future__ import annotations
 
