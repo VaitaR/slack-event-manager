@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 from time import sleep
@@ -21,6 +21,7 @@ from src.adapters.bulk_persistence import (
     upsert_event_relations_bulk,
     upsert_events_bulk,
 )
+from src.adapters.postgres_task_queue import PostgresTaskQueue
 from src.config.logging_config import get_logger
 from src.domain.candidate_constants import CANDIDATE_LEASE_TIMEOUT
 from src.domain.exceptions import RepositoryError
@@ -34,6 +35,7 @@ from src.domain.models import (
     TelegramMessage,
 )
 from src.domain.protocols import MessageRecord
+from src.ports.task_queue import TaskQueuePort
 
 if TYPE_CHECKING:
     from src.adapters.query_builders import (
@@ -112,6 +114,7 @@ class PostgresRepository:
         self._pool_high_watermark = 0
         self._pool_usage_warning_emitted = False
         self._pool_lock = Lock()
+        self._task_queue_adapter: PostgresTaskQueue | None = None
 
         if self._pool_min_connections <= 0:
             raise RepositoryError("postgres_min_connections must be positive")
@@ -283,6 +286,17 @@ class PostgresRepository:
             database=self._database,
             high_watermark=self._pool_high_watermark,
         )
+
+    def task_queue(self) -> TaskQueuePort:
+        """Provide task queue adapter tied to this repository."""
+
+        if self._task_queue_adapter is None:
+
+            def _provider() -> AbstractContextManager[Any]:
+                return self._get_connection()
+
+            self._task_queue_adapter = PostgresTaskQueue(_provider)
+        return self._task_queue_adapter
 
     def _get_state_table_name(self, source_id: MessageSource | None) -> str:
         """Get state table name for the given source."""

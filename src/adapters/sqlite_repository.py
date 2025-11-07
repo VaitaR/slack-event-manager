@@ -37,6 +37,7 @@ from src.domain.models import (
     SlackMessage,
     TelegramMessage,
 )
+from src.ports.task_queue import TaskQueuePort
 
 logger = get_logger(__name__)
 
@@ -629,10 +630,9 @@ class SQLiteRepository:
             channel: Channel ID
             ts: New watermark timestamp
         """
+        conn = self._get_connection()
         try:
-            conn = self._get_connection()
             cursor = conn.cursor()
-
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO channel_watermarks (channel, committed_ts, processing_ts)
@@ -640,12 +640,17 @@ class SQLiteRepository:
                 """,
                 (channel, ts, datetime.now(tz=pytz.UTC).isoformat()),
             )
-
             conn.commit()
+        except sqlite3.Error as e:
+            raise RepositoryError(f"Failed to update watermark: {e}") from e
+        finally:
             conn.close()
 
-        except sqlite3.Error as e:
-            raise RepositoryError(f"Failed to update watermark: {e}")
+    def task_queue(self) -> TaskQueuePort:
+        """SQLite backend does not support the task queue."""
+
+        msg = "Task queue is only supported when using PostgreSQL backend"
+        raise NotImplementedError(msg)
 
     def get_new_messages_for_candidates(self) -> list[SlackMessage]:
         """Get messages not yet in candidates table.
