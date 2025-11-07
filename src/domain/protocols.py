@@ -18,6 +18,7 @@ from src.domain.models import (
 
 if TYPE_CHECKING:
     from src.adapters.query_builders import CandidateQueryCriteria, EventQueryCriteria
+    from src.ports.task_queue import TaskQueuePort
 
 
 class MessageRecord(Protocol):
@@ -274,6 +275,9 @@ class RepositoryProtocol(Protocol):
 
     def get_recent_events(self, limit: int = 100) -> list[Event]:
         """Get most recently extracted events for presentation use."""
+
+    def task_queue(self) -> "TaskQueuePort":
+        """Expose task queue interface for asynchronous workers."""
 
         ...
 
