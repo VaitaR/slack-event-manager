@@ -2,11 +2,11 @@
 
 import json
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 from time import sleep
-from typing import TYPE_CHECKING, Any, ContextManager, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytz
 from psycopg2 import Error as PsycopgError
@@ -291,7 +291,8 @@ class PostgresRepository:
         """Provide task queue adapter tied to this repository."""
 
         if self._task_queue_adapter is None:
-            def _provider() -> ContextManager[Any]:
+
+            def _provider() -> AbstractContextManager[Any]:
                 return self._get_connection()
 
             self._task_queue_adapter = PostgresTaskQueue(_provider)

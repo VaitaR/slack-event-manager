@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, ContextManager
+from typing import Any
 from uuid import UUID, uuid4
 
 from pytest_mock import MockerFixture
@@ -14,7 +14,7 @@ from src.domain.task_queue import TaskCreate, TaskStatus, TaskType
 
 def _make_connection(
     mocker: MockerFixture,
-) -> tuple[Any, Any, Callable[[], ContextManager[Any]]]:
+) -> tuple[Any, Any, Callable[[], AbstractContextManager[Any]]]:
     """Create mocked psycopg connection and cursor."""
 
     connection = mocker.MagicMock()
@@ -28,13 +28,15 @@ def _make_connection(
     def _connection_ctx() -> Iterator[Any]:
         yield connection
 
-    def _provider() -> ContextManager[Any]:
+    def _provider() -> AbstractContextManager[Any]:
         return _connection_ctx()
 
     return connection, cursor, _provider
 
 
-def _queue(connection_provider: Callable[[], ContextManager[Any]]) -> PostgresTaskQueue:
+def _queue(
+    connection_provider: Callable[[], AbstractContextManager[Any]],
+) -> PostgresTaskQueue:
     """Create queue instance from connection provider."""
 
     return PostgresTaskQueue(connection_provider=connection_provider)
@@ -154,4 +156,3 @@ def test_fail_task_without_retry_marks_failed(mocker: MockerFixture) -> None:
 
     cursor.execute.assert_called()
     connection.commit.assert_called_once()
-

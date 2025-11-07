@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from typing import Any, ContextManager
+from typing import Any
 from uuid import UUID, uuid4
 
 from psycopg2.extras import RealDictCursor
@@ -21,7 +22,7 @@ logger = get_logger(__name__)
 class PostgresTaskQueue(TaskQueuePort):
     """Task queue backed by a PostgreSQL table."""
 
-    def __init__(self, connection_provider: Callable[[], ContextManager[Any]]):
+    def __init__(self, connection_provider: Callable[[], AbstractContextManager[Any]]):
         self._connection_provider = connection_provider
 
     def enqueue(self, task: TaskCreate) -> Task:
@@ -173,9 +174,7 @@ class PostgresTaskQueue(TaskQueuePort):
 
                 attempts = int(row["attempts"])
                 max_attempts = int(row["max_attempts"])
-                should_retry = (
-                    retry_at_utc is not None and attempts < max_attempts
-                )
+                should_retry = retry_at_utc is not None and attempts < max_attempts
                 next_status = (
                     TaskStatus.QUEUED.value if should_retry else TaskStatus.FAILED.value
                 )

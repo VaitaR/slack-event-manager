@@ -86,7 +86,9 @@ class _BaseWorker:
         if task.attempts >= task.max_attempts:
             return None
 
-        base_delay = min(_DEFAULT_RETRY_MAX_SECONDS, math.pow(2.0, max(task.attempts - 1, 0)))
+        base_delay = min(
+            _DEFAULT_RETRY_MAX_SECONDS, math.pow(2.0, max(task.attempts - 1, 0))
+        )
         jitter = max(0.0, self._jitter_provider(base_delay))
         delay = max(1.0, base_delay + jitter)
         return datetime.now(tz=UTC) + timedelta(seconds=delay)
