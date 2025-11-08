@@ -889,6 +889,28 @@ class SQLiteRepository:
         except sqlite3.Error as e:
             raise RepositoryError(f"Failed to get candidates: {e}")
 
+    def get_candidate_by_message_id(self, message_id: str) -> EventCandidate | None:
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT *
+                FROM event_candidates
+                WHERE message_id = ?
+                """,
+                (message_id,),
+            )
+            row = cursor.fetchone()
+            conn.close()
+        except sqlite3.Error as exc:  # pragma: no cover - defensive path
+            raise RepositoryError(f"Failed to load candidate: {exc}")
+
+        if row is None:
+            return None
+
+        return self._row_to_candidate(row)
+
     def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
         """Get most recent Slack messages for presentation use."""
 

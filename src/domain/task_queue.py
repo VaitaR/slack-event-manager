@@ -18,6 +18,8 @@ class TaskType(StrEnum):
 
     INGEST = "ingest"
     EXTRACTION = "extraction"
+    LLM_EXTRACTION = "llm_extraction"
+    DEDUP = "dedup"
     DIGEST = "digest"
 
 
