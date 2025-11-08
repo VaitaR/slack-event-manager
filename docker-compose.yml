@@ -1,5 +1,36 @@
 version: '3.8'
 
+x-app-env: &app-env
+  SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN must be set}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+  TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+  TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+  DATABASE_TYPE: postgres
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DATABASE: ${POSTGRES_DATABASE:-slack_events}
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+
+x-app-volumes: &app-volumes
+  - ./data:/app/data
+  - ./logs:/app/logs
+  - ./config:/app/config
+
+x-worker-base: &worker-base
+  build: .
+  environment: *app-env
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+  volumes: *app-volumes
+  healthcheck:
+    test: ["CMD", "python", "-c", "from src.config.settings import get_settings; get_settings(); print('OK')"]
+    interval: 5m
+    timeout: 10s
+    retries: 3
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,62 +51,50 @@ services:
     networks:
       - slack_network
 
-  slack-bot:
-    build: .
-    container_name: slack_event_manager
-    environment:
-      # Secrets from host .env (will be prompted if missing)
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN must be set}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-      # Telegram API credentials (optional)
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
-      # Database configuration for Docker
-      DATABASE_TYPE: postgres
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-slack_events}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
-    command: python scripts/run_pipeline.py --interval-seconds 3600
-    healthcheck:
-      test: ["CMD", "python", "-c", "from src.config.settings import get_settings; get_settings(); print('OK')"]
-      interval: 5m
-      timeout: 10s
-      retries: 3
+  pipeline-scheduler:
+    <<: *worker-base
+    container_name: slack_pipeline_scheduler
+    command: python scripts/run_pipeline_scheduler.py --interval-seconds 300
+    networks:
+      - slack_network
+
+  ingest-worker:
+    <<: *worker-base
+    container_name: slack_ingest_worker
+    command: python scripts/run_ingest_worker.py
+    networks:
+      - slack_network
+
+  extraction-worker:
+    <<: *worker-base
+    container_name: slack_extraction_worker
+    command: python scripts/run_extraction_worker.py
+    networks:
+      - slack_network
+
+  llm-worker:
+    <<: *worker-base
+    container_name: slack_llm_worker
+    command: python scripts/run_llm_worker.py
+    networks:
+      - slack_network
+
+  dedup-worker:
+    <<: *worker-base
+    container_name: slack_dedup_worker
+    command: python scripts/run_dedup_worker.py
     networks:
       - slack_network
 
   streamlit-ui:
     build: .
     container_name: slack_streamlit
-    environment:
-      # Secrets from host .env
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN must be set}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-      # Telegram API credentials (optional)
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
-      # Database configuration for Docker
-      DATABASE_TYPE: postgres
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-slack_events}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+    environment: *app-env
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-      slack-bot:
+      pipeline-scheduler:
         condition: service_started
     ports:
       - "8501:8501"
