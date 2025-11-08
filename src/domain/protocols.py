@@ -263,6 +263,11 @@ class RepositoryProtocol(Protocol):
         """
         ...
 
+    def get_candidate_by_message_id(self, message_id: str) -> EventCandidate | None:
+        """Fetch a candidate by message identifier."""
+
+        ...
+
     def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
         """Get most recent Slack messages for presentation use."""
 

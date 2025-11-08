@@ -6,25 +6,47 @@ import math
 import random
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Final
+from typing import Final, Protocol
 
 from src.config.logging_config import get_logger
 from src.domain.models import (
     CandidateResult,
     DeduplicationResult,
     DigestResult,
-    ExtractionResult,
     IngestResult,
 )
 from src.domain.task_queue import Task, TaskCreate, TaskType
 from src.ports.task_queue import TaskQueuePort
+from src.use_cases.extract_events import (
+    CandidateExtractionMetrics,
+    LLMTaskScheduleResult,
+)
 
 logger = get_logger(__name__)
+
+
+class LLMScheduler(Protocol):
+    """Protocol for scheduling LLM extraction tasks."""
+
+    def __call__(
+        self, *, correlation_id: str | None, batch_hint: int | None
+    ) -> LLMTaskScheduleResult: ...
+
+
+class LLMCandidateProcessor(Protocol):
+    """Protocol for processing a single LLM candidate."""
+
+    def __call__(
+        self, *, message_id: str, correlation_id: str | None
+    ) -> CandidateExtractionMetrics: ...
+
 
 _DEFAULT_RETRY_MAX_SECONDS: Final[float] = 300.0
 _DEFAULT_BATCH_SIZE: Final[int] = 8
 _PRIORITY_INGEST: Final[int] = 5
 _PRIORITY_EXTRACTION: Final[int] = 10
+_PRIORITY_LLM_EXTRACTION: Final[int] = 12
+_PRIORITY_DEDUP: Final[int] = 15
 _PRIORITY_DIGEST: Final[int] = 20
 
 
@@ -149,14 +171,13 @@ class IngestWorker(_BaseWorker):
 
 
 class ExtractionWorker(_BaseWorker):
-    """Worker that performs LLM extraction and deduplication."""
+    """Worker that schedules LLM extraction jobs for processing."""
 
     def __init__(
         self,
         *,
         task_queue: TaskQueuePort,
-        extract_events: Callable[[], ExtractionResult],
-        deduplicate_events: Callable[[], DeduplicationResult],
+        schedule_llm_tasks: LLMScheduler,
         jitter_provider: Callable[[float], float] | None = None,
     ) -> None:
         super().__init__(
@@ -165,29 +186,125 @@ class ExtractionWorker(_BaseWorker):
             batch_size=1,
             jitter_provider=jitter_provider,
         )
-        self._extract_events = extract_events
-        self._deduplicate_events = deduplicate_events
+        self._schedule_llm_tasks = schedule_llm_tasks
 
     def _handle_task(self, task: Task) -> None:
-        extraction_result = self._extract_events()
-        dedupe_result = self._deduplicate_events()
+        payload = task.payload or {}
+        correlation_id = payload.get("correlation_id")
+        candidates_hint = payload.get("candidates_created")
+        batch_hint = candidates_hint if isinstance(candidates_hint, int) else None
+
+        result = self._schedule_llm_tasks(
+            correlation_id=correlation_id,
+            batch_hint=batch_hint,
+        )
 
         logger.info(
             "extraction_worker_summary",
-            processed=extraction_result.candidates_processed,
-            events=extraction_result.events_extracted,
-            dedup_new=dedupe_result.new_events,
+            correlation_id=correlation_id,
+            scheduled=result.candidates_enqueued,
+            total_candidates=result.total_candidates,
+            batch_hint=batch_hint,
         )
 
-        if extraction_result.events_extracted <= 0 and dedupe_result.new_events <= 0:
+
+class LLMExtractionWorker(_BaseWorker):
+    """Worker that executes LLM extraction for individual candidates."""
+
+    def __init__(
+        self,
+        *,
+        task_queue: TaskQueuePort,
+        process_candidate: LLMCandidateProcessor,
+        jitter_provider: Callable[[float], float] | None = None,
+    ) -> None:
+        super().__init__(
+            task_queue=task_queue,
+            task_type=TaskType.LLM_EXTRACTION,
+            batch_size=1,
+            jitter_provider=jitter_provider,
+        )
+        self._process_candidate = process_candidate
+
+    def _handle_task(self, task: Task) -> None:
+        payload = task.payload or {}
+        message_id = payload.get("message_id")
+        if not isinstance(message_id, str) or not message_id:
+            msg = "llm task missing message_id"
+            raise ValueError(msg)
+
+        correlation_id = payload.get("correlation_id")
+        metrics = self._process_candidate(
+            message_id=message_id,
+            correlation_id=correlation_id,
+        )
+
+        logger.info(
+            "llm_worker_summary",
+            correlation_id=correlation_id,
+            message_id=message_id[:8],
+            events=metrics.events_extracted,
+            llm_calls=metrics.llm_calls,
+            cache_hits=metrics.cache_hits,
+            dedup_required=metrics.dedup_required,
+            budget_exhausted=metrics.budget_exhausted,
+            errors=len(metrics.errors),
+        )
+
+        if not metrics.dedup_required:
             return
 
+        dedup_task = TaskCreate(
+            task_type=TaskType.DEDUP,
+            payload={
+                "source": "llm",
+                "correlation_id": correlation_id,
+                "origin_message_id": message_id,
+            },
+            priority=_PRIORITY_DEDUP,
+            idempotency_key=f"dedup:{message_id}",
+        )
+        self._task_queue.enqueue(dedup_task)
+
+
+class DedupWorker(_BaseWorker):
+    """Worker responsible for deduplicating newly extracted events."""
+
+    def __init__(
+        self,
+        *,
+        task_queue: TaskQueuePort,
+        deduplicate_events: Callable[[], DeduplicationResult],
+        jitter_provider: Callable[[float], float] | None = None,
+    ) -> None:
+        super().__init__(
+            task_queue=task_queue,
+            task_type=TaskType.DEDUP,
+            batch_size=1,
+            jitter_provider=jitter_provider,
+        )
+        self._deduplicate_events = deduplicate_events
+
+    def _handle_task(self, task: Task) -> None:
+        result = self._deduplicate_events()
+
+        logger.info(
+            "dedup_worker_summary",
+            new_events=result.new_events,
+            merged=result.merged_events,
+            total=result.total_events,
+        )
+
+        if result.new_events <= 0:
+            return
+
+        payload = task.payload or {}
         enqueue = TaskCreate(
             task_type=TaskType.DIGEST,
             payload={
-                "source": "extraction",
-                "correlation_id": str(task.task_id),
-                "events_extracted": extraction_result.events_extracted,
+                "source": "dedup",
+                "correlation_id": payload.get("correlation_id"),
+                "new_events": result.new_events,
             },
             priority=_PRIORITY_DIGEST,
             idempotency_key=f"digest:{task.task_id}",
@@ -222,4 +339,10 @@ class DigestWorker(_BaseWorker):
         )
 
 
-__all__ = ["IngestWorker", "ExtractionWorker", "DigestWorker"]
+__all__ = [
+    "IngestWorker",
+    "ExtractionWorker",
+    "LLMExtractionWorker",
+    "DedupWorker",
+    "DigestWorker",
+]

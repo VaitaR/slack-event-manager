@@ -872,6 +872,24 @@ class PostgresRepository:
                     for row in rows
                 ]
 
+    def get_candidate_by_message_id(self, message_id: str) -> EventCandidate | None:
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM event_candidates
+                    WHERE message_id = %s
+                    """,
+                    (message_id,),
+                )
+                row = cur.fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_candidate(dict(row))
+
     def get_recent_slack_messages(self, limit: int = 100) -> list[SlackMessage]:
         """Get most recent Slack messages for presentation use."""
 

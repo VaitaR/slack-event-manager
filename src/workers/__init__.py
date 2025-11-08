@@ -1,5 +1,17 @@
 """Worker package exports."""
 
-from src.workers.pipeline import DigestWorker, ExtractionWorker, IngestWorker
+from src.workers.pipeline import (
+    DedupWorker,
+    DigestWorker,
+    ExtractionWorker,
+    IngestWorker,
+    LLMExtractionWorker,
+)
 
-__all__ = ["DigestWorker", "ExtractionWorker", "IngestWorker"]
+__all__ = [
+    "DedupWorker",
+    "DigestWorker",
+    "ExtractionWorker",
+    "IngestWorker",
+    "LLMExtractionWorker",
+]

@@ -9,19 +9,32 @@ from src.domain.models import (
     CandidateResult,
     DeduplicationResult,
     DigestResult,
-    ExtractionResult,
     IngestResult,
 )
 from src.domain.task_queue import Task, TaskStatus, TaskType
-from src.workers.pipeline import DigestWorker, ExtractionWorker, IngestWorker
+from src.use_cases.extract_events import (
+    CandidateExtractionMetrics,
+    LLMTaskScheduleResult,
+)
+from src.workers.pipeline import (
+    DedupWorker,
+    DigestWorker,
+    ExtractionWorker,
+    IngestWorker,
+    LLMExtractionWorker,
+)
 
 
-def _task(task_type: TaskType, attempts: int = 1) -> Task:
+def _task(
+    task_type: TaskType,
+    attempts: int = 1,
+    payload: dict[str, object] | None = None,
+) -> Task:
     now = datetime.now(tz=UTC)
     return Task(
         task_id=uuid4(),
         task_type=task_type,
-        payload={},
+        payload=payload or {},
         priority=10,
         run_at=now,
         status=TaskStatus.IN_PROGRESS,
@@ -97,36 +110,114 @@ def test_ingest_worker_retries_on_error(mocker: MockerFixture) -> None:
     assert kwargs["retry_at"] is not None
 
 
-def test_extraction_worker_triggers_digest(mocker: MockerFixture) -> None:
+def test_extraction_worker_schedules_llm_tasks(mocker: MockerFixture) -> None:
     queue = mocker.Mock()
-    task = _task(TaskType.EXTRACTION, attempts=2)
+    task = _task(
+        TaskType.EXTRACTION,
+        attempts=2,
+        payload={"correlation_id": "corr-1", "candidates_created": 5},
+    )
     queue.lease.return_value = [task]
 
-    extraction_result = ExtractionResult(
-        events_extracted=3,
-        candidates_processed=3,
-        llm_calls=3,
-        cache_hits=0,
-        total_cost_usd=0.45,
-        errors=[],
-    )
-    dedupe_result = DeduplicationResult(new_events=3, merged_events=0, total_events=10)
-
-    extraction_callable = mocker.Mock(return_value=extraction_result)
-    dedupe_callable = mocker.Mock(return_value=dedupe_result)
+    schedule_result = LLMTaskScheduleResult(total_candidates=5, candidates_enqueued=3)
+    scheduler = mocker.Mock(return_value=schedule_result)
 
     worker = ExtractionWorker(
         task_queue=queue,
-        extract_events=extraction_callable,
+        schedule_llm_tasks=scheduler,
+        jitter_provider=lambda base: 0.0,
+    )
+
+    worker.process_available_tasks()
+
+    scheduler.assert_called_once_with(correlation_id="corr-1", batch_hint=5)
+    queue.enqueue.assert_not_called()
+    queue.complete.assert_called_once_with(task.task_id)
+
+
+def test_llm_worker_enqueues_dedup_when_required(mocker: MockerFixture) -> None:
+    queue = mocker.Mock()
+    task = _task(
+        TaskType.LLM_EXTRACTION,
+        payload={"message_id": "msg-123", "correlation_id": "corr"},
+    )
+    queue.lease.return_value = [task]
+
+    metrics = CandidateExtractionMetrics(
+        events_extracted=2,
+        llm_calls=1,
+        cache_hits=0,
+        total_cost_usd=0.25,
+        dedup_required=True,
+    )
+    processor = mocker.Mock(return_value=metrics)
+
+    worker = LLMExtractionWorker(
+        task_queue=queue,
+        process_candidate=processor,
+        jitter_provider=lambda base: 0.0,
+    )
+
+    worker.process_available_tasks()
+
+    processor.assert_called_once_with(message_id="msg-123", correlation_id="corr")
+    queue.enqueue.assert_called_once()
+    enqueued = queue.enqueue.call_args.args[0]
+    assert enqueued.task_type is TaskType.DEDUP
+    assert enqueued.payload["origin_message_id"] == "msg-123"
+    queue.complete.assert_called_once_with(task.task_id)
+
+
+def test_llm_worker_skips_dedup_when_not_needed(mocker: MockerFixture) -> None:
+    queue = mocker.Mock()
+    task = _task(
+        TaskType.LLM_EXTRACTION,
+        payload={"message_id": "msg-456", "correlation_id": "corr"},
+    )
+    queue.lease.return_value = [task]
+
+    metrics = CandidateExtractionMetrics(
+        events_extracted=0,
+        llm_calls=0,
+        cache_hits=1,
+        total_cost_usd=0.0,
+        dedup_required=False,
+    )
+    processor = mocker.Mock(return_value=metrics)
+
+    worker = LLMExtractionWorker(
+        task_queue=queue,
+        process_candidate=processor,
+        jitter_provider=lambda base: 0.0,
+    )
+
+    worker.process_available_tasks()
+
+    queue.enqueue.assert_not_called()
+    queue.complete.assert_called_once_with(task.task_id)
+
+
+def test_dedup_worker_enqueues_digest(mocker: MockerFixture) -> None:
+    queue = mocker.Mock()
+    task = _task(TaskType.DEDUP, payload={"correlation_id": "corr"})
+    queue.lease.return_value = [task]
+
+    dedupe_result = DeduplicationResult(new_events=2, merged_events=1, total_events=5)
+    dedupe_callable = mocker.Mock(return_value=dedupe_result)
+
+    worker = DedupWorker(
+        task_queue=queue,
         deduplicate_events=dedupe_callable,
         jitter_provider=lambda base: 0.0,
     )
 
     worker.process_available_tasks()
 
-    extraction_callable.assert_called_once()
     dedupe_callable.assert_called_once()
-    queue.enqueue.assert_called()
+    queue.enqueue.assert_called_once()
+    enqueued = queue.enqueue.call_args.args[0]
+    assert enqueued.task_type is TaskType.DIGEST
+    assert enqueued.payload["correlation_id"] == "corr"
     queue.complete.assert_called_once_with(task.task_id)
 
 
