@@ -21,6 +21,11 @@ from src.use_cases.extract_events import (
     CandidateExtractionMetrics,
     LLMTaskScheduleResult,
 )
+from src.use_cases.pipeline_priorities import (
+    DEDUP_TASK_PRIORITY,
+    DIGEST_TASK_PRIORITY,
+    EXTRACTION_TASK_PRIORITY,
+)
 
 logger = get_logger(__name__)
 
@@ -43,11 +48,6 @@ class LLMCandidateProcessor(Protocol):
 
 _DEFAULT_RETRY_MAX_SECONDS: Final[float] = 300.0
 _DEFAULT_BATCH_SIZE: Final[int] = 8
-_PRIORITY_INGEST: Final[int] = 5
-_PRIORITY_EXTRACTION: Final[int] = 10
-_PRIORITY_LLM_EXTRACTION: Final[int] = 12
-_PRIORITY_DEDUP: Final[int] = 15
-_PRIORITY_DIGEST: Final[int] = 20
 
 
 class _BaseWorker:
@@ -164,7 +164,7 @@ class IngestWorker(_BaseWorker):
                 "correlation_id": str(task.task_id),
                 "candidates_created": candidate_result.candidates_created,
             },
-            priority=_PRIORITY_EXTRACTION,
+            priority=EXTRACTION_TASK_PRIORITY,
             idempotency_key=f"extraction:{task.task_id}",
         )
         self._task_queue.enqueue(enqueue)
@@ -261,7 +261,7 @@ class LLMExtractionWorker(_BaseWorker):
                 "correlation_id": correlation_id,
                 "origin_message_id": message_id,
             },
-            priority=_PRIORITY_DEDUP,
+            priority=DEDUP_TASK_PRIORITY,
             idempotency_key=f"dedup:{message_id}",
         )
         self._task_queue.enqueue(dedup_task)
@@ -306,7 +306,7 @@ class DedupWorker(_BaseWorker):
                 "correlation_id": payload.get("correlation_id"),
                 "new_events": result.new_events,
             },
-            priority=_PRIORITY_DIGEST,
+            priority=DIGEST_TASK_PRIORITY,
             idempotency_key=f"digest:{task.task_id}",
         )
         self._task_queue.enqueue(enqueue)
