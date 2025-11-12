@@ -131,6 +131,15 @@ PIPELINE_STAGE_DURATION_SECONDS: Final[Any] = HistogramClass(
 _EXPORTER_LOCK = threading.Lock()
 _EXPORTER_STARTED = False
 _DEFAULT_METRICS_PORT: Final[int] = 9000
+METRICS_EXPORTER_AUTO_START_ENV: Final[str] = "METRICS_EXPORTER_AUTO_START"
+
+
+def _should_autostart() -> bool:
+    """Return True when the metrics exporter should auto-start."""
+
+    raw_value = os.getenv(METRICS_EXPORTER_AUTO_START_ENV, "1")
+    normalized = raw_value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
 
 
 def ensure_metrics_exporter() -> None:
@@ -148,7 +157,16 @@ def ensure_metrics_exporter() -> None:
             logger.warning("invalid_metrics_port", port=port_raw)
             port = _DEFAULT_METRICS_PORT
 
-        _start_http_server(port)
+        try:
+            _start_http_server(port)
+        except OSError as exc:
+            logger.error(
+                "metrics_exporter_start_failed",
+                port=port,
+                error=str(exc),
+            )
+            raise
+
         _EXPORTER_STARTED = True
         logger.info("metrics_exporter_started", port=port)
 
@@ -159,3 +177,7 @@ __all__ = [
     "PIPELINE_STAGE_DURATION_SECONDS",
     "ensure_metrics_exporter",
 ]
+
+
+if _should_autostart():
+    ensure_metrics_exporter()
