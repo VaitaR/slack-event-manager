@@ -19,7 +19,9 @@ x-app-volumes: &app-volumes
 
 x-worker-base: &worker-base
   build: .
-  environment: *app-env
+  environment:
+    <<: *app-env
+    METRICS_EXPORTER_AUTO_START: '0'
   restart: unless-stopped
   depends_on:
     postgres:
@@ -86,10 +88,31 @@ services:
     networks:
       - slack_network
 
+  metrics-exporter:
+    build: .
+    container_name: slack_metrics_exporter
+    entrypoint: ["python", "-m", "src.observability.metrics"]
+    environment:
+      METRICS_EXPORTER_AUTO_START: '0'
+      METRICS_PORT: '9000'
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - slack_network
+
   streamlit-ui:
     build: .
     container_name: slack_streamlit
-    environment: *app-env
+    environment:
+      <<: *app-env
+      METRICS_EXPORTER_AUTO_START: '0'
     restart: unless-stopped
     depends_on:
       postgres:

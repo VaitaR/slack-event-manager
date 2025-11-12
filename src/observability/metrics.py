@@ -27,7 +27,9 @@ When to refactor:
 from __future__ import annotations
 
 import os
+import signal
 import threading
+from types import FrameType
 from typing import Any, Final
 
 from src.config.logging_config import get_logger
@@ -130,7 +132,9 @@ PIPELINE_STAGE_DURATION_SECONDS: Final[Any] = HistogramClass(
 
 _EXPORTER_LOCK = threading.Lock()
 _EXPORTER_STARTED = False
+_EXPORTER_STOP_EVENT = threading.Event()
 _DEFAULT_METRICS_PORT: Final[int] = 9000
+_METRICS_PORT_ENV: Final[str] = "METRICS_PORT"
 METRICS_EXPORTER_AUTO_START_ENV: Final[str] = "METRICS_EXPORTER_AUTO_START"
 
 
@@ -142,6 +146,15 @@ def _should_autostart() -> bool:
     return normalized in {"1", "true", "yes", "on"}
 
 
+def _resolve_metrics_port() -> int:
+    port_raw = os.getenv(_METRICS_PORT_ENV)
+    try:
+        return int(port_raw) if port_raw else _DEFAULT_METRICS_PORT
+    except ValueError:
+        logger.warning("invalid_metrics_port", port=port_raw)
+        return _DEFAULT_METRICS_PORT
+
+
 def ensure_metrics_exporter() -> None:
     """Start Prometheus HTTP exporter once per process."""
 
@@ -150,12 +163,7 @@ def ensure_metrics_exporter() -> None:
         if _EXPORTER_STARTED:
             return
 
-        port_raw = os.getenv("METRICS_PORT")
-        try:
-            port = int(port_raw) if port_raw else _DEFAULT_METRICS_PORT
-        except ValueError:
-            logger.warning("invalid_metrics_port", port=port_raw)
-            port = _DEFAULT_METRICS_PORT
+        port = _resolve_metrics_port()
 
         try:
             _start_http_server(port)
@@ -171,13 +179,35 @@ def ensure_metrics_exporter() -> None:
         logger.info("metrics_exporter_started", port=port)
 
 
+def _handle_shutdown_signal(signum: int, frame: FrameType | None) -> None:
+    logger.info("metrics_exporter_shutdown_signal", signal=signum)
+    _EXPORTER_STOP_EVENT.set()
+
+
+def run_metrics_exporter_forever() -> None:
+    """Start the exporter and block until a shutdown signal is received."""
+
+    ensure_metrics_exporter()
+    for watched_signal in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(watched_signal, _handle_shutdown_signal)
+
+    logger.info("metrics_exporter_listening", port=_resolve_metrics_port())
+    _EXPORTER_STOP_EVENT.wait()
+    logger.info("metrics_exporter_stopped")
+
+
 __all__ = [
     "JOBS_SUBMITTED_TOTAL",
     "JOB_DURATION_SECONDS",
     "PIPELINE_STAGE_DURATION_SECONDS",
     "ensure_metrics_exporter",
+    "run_metrics_exporter_forever",
 ]
 
 
 if _should_autostart():
     ensure_metrics_exporter()
+
+
+if __name__ == "__main__":
+    run_metrics_exporter_forever()

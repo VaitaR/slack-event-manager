@@ -573,6 +573,10 @@ make pre-commit
 Metrics and health endpoints are available as soon as the containers start. Refer to
 [`docs/OPERATIONS_OBSERVABILITY.md`](docs/OPERATIONS_OBSERVABILITY.md) for complete guidance.
 
+The Docker Compose stack exposes a single Prometheus endpoint from the dedicated
+`metrics-exporter` service. All other services disable the in-process exporter by setting
+`METRICS_EXPORTER_AUTO_START=0`.
+
 Quick checks from the host running Docker Compose:
 
 ```bash
@@ -582,6 +586,10 @@ curl -sf http://localhost:9000/metrics | head
 # Streamlit health endpoint (port 8501)
 curl -sf http://localhost:8501/_stcore/health
 ```
+
+Running ad-hoc scripts? Export `METRICS_EXPORTER_AUTO_START=0` to keep them from binding
+`0.0.0.0:9000`, then call `ensure_metrics_exporter()` or run `python -m src.observability.metrics`
+when you want to expose metrics.
 
 ### Development Issues
 
