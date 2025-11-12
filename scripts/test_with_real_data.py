@@ -37,7 +37,9 @@ def parse_args() -> Namespace:
         description="Run the real data pipeline test with optional limits."
     )
     parser.add_argument(
+        "--limit",
         "--message-limit",
+        dest="message_limit",
         type=int,
         default=DEFAULT_MESSAGE_LIMIT,
         help=(
