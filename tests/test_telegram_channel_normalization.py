@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.domain.models import TelegramChannelConfig
@@ -21,9 +22,9 @@ def test_normalize_mixed_channel_configurations() -> None:
         "from_date": "2025-01-01T00:00:00Z",
     }
 
-    with patch(
-        "src.use_cases.ingest_telegram_messages.logger", MagicMock()
-    ) as mock_logger:
+    logger_stub = SimpleNamespace(warning=MagicMock())
+
+    with patch("src.use_cases.ingest_telegram_messages.logger", new=logger_stub):
         normalized = _normalize_telegram_channel_configs(
             [config_obj, mapping_config, "@legacy_channel", 123]
         )
@@ -38,8 +39,8 @@ def test_normalize_mixed_channel_configurations() -> None:
     assert legacy_config["username"] == "@legacy_channel"
     assert legacy_config["enabled"] is True
 
-    mock_logger.warning.assert_called_once()
-    kwargs = mock_logger.warning.call_args.kwargs
+    logger_stub.warning.assert_called_once()
+    kwargs = logger_stub.warning.call_args.kwargs
     assert kwargs["reason"] == "unsupported_channel_config_type"
     assert kwargs["config_type"] == "int"
 
