@@ -42,8 +42,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.sqlite_repository import SQLiteRepository
+from src.adapters.telegram_client import TelegramClient
 from src.config.settings import get_settings
 from src.domain.models import MessageSource
+from src.domain.protocols import MessageClientProtocol
 from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
 
 
@@ -110,6 +112,7 @@ def main() -> int:
     print()
 
     # Create Telegram client
+    telegram_client: MessageClientProtocol | None = None
     print("Creating Telegram client...")
     try:
         telegram_client = get_message_client(
@@ -121,6 +124,7 @@ def main() -> int:
         print(f"❌ Failed to create Telegram client: {e}")
         return 1
     print()
+    assert telegram_client is not None
 
     # Set backfill date (1 day ago as per requirements)
     backfill_from_date = datetime.utcnow().replace(tzinfo=pytz.UTC) - timedelta(days=1)
@@ -200,6 +204,9 @@ def main() -> int:
 
         traceback.print_exc()
         return 1
+    finally:
+        if isinstance(telegram_client, TelegramClient):
+            telegram_client.shutdown()
 
 
 if __name__ == "__main__":

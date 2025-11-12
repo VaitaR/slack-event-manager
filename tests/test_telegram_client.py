@@ -34,6 +34,24 @@ class TestTelegramClientInitialization:
         assert client.api_hash == "secret_hash"
 
 
+class TestTelegramClientShutdown:
+    """Test shutdown semantics for TelegramClient."""
+
+    def test_shutdown_stops_background_loop(self) -> None:
+        """Shutdown should stop the background loop thread without warnings."""
+
+        client = TelegramClient(api_id=12345, api_hash="hash", session_name="session")
+
+        loop = client._ensure_loop()
+        assert loop.is_running()
+
+        client.shutdown()
+
+        assert client._loop is None
+        assert client._loop_thread is None
+        assert not client._loop_ready.is_set()
+
+
 class TestFetchMessages:
     """Test fetch_messages method."""
 
