@@ -1,9 +1,9 @@
 """Migration script for multi-source architecture.
 
 This script migrates existing databases to support multi-source architecture:
-1. Creates new tables (raw_telegram_messages, ingestion_state_slack, ingestion_state_telegram)
+1. Creates new tables (raw_telegram_messages, slack_ingestion_state, ingestion_state_telegram)
 2. Adds source_id column to event_candidates and events tables
-3. Migrates existing ingestion_state data to ingestion_state_slack
+3. Migrates existing ingestion_state data to slack_ingestion_state
 4. Sets default source_id='slack' for existing events and candidates
 
 Safe to run multiple times (idempotent).
@@ -76,22 +76,24 @@ def migrate_database(db_path: str, dry_run: bool = False) -> None:
         else:
             print("   → Would create raw_telegram_messages table\n")
 
-        # Step 2: Create ingestion_state_slack table
-        print("2️⃣  Creating ingestion_state_slack table...")
-        if "ingestion_state_slack" in existing_tables:
+        # Step 2: Create slack_ingestion_state table
+        print("2️⃣  Creating slack_ingestion_state table...")
+        if "slack_ingestion_state" in existing_tables:
             print("   ✓ Table already exists, skipping\n")
         elif not dry_run:
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS ingestion_state_slack (
+                CREATE TABLE IF NOT EXISTS slack_ingestion_state (
                     channel_id TEXT PRIMARY KEY,
-                    last_processed_ts REAL NOT NULL,
-                    updated_at TIMESTAMP NOT NULL
+                    max_processed_ts REAL NOT NULL DEFAULT 0,
+                    resume_cursor TEXT,
+                    resume_min_ts REAL,
+                    updated_at TEXT
                 )
             """)
             conn.commit()
-            print("   ✓ Created ingestion_state_slack table\n")
+            print("   ✓ Created slack_ingestion_state table\n")
         else:
-            print("   → Would create ingestion_state_slack table\n")
+            print("   → Would create slack_ingestion_state table\n")
 
         # Step 3: Create ingestion_state_telegram table
         print("3️⃣  Creating ingestion_state_telegram table...")
@@ -110,34 +112,41 @@ def migrate_database(db_path: str, dry_run: bool = False) -> None:
         else:
             print("   → Would create ingestion_state_telegram table\n")
 
-        # Step 4: Migrate ingestion_state data to ingestion_state_slack
+        # Step 4: Migrate ingestion_state data to slack_ingestion_state
         print("4️⃣  Migrating ingestion_state data...")
         if "ingestion_state" in existing_tables:
             cursor.execute("SELECT COUNT(*) FROM ingestion_state")
             state_count = cursor.fetchone()[0]
 
             if state_count > 0:
-                if "ingestion_state_slack" not in existing_tables or dry_run:
+                if "slack_ingestion_state" not in existing_tables or dry_run:
                     print(
-                        f"   → Would migrate {state_count} records from ingestion_state to ingestion_state_slack\n"
+                        f"   → Would migrate {state_count} records from ingestion_state to slack_ingestion_state\n"
                     )
                 else:
                     # Check if already migrated
-                    cursor.execute("SELECT COUNT(*) FROM ingestion_state_slack")
+                    cursor.execute("SELECT COUNT(*) FROM slack_ingestion_state")
                     slack_state_count = cursor.fetchone()[0]
 
                     if slack_state_count > 0:
                         print(
-                            f"   ✓ Already migrated ({slack_state_count} records in ingestion_state_slack)\n"
+                            f"   ✓ Already migrated ({slack_state_count} records in slack_ingestion_state)\n"
                         )
                     else:
                         cursor.execute("""
-                            INSERT INTO ingestion_state_slack (channel_id, last_processed_ts, updated_at)
-                            SELECT channel_id, last_processed_ts, updated_at FROM ingestion_state
+                            INSERT INTO slack_ingestion_state (
+                                channel_id,
+                                max_processed_ts,
+                                resume_cursor,
+                                resume_min_ts,
+                                updated_at
+                            )
+                            SELECT channel_id, last_processed_ts, NULL, NULL, updated_at
+                            FROM ingestion_state
                         """)
                         conn.commit()
                         print(
-                            f"   ✓ Migrated {state_count} records to ingestion_state_slack\n"
+                            f"   ✓ Migrated {state_count} records to slack_ingestion_state\n"
                         )
             else:
                 print("   ✓ No data to migrate\n")
@@ -185,7 +194,7 @@ def migrate_database(db_path: str, dry_run: bool = False) -> None:
 
         expected_tables = {
             "raw_telegram_messages",
-            "ingestion_state_slack",
+            "slack_ingestion_state",
             "ingestion_state_telegram",
         }
 

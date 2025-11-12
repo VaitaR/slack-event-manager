@@ -11,11 +11,12 @@ def test_channel_watermarks_table_restored(tmp_path: Path) -> None:
     db_path = tmp_path / "state.db"
     repository = SQLiteRepository(str(db_path))
 
-    # Simulate a migration that drops legacy tables.
+    # Simulate a migration that drops state tables.
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute("DROP TABLE IF EXISTS channel_watermarks")
-        conn.execute("DROP TABLE IF EXISTS ingestion_state_slack")
+        conn.execute("DROP VIEW IF EXISTS ingestion_state_slack")
+        conn.execute("DROP TABLE IF EXISTS slack_ingestion_state")
         conn.commit()
     finally:
         conn.close()
@@ -27,6 +28,9 @@ def test_channel_watermarks_table_restored(tmp_path: Path) -> None:
     try:
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE name='channel_watermarks'"
+        ).fetchone()
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='slack_ingestion_state'"
         ).fetchone()
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE name='ingestion_state_slack'"

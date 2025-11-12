@@ -32,7 +32,7 @@ class TestMessageSourceConfigIntegration:
                     "enabled": True,
                     "bot_token_env": "SLACK_BOT_TOKEN",
                     "raw_table": "raw_slack_messages",
-                    "state_table": "ingestion_state_slack",
+                    "state_table": "slack_ingestion_state",
                     "prompt_file": "config/prompts/slack.yaml",
                     "llm_settings": {"temperature": 1.0, "timeout_seconds": 30},
                     "channels": ["C123", "C456"],
@@ -100,7 +100,7 @@ class TestMessageSourceConfigIntegration:
                     "enabled": True,
                     "bot_token_env": "SLACK_BOT_TOKEN",
                     "raw_table": "raw_slack_messages",
-                    "state_table": "ingestion_state_slack",
+                    "state_table": "slack_ingestion_state",
                     "channels": ["C123"],
                 },
                 {
@@ -145,7 +145,7 @@ class TestMessageSourceConfigIntegration:
                     "enabled": True,
                     "channels": ["C123"],
                     "raw_table": "raw_slack_messages",
-                    "state_table": "ingestion_state_slack",
+                    "state_table": "slack_ingestion_state",
                 },
                 {
                     "source_id": "telegram",
@@ -185,7 +185,7 @@ class TestLLMSettingsPerSource:
                     "source_id": "slack",
                     "enabled": True,
                     "raw_table": "raw_slack_messages",
-                    "state_table": "ingestion_state_slack",
+                    "state_table": "slack_ingestion_state",
                     "llm_settings": {"temperature": 1.0},
                 },
                 {
@@ -225,7 +225,7 @@ class TestLLMSettingsPerSource:
                     "source_id": "slack",
                     "enabled": True,
                     "raw_table": "raw_slack_messages",
-                    "state_table": "ingestion_state_slack",
+                    "state_table": "slack_ingestion_state",
                     "prompt_file": "config/prompts/slack.yaml",
                 },
                 {

@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 
 class CursorProtocol(Protocol):
@@ -45,6 +45,8 @@ class SlackStateStore:
             get_conn: Callable returning a context manager that yields a database connection.
         """
         self._get_conn = get_conn
+
+    _TABLE_NAME: Final[str] = "slack_ingestion_state"
 
     def get(self, channel_id: str) -> dict[str, float | str | None]:
         """Load state for a channel.
@@ -120,13 +122,13 @@ class SlackStateStore:
         placeholder = "?" if self._is_sqlite(conn) else "%s"
         return (
             "SELECT max_processed_ts, resume_cursor, resume_min_ts "
-            "FROM slack_ingestion_state WHERE channel_id = " + placeholder
+            f"FROM {self._TABLE_NAME} WHERE channel_id = " + placeholder
         )
 
     def _build_upsert_sql(self, conn: ConnectionProtocol) -> str:
         if self._is_sqlite(conn):
             return (
-                "INSERT INTO slack_ingestion_state (channel_id, max_processed_ts, resume_cursor, "
+                f"INSERT INTO {self._TABLE_NAME} (channel_id, max_processed_ts, resume_cursor, "
                 "resume_min_ts, updated_at) VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(channel_id) DO UPDATE SET "
                 "max_processed_ts=excluded.max_processed_ts, "
@@ -135,7 +137,7 @@ class SlackStateStore:
                 "updated_at=excluded.updated_at"
             )
         return (
-            "INSERT INTO slack_ingestion_state (channel_id, max_processed_ts, resume_cursor, "
+            f"INSERT INTO {self._TABLE_NAME} (channel_id, max_processed_ts, resume_cursor, "
             "resume_min_ts, updated_at) VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT (channel_id) DO UPDATE SET "
             "max_processed_ts=EXCLUDED.max_processed_ts, "
