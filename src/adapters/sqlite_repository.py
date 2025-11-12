@@ -1504,12 +1504,22 @@ class SQLiteRepository:
                 """
                 UPDATE llm_calls
                 SET response_json = ?
-                WHERE prompt_hash = ?
-                ORDER BY ts DESC
-                LIMIT 1
+                WHERE id = (
+                    SELECT id
+                    FROM llm_calls
+                    WHERE prompt_hash = ?
+                    ORDER BY ts DESC, id DESC
+                    LIMIT 1
+                )
                 """,
                 (response_json, prompt_hash),
             )
+
+            if cursor.rowcount == 0:
+                logger.warning(
+                    "llm_response_update_missing_call",
+                    prompt_hash=prompt_hash[:12],
+                )
 
             conn.commit()
             conn.close()
