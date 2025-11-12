@@ -336,6 +336,7 @@ def postgres_test_db():
                 DROP TABLE IF EXISTS events CASCADE;
                 DROP TABLE IF EXISTS event_candidates CASCADE;
                 DROP TABLE IF EXISTS raw_slack_messages CASCADE;
+                DROP TABLE IF EXISTS pipeline_tasks CASCADE;
             """)
             conn.commit()
 
@@ -360,6 +361,7 @@ def postgres_test_db():
                 DROP TABLE IF EXISTS events CASCADE;
                 DROP TABLE IF EXISTS event_candidates CASCADE;
                 DROP TABLE IF EXISTS raw_slack_messages CASCADE;
+                DROP TABLE IF EXISTS pipeline_tasks CASCADE;
             """)
             conn.commit()
 

@@ -8,7 +8,7 @@ These tests are skipped unless:
 Run with: TEST_POSTGRES=1 POSTGRES_PASSWORD=password pytest tests/test_postgres_repository.py
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytz
 
@@ -24,6 +24,7 @@ from src.domain.models import (
     LLMCallMetadata,
     MessageSource,
 )
+from src.domain.task_queue import TaskCreate, TaskStatus, TaskType
 
 
 def test_postgres_save_and_get_messages(postgres_test_db, sample_slack_message):
@@ -193,6 +194,42 @@ def test_postgres_update_candidate_status(postgres_test_db, sample_event_candida
     # Verify status changed (should not appear in extraction queue)
     candidates = repo.get_candidates_for_extraction(batch_size=10)
     assert len(candidates) == 0
+
+
+def test_postgres_task_queue_enqueue_many(postgres_test_db) -> None:
+    """Task queue should persist batches when enqueueing with UUID identifiers."""
+
+    repo = postgres_test_db
+    queue = repo.task_queue()
+    run_at = datetime.now(tz=UTC)
+
+    tasks = [
+        TaskCreate(
+            task_type=TaskType.INGEST,
+            payload={"channel": "C123"},
+            idempotency_key="ingest:C123",
+            run_at=run_at,
+        ),
+        TaskCreate(
+            task_type=TaskType.INGEST,
+            payload={"channel": "C456"},
+            idempotency_key="ingest:C456",
+            run_at=run_at,
+        ),
+    ]
+
+    created = queue.enqueue_many(tasks)
+
+    assert len(created) == 2
+    created_keys = {task.idempotency_key for task in created}
+    expected_keys = {task.idempotency_key for task in tasks}
+    assert created_keys == expected_keys
+    assert all(task.status is TaskStatus.QUEUED for task in created)
+
+    leased = queue.lease(TaskType.INGEST, limit=2)
+    leased_keys = {task.idempotency_key for task in leased}
+    assert expected_keys <= leased_keys
+    assert all(task.status is TaskStatus.IN_PROGRESS for task in leased)
 
 
 def test_postgres_save_and_get_events(postgres_test_db, sample_event):
