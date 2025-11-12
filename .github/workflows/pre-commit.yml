@@ -31,7 +31,7 @@ jobs:
       - name: Install pre-commit and dependencies
         run: |
           uv pip install --python $(which python) pre-commit
-          uv pip install --python $(which python) -r requirements.txt
+          uv pip install --python $(which python) -r requirements-dev.txt
 
       - name: Run pre-commit hooks (fastest feedback)
         run: |

@@ -60,7 +60,7 @@ jobs:
 
       - name: Install dependencies (matches Makefile exactly)
         run: |
-          uv pip install --python $(which python) -r requirements.txt
+          uv pip install --python $(which python) -r requirements-dev.txt
 
       - name: Mypy (strict) - matches Makefile exactly
         run: |
@@ -86,7 +86,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --python $(which python) -r requirements.txt
+          uv pip install --python $(which python) -r requirements-dev.txt
 
       - name: Run tests with coverage (matches Makefile exactly)
         env:
