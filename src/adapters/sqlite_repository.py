@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 from uuid import UUID
 
 import pytz
@@ -40,6 +40,10 @@ from src.domain.models import (
 from src.ports.task_queue import TaskQueuePort
 
 logger = get_logger(__name__)
+
+SLACK_STATE_TABLE: Final[str] = "slack_ingestion_state"
+LEGACY_SLACK_STATE_TABLE: Final[str] = "ingestion_state_slack"
+LEGACY_SLACK_STATE_BACKUP_TABLE: Final[str] = "ingestion_state_slack_legacy"
 
 
 class SQLiteRepository:
@@ -348,15 +352,7 @@ class SQLiteRepository:
         )
 
         # Source-specific ingestion state tables
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ingestion_state_slack (
-                channel_id TEXT PRIMARY KEY,
-                last_processed_ts REAL NOT NULL,
-                updated_at TIMESTAMP NOT NULL
-            )
-        """
-        )
+        self._ensure_slack_state_schema(cursor)
 
         cursor.execute(
             """
@@ -382,6 +378,120 @@ class SQLiteRepository:
         conn.commit()
         conn.close()
         logger.info("sqlite_schema_creation_completed", db_path=str(self.db_path))
+
+    def _ensure_slack_state_schema(self, cursor: sqlite3.Cursor) -> None:
+        """Ensure Slack ingestion state table uses canonical schema and migrate data."""
+
+        if self._sqlite_object_exists(
+            cursor, LEGACY_SLACK_STATE_TABLE, "table"
+        ) and not self._sqlite_object_exists(cursor, SLACK_STATE_TABLE, "table"):
+            cursor.execute(
+                f"ALTER TABLE {LEGACY_SLACK_STATE_TABLE} RENAME TO {SLACK_STATE_TABLE}"
+            )
+
+        cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {SLACK_STATE_TABLE} (
+                channel_id TEXT PRIMARY KEY,
+                max_processed_ts REAL NOT NULL DEFAULT 0,
+                resume_cursor TEXT,
+                resume_min_ts REAL,
+                updated_at TEXT
+            )
+            """
+        )
+
+        self._ensure_slack_state_columns(cursor)
+
+        if self._sqlite_object_exists(cursor, LEGACY_SLACK_STATE_TABLE, "table"):
+            self._backfill_slack_state_data(cursor, LEGACY_SLACK_STATE_TABLE)
+            self._archive_legacy_slack_state_table(cursor)
+
+        cursor.execute(f"DROP VIEW IF EXISTS {LEGACY_SLACK_STATE_TABLE}")
+        cursor.execute(
+            f"""
+            CREATE VIEW IF NOT EXISTS {LEGACY_SLACK_STATE_TABLE} AS
+            SELECT channel_id,
+                   max_processed_ts AS last_processed_ts,
+                   updated_at
+            FROM {SLACK_STATE_TABLE}
+            """
+        )
+
+    @staticmethod
+    def _sqlite_object_exists(cursor: sqlite3.Cursor, name: str, obj_type: str) -> bool:
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?",
+            (obj_type, name),
+        )
+        return cursor.fetchone() is not None
+
+    def _backfill_slack_state_data(
+        self, cursor: sqlite3.Cursor, source_table: str
+    ) -> None:
+        cursor.execute(f"PRAGMA table_info({source_table})")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "last_processed_ts" not in columns:
+            return
+
+        cursor.execute(
+            f"""
+            INSERT INTO {SLACK_STATE_TABLE} (channel_id, max_processed_ts, updated_at)
+            SELECT channel_id, last_processed_ts, updated_at FROM {source_table}
+            ON CONFLICT(channel_id) DO UPDATE SET
+                max_processed_ts=excluded.max_processed_ts,
+                updated_at=excluded.updated_at
+            """
+        )
+
+    def _archive_legacy_slack_state_table(self, cursor: sqlite3.Cursor) -> None:
+        backup_name = LEGACY_SLACK_STATE_BACKUP_TABLE
+        if self._sqlite_object_exists(cursor, backup_name, "table"):
+            backup_name = f"{backup_name}_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+        cursor.execute(
+            f"ALTER TABLE {LEGACY_SLACK_STATE_TABLE} RENAME TO {backup_name}"
+        )
+
+    def _ensure_slack_state_columns(self, cursor: sqlite3.Cursor) -> None:
+        cursor.execute(f"PRAGMA table_info({SLACK_STATE_TABLE})")
+        columns_info = {row[1]: row for row in cursor.fetchall()}
+
+        if "max_processed_ts" not in columns_info:
+            if "last_processed_ts" in columns_info:
+                cursor.execute(
+                    f"ALTER TABLE {SLACK_STATE_TABLE} RENAME COLUMN last_processed_ts TO max_processed_ts"
+                )
+            else:
+                cursor.execute(
+                    f"ALTER TABLE {SLACK_STATE_TABLE} ADD COLUMN max_processed_ts REAL NOT NULL DEFAULT 0"
+                )
+
+        cursor.execute(f"PRAGMA table_info({SLACK_STATE_TABLE})")
+        column_names = {row[1] for row in cursor.fetchall()}
+
+        if "resume_cursor" not in column_names:
+            cursor.execute(
+                f"ALTER TABLE {SLACK_STATE_TABLE} ADD COLUMN resume_cursor TEXT"
+            )
+
+        if "resume_min_ts" not in column_names:
+            cursor.execute(
+                f"ALTER TABLE {SLACK_STATE_TABLE} ADD COLUMN resume_min_ts REAL"
+            )
+
+        if "updated_at" not in column_names:
+            cursor.execute(
+                f"ALTER TABLE {SLACK_STATE_TABLE} ADD COLUMN updated_at TEXT"
+            )
+
+        cursor.execute(
+            f"""
+            UPDATE {SLACK_STATE_TABLE}
+            SET updated_at = ?
+            WHERE updated_at IS NULL
+            """,
+            (datetime.now(UTC).isoformat(),),
+        )
 
     def save_messages(self, messages: list[SlackMessage]) -> int:
         """Save messages to storage (idempotent upsert).
@@ -1606,22 +1716,22 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Route to source-specific table or legacy table
-            if source_id == MessageSource.SLACK:
-                table_name = "ingestion_state_slack"
-            elif source_id == MessageSource.TELEGRAM:
-                table_name = "ingestion_state_telegram"
+            if source_id == MessageSource.TELEGRAM:
+                cursor.execute(
+                    """
+                    SELECT last_processed_ts FROM ingestion_state_telegram
+                    WHERE channel_id = ?
+                    """,
+                    (channel,),
+                )
             else:
-                # Legacy: default to Slack state for backward compatibility
-                table_name = "ingestion_state_slack"
-
-            cursor.execute(
-                f"""
-                SELECT last_processed_ts FROM {table_name}
-                WHERE channel_id = ?
-                """,
-                (channel,),
-            )
+                cursor.execute(
+                    f"""
+                    SELECT max_processed_ts FROM {SLACK_STATE_TABLE}
+                    WHERE channel_id = ?
+                    """,
+                    (channel,),
+                )
 
             row = cursor.fetchone()
             conn.close()
@@ -1648,22 +1758,39 @@ class SQLiteRepository:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Route to source-specific table or legacy table
-            if source_id == MessageSource.SLACK:
-                table_name = "ingestion_state_slack"
-            elif source_id == MessageSource.TELEGRAM:
-                table_name = "ingestion_state_telegram"
+            if source_id == MessageSource.TELEGRAM:
+                cursor.execute(
+                    """
+                    INSERT INTO ingestion_state_telegram (
+                        channel_id,
+                        last_processed_ts,
+                        last_processed_message_id,
+                        updated_at
+                    ) VALUES (?, ?, NULL, datetime('now'))
+                    ON CONFLICT(channel_id) DO UPDATE SET
+                        last_processed_ts=excluded.last_processed_ts,
+                        updated_at=excluded.updated_at,
+                        last_processed_message_id=COALESCE(
+                            excluded.last_processed_message_id,
+                            ingestion_state_telegram.last_processed_message_id
+                        )
+                    """,
+                    (channel, ts),
+                )
             else:
-                # Legacy: default to Slack state for backward compatibility
-                table_name = "ingestion_state_slack"
-
-            cursor.execute(
-                f"""
-                INSERT OR REPLACE INTO {table_name} (channel_id, last_processed_ts, updated_at)
-                VALUES (?, ?, datetime('now'))
-                """,
-                (channel, ts),
-            )
+                cursor.execute(
+                    f"""
+                    INSERT INTO {SLACK_STATE_TABLE} (
+                        channel_id,
+                        max_processed_ts,
+                        updated_at
+                    ) VALUES (?, ?, datetime('now'))
+                    ON CONFLICT(channel_id) DO UPDATE SET
+                        max_processed_ts=excluded.max_processed_ts,
+                        updated_at=excluded.updated_at
+                    """,
+                    (channel, ts),
+                )
 
             conn.commit()
             conn.close()

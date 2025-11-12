@@ -345,20 +345,92 @@ class TestGetTelegramMessages:
 class TestSourceSpecificIngestionState:
     """Test source-specific ingestion state tracking."""
 
-    def test_ingestion_state_slack_table_created(self, temp_db: Path) -> None:
-        """Test that ingestion_state_slack table is created."""
+    def test_slack_ingestion_state_table_created(self, temp_db: Path) -> None:
+        """Test that slack_ingestion_state table and compatibility view are created."""
 
         _ = make_repository(temp_db)
 
         conn = sqlite3.connect(str(temp_db))
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='ingestion_state_slack'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='slack_ingestion_state'"
         )
-        result = cursor.fetchone()
+        table_result = cursor.fetchone()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='view' AND name='ingestion_state_slack'"
+        )
+        view_result = cursor.fetchone()
         conn.close()
 
-        assert result is not None, "ingestion_state_slack table should exist"
+        assert table_result is not None, "slack_ingestion_state table should exist"
+        assert view_result is not None, "ingestion_state_slack view should exist"
+
+    def test_migrates_legacy_slack_state_table(self, temp_db: Path) -> None:
+        """Test migration from legacy ingestion_state_slack table to canonical schema."""
+
+        legacy_conn = sqlite3.connect(str(temp_db))
+        try:
+            legacy_conn.execute(
+                """
+                CREATE TABLE ingestion_state_slack (
+                    channel_id TEXT PRIMARY KEY,
+                    last_processed_ts REAL NOT NULL,
+                    updated_at TEXT
+                )
+                """
+            )
+            legacy_conn.execute(
+                "INSERT INTO ingestion_state_slack VALUES (?, ?, ?)",
+                ("C123", 123.0, "2024-01-01T00:00:00Z"),
+            )
+            legacy_conn.commit()
+        finally:
+            legacy_conn.close()
+
+        repo = make_repository(temp_db)
+
+        conn = sqlite3.connect(str(temp_db))
+        try:
+            migrated = conn.execute(
+                """
+                SELECT max_processed_ts, resume_cursor, resume_min_ts, updated_at
+                FROM slack_ingestion_state
+                WHERE channel_id = ?
+                """,
+                ("C123",),
+            ).fetchone()
+            assert migrated is not None
+            assert migrated[0] == pytest.approx(123.0)
+            assert migrated[1] is None
+            assert migrated[2] is None
+
+            compatibility = conn.execute(
+                "SELECT last_processed_ts FROM ingestion_state_slack WHERE channel_id = ?",
+                ("C123",),
+            ).fetchone()
+            assert compatibility is not None
+            assert compatibility[0] == pytest.approx(123.0)
+        finally:
+            conn.close()
+
+        repo.update_last_processed_ts("C123", 200.0, source_id=MessageSource.SLACK)
+
+        conn = sqlite3.connect(str(temp_db))
+        try:
+            updated = conn.execute(
+                """
+                SELECT max_processed_ts, resume_cursor, resume_min_ts
+                FROM slack_ingestion_state
+                WHERE channel_id = ?
+                """,
+                ("C123",),
+            ).fetchone()
+            assert updated is not None
+            assert updated[0] == pytest.approx(200.0)
+            assert updated[1] is None
+            assert updated[2] is None
+        finally:
+            conn.close()
 
     def test_ingestion_state_telegram_table_created(self, temp_db: Path) -> None:
         """Test that ingestion_state_telegram table is created."""
