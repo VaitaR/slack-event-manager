@@ -11,6 +11,7 @@ Usage:
 """
 
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,7 @@ from src.adapters.message_client_factory import get_message_client
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.adapters.telegram_client import TelegramClient
 from src.config.settings import get_settings
-from src.domain.models import MessageSource
+from src.domain.models import MessageSource, TelegramChannelConfig
 from src.domain.protocols import MessageClientProtocol
 from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
 
