@@ -11,6 +11,7 @@ Usage:
 """
 
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -22,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.sqlite_repository import SQLiteRepository
 from src.config.settings import get_settings
-from src.domain.models import MessageSource
+from src.domain.models import MessageSource, TelegramChannelConfig
 from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
 
 
@@ -75,8 +76,15 @@ def main() -> int:
 
     print(f"✓ Found {len(settings.telegram_channels)} configured channel(s):")
     for ch in settings.telegram_channels:
-        channel_id = ch.get("channel_id", "unknown")
-        enabled = ch.get("enabled", False)
+        if isinstance(ch, TelegramChannelConfig):
+            channel_id = ch.channel_id
+            enabled = ch.enabled
+        elif isinstance(ch, Mapping):
+            channel_id = str(ch.get("channel_id", "unknown"))
+            enabled = bool(ch.get("enabled", False))
+        else:
+            channel_id = "unknown"
+            enabled = False
         status = "✓ enabled" if enabled else "⏭ disabled"
         print(f"  - {channel_id} ({status})")
     print()
