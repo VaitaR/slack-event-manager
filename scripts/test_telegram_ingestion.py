@@ -13,8 +13,29 @@ Usage:
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytz
+
+
+def _get_channel_config_value(channel: Any, field: str, default: Any) -> Any:
+    """Safely access Telegram channel configuration values.
+
+    Args:
+        channel: Configuration object or mapping describing the channel.
+        field: Attribute or key to retrieve.
+        default: Fallback value if the field is missing.
+
+    Returns:
+        Value for the requested field if available, otherwise ``default``.
+    """
+
+    if hasattr(channel, field):
+        return getattr(channel, field)
+    if isinstance(channel, dict):
+        return channel.get(field, default)
+    return default
+
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -74,11 +95,12 @@ def main() -> int:
         return 1
 
     print(f"✓ Found {len(settings.telegram_channels)} configured channel(s):")
-    for ch in settings.telegram_channels:
-        channel_id = ch.get("channel_id", "unknown")
-        enabled = ch.get("enabled", False)
+    for channel in settings.telegram_channels:
+        username = _get_channel_config_value(channel, "username", "unknown")
+        channel_name = _get_channel_config_value(channel, "channel_name", "unknown")
+        enabled = bool(_get_channel_config_value(channel, "enabled", False))
         status = "✓ enabled" if enabled else "⏭ disabled"
-        print(f"  - {channel_id} ({status})")
+        print(f"  - {username} — {channel_name} ({status})")
     print()
 
     # Create test database
