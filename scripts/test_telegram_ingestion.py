@@ -11,32 +11,10 @@ Usage:
 """
 
 import sys
-from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import pytz
-
-
-def _get_channel_config_value(channel: Any, field: str, default: Any) -> Any:
-    """Safely access Telegram channel configuration values.
-
-    Args:
-        channel: Configuration object or mapping describing the channel.
-        field: Attribute or key to retrieve.
-        default: Fallback value if the field is missing.
-
-    Returns:
-        Value for the requested field if available, otherwise ``default``.
-    """
-
-    if hasattr(channel, field):
-        return getattr(channel, field)
-    if isinstance(channel, dict):
-        return channel.get(field, default)
-    return default
-
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -99,9 +77,19 @@ def main() -> int:
 
     print(f"✓ Found {len(settings.telegram_channels)} configured channel(s):")
     for channel in settings.telegram_channels:
-        username = _get_channel_config_value(channel, "username", "unknown")
-        channel_name = _get_channel_config_value(channel, "channel_name", "unknown")
-        enabled = bool(_get_channel_config_value(channel, "enabled", False))
+        if isinstance(channel, TelegramChannelConfig):
+            username = channel.username
+            channel_name = channel.channel_name
+            enabled = bool(channel.enabled)
+        elif isinstance(channel, dict):
+            username = channel.get("username", "unknown")
+            channel_name = channel.get("channel_name", "unknown")
+            enabled = bool(channel.get("enabled", False))
+        else:
+            username = getattr(channel, "username", "unknown")
+            channel_name = getattr(channel, "channel_name", "unknown")
+            enabled = bool(getattr(channel, "enabled", False))
+
         status = "✓ enabled" if enabled else "⏭ disabled"
         print(f"  - {username} — {channel_name} ({status})")
     print()
