@@ -14,16 +14,39 @@ import sys
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytz
+
+
+def _get_channel_config_value(channel: Any, field: str, default: Any) -> Any:
+    """Safely access Telegram channel configuration values.
+
+    Args:
+        channel: Configuration object or mapping describing the channel.
+        field: Attribute or key to retrieve.
+        default: Fallback value if the field is missing.
+
+    Returns:
+        Value for the requested field if available, otherwise ``default``.
+    """
+
+    if hasattr(channel, field):
+        return getattr(channel, field)
+    if isinstance(channel, dict):
+        return channel.get(field, default)
+    return default
+
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.message_client_factory import get_message_client
 from src.adapters.sqlite_repository import SQLiteRepository
+from src.adapters.telegram_client import TelegramClient
 from src.config.settings import get_settings
 from src.domain.models import MessageSource, TelegramChannelConfig
+from src.domain.protocols import MessageClientProtocol
 from src.use_cases.ingest_telegram_messages import ingest_telegram_messages_use_case
 
 
@@ -75,18 +98,12 @@ def main() -> int:
         return 1
 
     print(f"✓ Found {len(settings.telegram_channels)} configured channel(s):")
-    for ch in settings.telegram_channels:
-        if isinstance(ch, TelegramChannelConfig):
-            channel_id = ch.channel_id
-            enabled = ch.enabled
-        elif isinstance(ch, Mapping):
-            channel_id = str(ch.get("channel_id", "unknown"))
-            enabled = bool(ch.get("enabled", False))
-        else:
-            channel_id = "unknown"
-            enabled = False
+    for channel in settings.telegram_channels:
+        username = _get_channel_config_value(channel, "username", "unknown")
+        channel_name = _get_channel_config_value(channel, "channel_name", "unknown")
+        enabled = bool(_get_channel_config_value(channel, "enabled", False))
         status = "✓ enabled" if enabled else "⏭ disabled"
-        print(f"  - {channel_id} ({status})")
+        print(f"  - {username} — {channel_name} ({status})")
     print()
 
     # Create test database
@@ -96,6 +113,7 @@ def main() -> int:
     print()
 
     # Create Telegram client
+    telegram_client: MessageClientProtocol | None = None
     print("Creating Telegram client...")
     try:
         telegram_client = get_message_client(
@@ -107,6 +125,7 @@ def main() -> int:
         print(f"❌ Failed to create Telegram client: {e}")
         return 1
     print()
+    assert telegram_client is not None
 
     # Set backfill date (1 day ago as per requirements)
     backfill_from_date = datetime.utcnow().replace(tzinfo=pytz.UTC) - timedelta(days=1)
@@ -186,6 +205,9 @@ def main() -> int:
 
         traceback.print_exc()
         return 1
+    finally:
+        if isinstance(telegram_client, TelegramClient):
+            telegram_client.shutdown()
 
 
 if __name__ == "__main__":
