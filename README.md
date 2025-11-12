@@ -568,6 +568,21 @@ sqlite3 data/slack_events.db "SELECT title, event_date FROM events ORDER BY even
 make pre-commit
 ```
 
+### Observability
+
+Metrics and health endpoints are available as soon as the containers start. Refer to
+[`docs/OPERATIONS_OBSERVABILITY.md`](docs/OPERATIONS_OBSERVABILITY.md) for complete guidance.
+
+Quick checks from the host running Docker Compose:
+
+```bash
+# Prometheus metrics (port 9000)
+curl -sf http://localhost:9000/metrics | head
+
+# Streamlit health endpoint (port 8501)
+curl -sf http://localhost:8501/_stcore/health
+```
+
 ### Development Issues
 
 ```bash
