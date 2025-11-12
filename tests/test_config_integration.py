@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from src.config.settings import Settings
@@ -315,3 +316,53 @@ class TestBackwardCompatibilityIntegration:
             assert hasattr(settings, "slack_channels")
             assert hasattr(settings, "llm_model")
             assert hasattr(settings, "db_path")
+
+
+class TestEnvironmentPrecedence:
+    """Ensure environment variables override YAML configuration defaults."""
+
+    def test_env_overrides_yaml_database_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Explicit database env vars should win over YAML defaults."""
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        main_yaml = config_dir / "main.yaml"
+        with open(main_yaml, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(
+                {
+                    "database": {
+                        "type": "sqlite",
+                        "path": "data/slack_events.db",
+                        "postgres": {
+                            "host": "yaml-host",
+                            "port": 5432,
+                            "database": "yaml_db",
+                            "user": "yaml_user",
+                        },
+                    }
+                },
+                handle,
+            )
+
+        monkeypatch.setenv("DATABASE_TYPE", "postgres")
+        monkeypatch.setenv("POSTGRES_HOST", "env-host")
+        monkeypatch.setenv("POSTGRES_PORT", "6123")
+        monkeypatch.setenv("POSTGRES_DATABASE", "env_db")
+        monkeypatch.setenv("POSTGRES_USER", "env_user")
+
+        previous_cwd = Path.cwd()
+        with patch.object(Path, "cwd", return_value=tmp_path):
+            os.chdir(tmp_path)
+            try:
+                settings = Settings()
+            finally:
+                os.chdir(previous_cwd)
+
+        assert settings.database_type == "postgres"
+        assert settings.postgres_host == "env-host"
+        assert settings.postgres_port == 6123
+        assert settings.postgres_database == "env_db"
+        assert settings.postgres_user == "env_user"
