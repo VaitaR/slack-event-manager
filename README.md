@@ -716,6 +716,12 @@ alembic upgrade head
 > `config/*.yaml`. Set them in production to keep secrets out of version control. See
 > [docs/CONFIG.md](docs/CONFIG.md) for details.
 
+> ⚙️ Each worker process maintains its own PostgreSQL pool. The default
+> `postgres_min_connections` is now `1` so ad-hoc scripts (for example `scripts/run_pipeline.py`)
+> can run alongside the five long-lived workers without exhausting the server. Increase the
+> minimum only when your database allows additional idle capacity, and adjust
+> `POSTGRES_MAX_CONNECTIONS` if you need higher peak throughput.
+
 See [MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md) for complete migration guide.
 
 ## Future Enhancements
