@@ -4,6 +4,7 @@ import asyncio
 import threading
 import types
 from collections.abc import Coroutine
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from typing import Any, Final, TypeVar
 
 import pytz
@@ -34,6 +35,7 @@ logger = get_logger(__name__)
 DEFAULT_TELEGRAM_PAGE_SIZE: Final[int] = 200
 DEFAULT_TELEGRAM_PAGE_DELAY_SECONDS: Final[float] = 1.0
 DEFAULT_TELEGRAM_MAX_RETRIES: Final[int] = 3
+TELEGRAM_LOOP_SHUTDOWN_TIMEOUT_SECONDS: Final[float] = 5.0
 
 
 class TelegramClient:
@@ -101,6 +103,7 @@ class TelegramClient:
         self._loop_thread: threading.Thread | None = None
         self._loop_ready = threading.Event()
         self._loop_lock = threading.Lock()
+        self._loop_shutdown_timeout = TELEGRAM_LOOP_SHUTDOWN_TIMEOUT_SECONDS
 
     def _get_client(self) -> TelegramClientLib:
         """Get or create Telethon client instance.
@@ -170,8 +173,89 @@ class TelegramClient:
         to ensure proper cleanup of connections and resources.
         """
         await self.disconnect()
+        loop = asyncio.get_running_loop()
+        current_task = asyncio.current_task()
+        pending_tasks = [
+            task
+            for task in asyncio.all_tasks(loop=loop)
+            if task is not current_task and not task.done()
+        ]
+
+        if pending_tasks:
+            await self._drain_pending_tasks(pending_tasks)
+
         self._client = None
         logger.info("Telegram client closed and resources cleaned up")
+
+    async def _drain_pending_tasks(
+        self, pending_tasks: list[asyncio.Task[Any]]
+    ) -> None:
+        """Await pending background tasks during shutdown."""
+
+        if not pending_tasks:
+            return
+
+        wait_task = asyncio.gather(*pending_tasks, return_exceptions=True)
+        try:
+            await asyncio.wait_for(wait_task, timeout=self._loop_shutdown_timeout)
+        except TimeoutError:
+            logger.warning(
+                "telegram_loop_pending_tasks_timeout",
+                pending_tasks=len(pending_tasks),
+                timeout_seconds=self._loop_shutdown_timeout,
+            )
+            for task in pending_tasks:
+                task.cancel()
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+    def _stop_loop_thread(self) -> None:
+        """Stop the background event loop thread if it is running."""
+
+        with self._loop_lock:
+            loop = self._loop
+            thread = self._loop_thread
+
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=self._loop_shutdown_timeout)
+            if thread.is_alive():
+                logger.warning(
+                    "telegram_loop_thread_join_timeout",
+                    timeout_seconds=self._loop_shutdown_timeout,
+                )
+
+        with self._loop_lock:
+            if self._loop is None:
+                self._loop_thread = None
+                self._loop_ready.clear()
+
+    def shutdown(self) -> None:
+        """Synchronously close client and stop background event loop."""
+
+        with self._loop_lock:
+            loop = self._loop
+
+        if loop is None or not loop.is_running():
+            self._stop_loop_thread()
+            return
+
+        close_future = asyncio.run_coroutine_threadsafe(self.close(), loop)
+        shutdown_timeout = max(
+            self._loop_shutdown_timeout,
+            getattr(self, "_operation_timeout", 60.0),
+        )
+        try:
+            close_future.result(timeout=shutdown_timeout)
+        except FuturesTimeoutError:
+            logger.warning(
+                "telegram_shutdown_timeout",
+                timeout_seconds=shutdown_timeout,
+            )
+            close_future.cancel()
+        finally:
+            self._stop_loop_thread()
 
     def __enter__(self) -> "TelegramClient":
         """Context manager entry."""
