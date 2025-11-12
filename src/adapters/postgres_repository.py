@@ -12,7 +12,7 @@ import pytz
 from psycopg2 import Error as PsycopgError
 from psycopg2 import extensions
 from psycopg2 import pool as psycopg2_pool
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, register_uuid
 
 from src.adapters.bulk_persistence import (
     DatabaseBackend,
@@ -60,6 +60,23 @@ POOL_ACQUIRE_MAX_DELAY_SECONDS: Final[float] = 2.0
 POOL_USAGE_WARNING_THRESHOLD: Final[float] = 0.8
 
 logger = get_logger(__name__)
+
+_UUID_ADAPTER_REGISTERED: bool = False
+_UUID_ADAPTER_LOCK: Lock = Lock()
+
+
+def _ensure_uuid_adapter_registered() -> None:
+    """Register psycopg2 adapters required by the repository."""
+
+    global _UUID_ADAPTER_REGISTERED
+    if _UUID_ADAPTER_REGISTERED:
+        return
+
+    with _UUID_ADAPTER_LOCK:
+        if _UUID_ADAPTER_REGISTERED:
+            return
+        register_uuid()
+        _UUID_ADAPTER_REGISTERED = True
 
 
 class PostgresRepository:
@@ -123,6 +140,7 @@ class PostgresRepository:
                 "postgres_max_connections must be greater than or equal to postgres_min_connections"
             )
 
+        _ensure_uuid_adapter_registered()
         self._pool = self._create_pool()
 
     def _create_pool(self) -> psycopg2_pool.ThreadedConnectionPool:
