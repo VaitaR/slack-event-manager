@@ -11,9 +11,9 @@ help: ## Show this help message
 	@echo "$(BLUE)Available targets:$(NC)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-15s$(NC) %s\n", $$1, $$2}'
 
-install: ## Install dependencies
+install: ## Install development dependencies
 	@echo "$(BLUE)Installing dependencies...$(NC)"
-	pip install -r requirements.txt
+	pip install -r requirements-dev.txt
 
 format: ## Format code with ruff
 	@echo "$(BLUE)Formatting code with ruff...$(NC)"

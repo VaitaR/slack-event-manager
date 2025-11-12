@@ -1,45 +1,28 @@
-# Core dependencies
-pydantic>=2.6.0
-pydantic-settings>=2.2.0
-python-dotenv>=1.0.0
+# Runtime dependencies (pinned)
+pydantic==2.6.0
+pydantic-settings==2.2.0
+python-dotenv==1.0.1
 
 # HTTP & APIs
-httpx>=0.27.0
-slack-sdk>=3.27.0
-openai>=1.12.0
-telethon>=1.41.0
+httpx==0.27.0
+slack-sdk==3.27.0
+openai==1.12.0
+telethon==1.41.1
 
 # Utilities
-pytz>=2024.1
-python-dateutil>=2.8.2
-rapidfuzz>=3.6.0
-pyyaml>=6.0.0
-jsonschema>=4.20.0
-types-jsonschema>=4.20.0
-structlog>=24.1.0
-prometheus-client>=0.20.0
-qrcode[pil]>=7.4.0
-
-# Testing
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-pytest-cov>=4.1.0
-pytest-mock>=3.12.0
-pytest-timeout>=2.2.0
-
-# Code Quality
-ruff==0.12.8
-mypy>=1.8.0
-pre-commit>=3.6.0
-types-pytz>=2024.1.0
-types-PyYAML>=6.0.0
-types-python-dateutil>=2.8.0
-types-requests>=2.31.0
+pytz==2024.1
+python-dateutil==2.8.2
+rapidfuzz==3.6.1
+pyyaml==6.0.1
+jsonschema==4.20.0
+structlog==24.1.0
+prometheus-client==0.20.0
+qrcode[pil]==7.4.2
 
 # Database & Migrations
-alembic>=1.13.0
-psycopg2-binary>=2.9.9
+alembic==1.13.1
+psycopg2-binary==2.9.9
 
 # Streamlit & Visualization
-streamlit>=1.29.0
-plotly>=5.17.0
+streamlit==1.29.0
+plotly==5.17.0
