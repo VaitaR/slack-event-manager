@@ -262,294 +262,201 @@ class Settings(BaseSettings):
         """Initialize settings with auto-loaded configs from all YAML files."""
         config = load_all_configs()
 
-        # Apply config values as defaults (env vars override via setdefault)
-        if "llm" in config:
-            data.setdefault("llm_model", config["llm"].get("model", "gpt-5-nano"))
-            data.setdefault("llm_temperature", config["llm"].get("temperature", 1.0))
-            data.setdefault(
-                "llm_timeout_seconds", config["llm"].get("timeout_seconds", 120)
-            )
-            data.setdefault(
-                "llm_daily_budget_usd", config["llm"].get("daily_budget_usd", 10.0)
-            )
-            data.setdefault(
-                "llm_max_events_per_msg", config["llm"].get("max_events_per_msg", 5)
-            )
-            data.setdefault(
-                "llm_cache_ttl_days",
-                config["llm"].get("cache_ttl_days", LLM_CACHE_TTL_DAYS_DEFAULT),
-            )
+        super().__init__(**data)
+        self._apply_yaml_defaults(config)
 
-        if "database" in config:
-            # Load database type (sqlite or postgres) - env var takes precedence
-            data.setdefault("database_type", config["database"].get("type", "sqlite"))
-            # Load SQLite path
-            data.setdefault(
-                "db_path", config["database"].get("path", "data/slack_events.db")
-            )
-            data.setdefault(
-                "bulk_upsert_chunk_size",
-                config["database"].get("bulk_upsert_chunk_size", 500),
-            )
-            # Load PostgreSQL settings if present
-            if "postgres" in config["database"]:
-                pg = config["database"]["postgres"]
-                data.setdefault("postgres_host", pg.get("host", "localhost"))
-                data.setdefault("postgres_port", pg.get("port", 5432))
-                data.setdefault("postgres_database", pg.get("database", "slack_events"))
-                data.setdefault("postgres_user", pg.get("user", "postgres"))
+    def _apply_yaml_defaults(self, config: dict[str, Any]) -> None:
+        """Apply YAML-sourced defaults without overriding env-provided values."""
 
-        if "slack" in config:
-            data.setdefault(
-                "slack_digest_channel_id",
-                config["slack"].get("digest_channel_id", "YOUR_DIGEST_CHANNEL_ID"),
-            )
-            data.setdefault(
-                "lookback_hours_default",
-                config["slack"].get("lookback_hours_default", 24),
-            )
+        fields_from_env = set(self.model_fields_set)
 
-        if "processing" in config:
-            data.setdefault(
-                "tz_default", config["processing"].get("tz_default", "Europe/Amsterdam")
-            )
-            data.setdefault(
-                "threshold_score_default",
-                config["processing"].get(
-                    "threshold_score_default", DEFAULT_THRESHOLD_SCORE
-                ),
-            )
+        def _assign(field_name: str, value: Any) -> None:
+            if value is None:
+                return
+            if field_name in fields_from_env:
+                return
 
-        if "deduplication" in config:
-            data.setdefault(
-                "dedup_date_window_hours",
-                config["deduplication"].get(
-                    "date_window_hours", DEFAULT_DATE_WINDOW_HOURS
-                ),
-            )
-            data.setdefault(
-                "dedup_title_similarity",
-                config["deduplication"].get(
-                    "title_similarity", DEFAULT_TITLE_SIMILARITY
-                ),
-            )
-            data.setdefault(
-                "dedup_message_lookback_days",
-                config["deduplication"].get(
-                    "message_lookback_days", DEFAULT_MESSAGE_LOOKBACK_DAYS
-                ),
-            )
+            object.__setattr__(self, field_name, value)
+            self.model_fields_set.add(field_name)
 
-        if "logging" in config:
-            data.setdefault("log_level", config["logging"].get("level", "INFO"))
+        llm_config = config.get("llm") or {}
+        _assign("llm_model", llm_config.get("model"))
+        _assign("llm_temperature", llm_config.get("temperature"))
+        _assign("llm_timeout_seconds", llm_config.get("timeout_seconds"))
+        _assign("llm_daily_budget_usd", llm_config.get("daily_budget_usd"))
+        _assign("llm_max_events_per_msg", llm_config.get("max_events_per_msg"))
+        _assign("llm_cache_ttl_days", llm_config.get("cache_ttl_days"))
 
-        # Load monitored channels from config
-        if "channels" in config:
-            channels = []
-            for ch in config["channels"]:
-                channels.append(
-                    ChannelConfig(
-                        channel_id=ch["channel_id"],
-                        channel_name=ch["channel_name"],
-                        threshold_score=ch.get("threshold_score", 0.0),
-                        keyword_weight=ch.get("keyword_weight", 10.0),
-                        mention_weight=ch.get("mention_weight", 8.0),
-                        reply_weight=ch.get("reply_weight", 5.0),
-                        reaction_weight=ch.get("reaction_weight", 3.0),
-                        anchor_weight=ch.get("anchor_weight", 4.0),
-                        link_weight=ch.get("link_weight", 2.0),
-                        file_weight=ch.get("file_weight", 3.0),
-                        bot_penalty=ch.get("bot_penalty", -15.0),
-                        whitelist_keywords=ch.get("whitelist_keywords", []),
-                        trusted_bots=ch.get("trusted_bots", []),
-                        prompt_file=ch.get("prompt_file", ""),
-                    )
-                )
-            data.setdefault("slack_channels", channels)
+        database_config = config.get("database") or {}
+        _assign("database_type", database_config.get("type"))
+        _assign("db_path", database_config.get("path"))
+        _assign("bulk_upsert_chunk_size", database_config.get("bulk_upsert_chunk_size"))
 
-        if "digest" in config:
-            data.setdefault("digest_max_events", config["digest"].get("max_events", 10))
-            data.setdefault(
-                "digest_min_confidence", config["digest"].get("min_confidence", 0.7)
-            )
-            data.setdefault(
-                "digest_lookback_hours", config["digest"].get("lookback_hours", 48)
-            )
-            data.setdefault(
-                "digest_category_priorities",
-                config["digest"].get(
-                    "category_priorities",
-                    {
-                        "product": 1,
-                        "risk": 2,
-                        "process": 3,
-                        "marketing": 4,
-                        "org": 5,
-                        "unknown": 6,
-                    },
-                ),
-            )
+        postgres_config = database_config.get("postgres") or {}
+        _assign("postgres_host", postgres_config.get("host"))
+        _assign("postgres_port", postgres_config.get("port"))
+        _assign("postgres_database", postgres_config.get("database"))
+        _assign("postgres_user", postgres_config.get("user"))
 
-        # Multi-source configuration with auto-migration
-        message_sources = []
+        slack_config = config.get("slack") or {}
+        _assign("slack_digest_channel_id", slack_config.get("digest_channel_id"))
+        _assign("lookback_hours_default", slack_config.get("lookback_hours_default"))
 
+        processing_config = config.get("processing") or {}
+        _assign("tz_default", processing_config.get("tz_default"))
+        _assign(
+            "threshold_score_default",
+            processing_config.get("threshold_score_default"),
+        )
+
+        dedupe_config = config.get("deduplication") or {}
+        _assign("dedup_date_window_hours", dedupe_config.get("date_window_hours"))
+        _assign("dedup_title_similarity", dedupe_config.get("title_similarity"))
+        _assign(
+            "dedup_message_lookback_days",
+            dedupe_config.get("message_lookback_days"),
+        )
+
+        logging_config = config.get("logging") or {}
+        _assign("log_level", logging_config.get("level"))
+
+        channels_config = config.get("channels")
+        if isinstance(channels_config, list):
+            slack_channels = [ChannelConfig(**channel) for channel in channels_config]
+            _assign("slack_channels", slack_channels)
+
+        digest_config = config.get("digest") or {}
+        _assign("digest_max_events", digest_config.get("max_events"))
+        _assign("digest_min_confidence", digest_config.get("min_confidence"))
+        _assign("digest_lookback_hours", digest_config.get("lookback_hours"))
+        _assign("digest_category_priorities", digest_config.get("category_priorities"))
+
+        message_sources: list[MessageSourceConfig] = []
         if "message_sources" in config:
-            # New format: explicit message_sources
-            for source_config in config["message_sources"]:
+            for source_config in config["message_sources"] or []:
                 message_sources.append(MessageSourceConfig(**source_config))
         else:
-            # Legacy format: auto-migrate from channels and telegram_channels
-
-            # Add Slack source if channels exist
-            if "channels" in config and len(config["channels"]) > 0:
+            if channels_config:
                 logger.info(
                     "Auto-migrating legacy 'channels' config to 'message_sources' format"
                 )
-                channel_ids = [ch["channel_id"] for ch in config["channels"]]
-                slack_source = MessageSourceConfig(
-                    source_id=MessageSource.SLACK,
-                    enabled=True,
-                    bot_token_env="SLACK_BOT_TOKEN",
-                    raw_table="raw_slack_messages",
-                    state_table="slack_ingestion_state",
-                    prompt_file="config/prompts/slack.yaml",
-                    llm_settings={
-                        "temperature": config.get("llm", {}).get("temperature", 1.0),
-                        "timeout_seconds": config.get("llm", {}).get(
-                            "timeout_seconds", 120
-                        ),
-                    },
-                    channels=channel_ids,
+                channel_ids = [ch["channel_id"] for ch in channels_config]
+                message_sources.append(
+                    MessageSourceConfig(
+                        source_id=MessageSource.SLACK,
+                        enabled=True,
+                        bot_token_env="SLACK_BOT_TOKEN",
+                        raw_table="raw_slack_messages",
+                        state_table="slack_ingestion_state",
+                        prompt_file="config/prompts/slack.yaml",
+                        llm_settings={
+                            "temperature": llm_config.get("temperature", 1.0),
+                            "timeout_seconds": llm_config.get("timeout_seconds", 120),
+                        },
+                        channels=channel_ids,
+                    )
                 )
-                message_sources.append(slack_source)
 
-            # Add Telegram source if telegram_channels exist
-            if "telegram_channels" in config and len(config["telegram_channels"]) > 0:
+            telegram_channels_config = config.get("telegram_channels")
+            if telegram_channels_config:
                 logger.info(
                     "Auto-migrating 'telegram_channels' config to 'message_sources' format"
                 )
-                # Convert raw config dicts to TelegramChannelConfig objects
-                from src.domain.models import TelegramChannelConfig
-
-                telegram_channels = [
-                    TelegramChannelConfig(
-                        username=ch["channel_id"],
-                        channel_name=ch.get("channel_name", ch["channel_id"]),
-                        from_date=ch.get("from_date"),
-                        enabled=ch.get("enabled", True),
+                source_telegram_channels: list[TelegramChannelConfig] = []
+                for channel in telegram_channels_config:
+                    channel_id = channel.get("channel_id") or channel.get("username")
+                    if not channel_id:
+                        logger.warning(
+                            "telegram_channel_missing_identifier",
+                            channel=channel,
+                        )
+                        continue
+                    source_telegram_channels.append(
+                        TelegramChannelConfig(
+                            username=channel_id,
+                            channel_name=channel.get("channel_name", channel_id),
+                            from_date=channel.get("from_date"),
+                            enabled=channel.get("enabled", True),
+                        )
                     )
-                    for ch in config["telegram_channels"]
-                ]
-                telegram_source = MessageSourceConfig(
-                    source_id=MessageSource.TELEGRAM,
-                    enabled=True,
-                    bot_token_env="TELEGRAM_API_ID",  # Not used for user client
-                    raw_table="raw_telegram_messages",
-                    state_table="ingestion_state_telegram",
-                    prompt_file="config/prompts/telegram.yaml",
-                    llm_settings={
-                        "temperature": config.get("llm", {}).get("temperature", 1.0),
-                        "timeout_seconds": config.get("llm", {}).get(
-                            "timeout_seconds", 120
-                        ),
-                    },
-                    channels=telegram_channels,
+                message_sources.append(
+                    MessageSourceConfig(
+                        source_id=MessageSource.TELEGRAM,
+                        enabled=True,
+                        bot_token_env="TELEGRAM_API_ID",
+                        raw_table="raw_telegram_messages",
+                        state_table="ingestion_state_telegram",
+                        prompt_file="config/prompts/telegram.yaml",
+                        llm_settings={
+                            "temperature": llm_config.get("temperature", 1.0),
+                            "timeout_seconds": llm_config.get("timeout_seconds", 120),
+                        },
+                        channels=source_telegram_channels,
+                    )
                 )
-                message_sources.append(telegram_source)
 
-        data.setdefault("message_sources", message_sources)
+        if message_sources:
+            _assign("message_sources", message_sources)
 
-        if "importance" in config:
-            data.setdefault(
-                "importance_min_publish_threshold",
-                config["importance"].get("min_publish_threshold", 60),
-            )
-            data.setdefault(
-                "importance_high_priority_threshold",
-                config["importance"].get("high_priority_threshold", 80),
-            )
-            data.setdefault(
-                "importance_category_base_scores",
-                config["importance"].get(
-                    "category_base_scores",
-                    {
-                        "product": 30,
-                        "risk": 35,
-                        "process": 20,
-                        "marketing": 15,
-                        "org": 25,
-                        "unknown": 10,
-                    },
-                ),
-            )
-            data.setdefault(
-                "importance_critical_subsystems",
-                config["importance"].get(
-                    "critical_subsystems",
-                    [
-                        "authentication",
-                        "payment",
-                        "trading",
-                        "wallet",
-                        "database",
-                        "api-gateway",
-                    ],
-                ),
-            )
+        importance_config = config.get("importance") or {}
+        _assign(
+            "importance_min_publish_threshold",
+            importance_config.get("min_publish_threshold"),
+        )
+        _assign(
+            "importance_high_priority_threshold",
+            importance_config.get("high_priority_threshold"),
+        )
+        _assign(
+            "importance_category_base_scores",
+            importance_config.get("category_base_scores"),
+        )
+        _assign(
+            "importance_critical_subsystems",
+            importance_config.get("critical_subsystems"),
+        )
 
-        if "validation" in config:
-            data.setdefault(
-                "validation_min_confidence",
-                config["validation"].get("min_confidence", 0.6),
-            )
-            data.setdefault(
-                "validation_max_title_length",
-                config["validation"].get("max_title_length", 140),
-            )
-            data.setdefault(
-                "validation_max_qualifiers",
-                config["validation"].get("max_qualifiers", 2),
-            )
-            data.setdefault(
-                "validation_max_links", config["validation"].get("max_links", 3)
-            )
-            data.setdefault(
-                "validation_max_impact_area",
-                config["validation"].get("max_impact_area", 3),
-            )
+        validation_config = config.get("validation") or {}
+        _assign("validation_min_confidence", validation_config.get("min_confidence"))
+        _assign(
+            "validation_max_title_length", validation_config.get("max_title_length")
+        )
+        _assign("validation_max_qualifiers", validation_config.get("max_qualifiers"))
+        _assign("validation_max_links", validation_config.get("max_links"))
+        _assign("validation_max_impact_area", validation_config.get("max_impact_area"))
 
-        # Load Telegram channels from config
-        if "telegram_channels" in config:
-            telegram_channels = []
-            for ch in config["telegram_channels"]:
-                # Handle both new format (username) and legacy format (channel_id)
-                username = ch.get("username") or ch.get("channel_id", "")
+        telegram_channels_config = config.get("telegram_channels")
+        if telegram_channels_config:
+            parsed_telegram_channels: list[TelegramChannelConfig] = []
+            for channel in telegram_channels_config:
+                username = channel.get("username") or channel.get("channel_id", "")
                 if not username:
                     logger.warning(
-                        f"Telegram channel missing username/channel_id: {ch}"
+                        "telegram_channel_missing_identifier",
+                        channel=channel,
                     )
                     continue
-
-                telegram_channels.append(
+                parsed_telegram_channels.append(
                     TelegramChannelConfig(
                         username=username,
-                        channel_name=ch["channel_name"],
-                        threshold_score=ch.get("threshold_score", 0.0),
-                        keyword_weight=ch.get("keyword_weight", 10.0),
-                        mention_weight=ch.get("mention_weight", 8.0),
-                        reply_weight=ch.get("reply_weight", 5.0),
-                        reaction_weight=ch.get("reaction_weight", 3.0),
-                        anchor_weight=ch.get("anchor_weight", 4.0),
-                        link_weight=ch.get("link_weight", 2.0),
-                        file_weight=ch.get("file_weight", 3.0),
-                        bot_penalty=ch.get("bot_penalty", -15.0),
-                        whitelist_keywords=ch.get("whitelist_keywords", []),
-                        prompt_file=ch.get("prompt_file", ""),
+                        channel_name=channel.get("channel_name", username),
+                        threshold_score=channel.get("threshold_score", 0.0),
+                        whitelist_keywords=channel.get("whitelist_keywords", []),
+                        keyword_weight=channel.get("keyword_weight", 10.0),
+                        mention_weight=channel.get("mention_weight", 8.0),
+                        reply_weight=channel.get("reply_weight", 5.0),
+                        reaction_weight=channel.get("reaction_weight", 3.0),
+                        anchor_weight=channel.get("anchor_weight", 4.0),
+                        link_weight=channel.get("link_weight", 2.0),
+                        file_weight=channel.get("file_weight", 3.0),
+                        bot_penalty=channel.get("bot_penalty", -15.0),
+                        trusted_bots=channel.get("trusted_bots", []),
+                        prompt_file=channel.get("prompt_file", ""),
+                        from_date=channel.get("from_date"),
+                        enabled=channel.get("enabled", True),
                     )
                 )
-            data.setdefault("telegram_channels", telegram_channels)
-
-        super().__init__(**data)
+            _assign("telegram_channels", parsed_telegram_channels)
 
     # Slack channels (loaded from config.yaml)
     slack_channels: list[ChannelConfig] = Field(

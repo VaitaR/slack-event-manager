@@ -704,6 +704,10 @@ Run migrations:
 alembic upgrade head
 ```
 
+> ℹ️ Environment variables such as `DATABASE_TYPE` and `POSTGRES_*` override values from
+> `config/*.yaml`. Set them in production to keep secrets out of version control. See
+> [docs/CONFIG.md](docs/CONFIG.md) for details.
+
 See [MIGRATION_TO_POSTGRES.md](MIGRATION_TO_POSTGRES.md) for complete migration guide.
 
 ## Future Enhancements
